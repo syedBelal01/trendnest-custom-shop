@@ -34,6 +34,8 @@ const emptyProduct = (): Partial<Product> => ({
   tags: [],
   isCustomPrint: false,
   isTrending: false,
+  /** Same variant-card layout for every product: at least one row to add name + images. */
+  variantOptions: [{ name: '', images: [] }],
 });
 
 const PRESETS: Record<string, Partial<Product>> = {
@@ -129,7 +131,10 @@ function normalizeProductForEditing(p: Product): Partial<Product> {
       })),
     };
   }
-  return { ...p };
+  return {
+    ...p,
+    variantOptions: [{ name: '', images: [...(p.images ?? [])] }],
+  };
 }
 
 function optionsSummary(p: Product): string {
@@ -142,83 +147,40 @@ function optionsSummary(p: Product): string {
   return bits.join(', ') || '—';
 }
 
+function VariantThumbImg({ src, onRemove }: { src: string; onRemove: () => void }) {
+  const [broken, setBroken] = useState(false);
+  return (
+    <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg border border-border bg-muted/50">
+      {broken ? (
+        <div className="flex h-full w-full items-center justify-center">
+          <ImageIcon className="h-7 w-7 text-muted-foreground" />
+        </div>
+      ) : (
+        <img src={src} alt="" className="h-full w-full object-cover" onError={() => setBroken(true)} />
+      )}
+      <button
+        type="button"
+        aria-label="Remove image"
+        className="absolute right-1 top-1 rounded-md bg-background/95 p-1 shadow-sm ring-1 ring-border hover:bg-destructive hover:text-destructive-foreground"
+        onClick={onRemove}
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
 export default function AdminProducts() {
   const { products, addProduct, updateProduct, deleteProduct, apiAvailable, apiIssue, loading, refreshProducts } = useProducts();
   const [editing, setEditing] = useState<Partial<Product> | null>(null);
   const [open, setOpen] = useState(false);
-  const fileRef = useRef<HTMLInputElement>(null);
   const [maxEdge, setMaxEdge] = useState(1000);
   const [qualityPct, setQualityPct] = useState(85);
   const [imageBusy, setImageBusy] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
-  const [imageUrlDraft, setImageUrlDraft] = useState('');
   const variantFileRef = useRef<HTMLInputElement>(null);
   const variantUploadIdxRef = useRef<number | null>(null);
   const [variantUrlDraft, setVariantUrlDraft] = useState<Record<number, string>>({});
-
-  const handleImageFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files ? Array.from(e.target.files) : [];
-    e.target.value = '';
-    if (!files.length || !editing) return;
-    setImageBusy(true);
-    try {
-      const appended: string[] = [];
-      let anyDeferred = false;
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const dataUrl = await processProductImageFile(file, {
-          maxEdge,
-          quality: qualityPct / 100,
-        });
-        try {
-          const blob = await (await fetch(dataUrl)).blob();
-          const url = await uploadProductImage(blob, `product-${Date.now()}-${i}.jpg`);
-          appended.push(url);
-        } catch {
-          appended.push(dataUrl);
-          anyDeferred = true;
-        }
-      }
-      setEditing(p =>
-        p
-          ? {
-              ...p,
-              images: [...(p.images ?? []).map(s => s.trim()).filter(Boolean), ...appended],
-            }
-          : p
-      );
-      if (anyDeferred) {
-        toast.message(
-          `${appended.length} image(s) prepared locally. Start the API and Cloudinary, or click Save to upload data URLs when online.`,
-          { duration: 6000 }
-        );
-      } else {
-        toast.success(`Uploaded ${appended.length} image(s) to Cloudinary.`);
-      }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Could not process images');
-    } finally {
-      setImageBusy(false);
-    }
-  };
-
-  const removeImageAt = (idx: number) => {
-    setEditing(p => {
-      if (!p?.images) return p;
-      const next = p.images.filter((_, i) => i !== idx);
-      return { ...p, images: next };
-    });
-  };
-
-  const addImageUrl = () => {
-    const u = imageUrlDraft.trim();
-    if (!u || !editing) return;
-    setEditing(p =>
-      p ? { ...p, images: [...(p.images ?? []).map(s => s.trim()).filter(Boolean), u] } : p
-    );
-    setImageUrlDraft('');
-    toast.success('Image URL added to gallery');
-  };
 
   const openVariantUpload = (vidx: number) => {
     variantUploadIdxRef.current = vidx;
@@ -251,15 +213,13 @@ export default function AdminProducts() {
         }
       }
       setEditing(p => {
-        if (!p?.variantOptions) return p;
-        const opts = p.variantOptions.map((o, i) =>
-          i === vidx
-            ? {
-                ...o,
-                images: [...(o.images ?? []).map(s => s.trim()).filter(Boolean), ...appended],
-              }
-            : o
-        );
+        if (!p) return p;
+        const opts = [...(p.variantOptions ?? [{ name: '', images: [] as string[] }])];
+        while (opts.length <= vidx) opts.push({ name: '', images: [] });
+        opts[vidx] = {
+          ...opts[vidx],
+          images: [...(opts[vidx].images ?? []).map(s => s.trim()).filter(Boolean), ...appended],
+        };
         return { ...p, variantOptions: opts };
       });
       if (anyDeferred) {
@@ -279,18 +239,23 @@ export default function AdminProducts() {
 
   const removeVariantImageAt = (vidx: number, imgIdx: number) => {
     setEditing(p => {
-      if (!p?.variantOptions) return p;
-      const opts = p.variantOptions.map((o, i) =>
-        i === vidx ? { ...o, images: (o.images ?? []).filter((_, j) => j !== imgIdx) } : o
-      );
+      if (!p) return p;
+      const opts = [...(p.variantOptions ?? [{ name: '', images: [] as string[] }])];
+      if (!opts[vidx]) return p;
+      opts[vidx] = {
+        ...opts[vidx],
+        images: (opts[vidx].images ?? []).filter((_, j) => j !== imgIdx),
+      };
       return { ...p, variantOptions: opts };
     });
   };
 
   const updateVariantName = (vidx: number, name: string) => {
     setEditing(p => {
-      if (!p?.variantOptions) return p;
-      const opts = p.variantOptions.map((o, i) => (i === vidx ? { ...o, name } : o));
+      if (!p) return p;
+      const opts = [...(p.variantOptions ?? [{ name: '', images: [] as string[] }])];
+      while (opts.length <= vidx) opts.push({ name: '', images: [] });
+      opts[vidx] = { ...opts[vidx], name };
       return { ...p, variantOptions: opts };
     });
   };
@@ -300,7 +265,7 @@ export default function AdminProducts() {
       p
         ? {
             ...p,
-            variantOptions: [...(p.variantOptions ?? []), { name: '', images: [] as string[] }],
+            variantOptions: [...(p.variantOptions ?? [{ name: '', images: [] as string[] }]), { name: '', images: [] }],
           }
         : p
     );
@@ -308,9 +273,13 @@ export default function AdminProducts() {
 
   const removeVariantRow = (vidx: number) => {
     setEditing(p => {
-      if (!p?.variantOptions) return p;
-      const opts = p.variantOptions.filter((_, i) => i !== vidx);
-      return { ...p, variantOptions: opts.length ? opts : undefined };
+      if (!p) return p;
+      const cur = p.variantOptions ?? [{ name: '', images: [] }];
+      if (cur.length <= 1) {
+        return { ...p, variantOptions: [{ name: '', images: [] }] };
+      }
+      const opts = cur.filter((_, i) => i !== vidx);
+      return { ...p, variantOptions: opts };
     });
     setVariantUrlDraft(d => {
       const next = { ...d };
@@ -321,53 +290,19 @@ export default function AdminProducts() {
 
   const addVariantImageUrl = (vidx: number) => {
     const u = (variantUrlDraft[vidx] ?? '').trim();
-    if (!u || !editing?.variantOptions) return;
+    if (!u || !editing) return;
     setEditing(p => {
-      if (!p?.variantOptions) return p;
-      const opts = p.variantOptions.map((o, i) =>
-        i === vidx
-          ? { ...o, images: [...(o.images ?? []).map(s => s.trim()).filter(Boolean), u] }
-          : o
-      );
+      if (!p) return p;
+      const opts = [...(p.variantOptions ?? [{ name: '', images: [] as string[] }])];
+      while (opts.length <= vidx) opts.push({ name: '', images: [] });
+      opts[vidx] = {
+        ...opts[vidx],
+        images: [...(opts[vidx].images ?? []).map(s => s.trim()).filter(Boolean), u],
+      };
       return { ...p, variantOptions: opts };
     });
     setVariantUrlDraft(d => ({ ...d, [vidx]: '' }));
     toast.success('Image URL added for this variant');
-  };
-
-  const promoteToPerVariantImages = () => {
-    if (!editing) return;
-    const names = (editing.variants ?? []).map(s => s.trim()).filter(Boolean);
-    if (!names.length) {
-      toast.error('Enter color/finish names (comma separated) first.');
-      return;
-    }
-    setEditing(p =>
-      p
-        ? {
-            ...p,
-            variantOptions: names.map((name, i) => ({
-              name,
-              images: i === 0 ? [...(p.images ?? []).map(s => s.trim()).filter(Boolean)] : [],
-            })),
-          }
-        : p
-    );
-    toast.success('Per-variant mode: add images for each color below.');
-  };
-
-  const clearVariantOptionsMode = () => {
-    setEditing(p => {
-      if (!p) return p;
-      const names = (p.variantOptions ?? []).map(v => v.name.trim()).filter(Boolean);
-      const merged = [...new Set((p.variantOptions ?? []).flatMap(v => (v.images ?? []).map(s => s.trim()).filter(Boolean)))];
-      return {
-        ...p,
-        variantOptions: undefined,
-        variants: names.length ? names : p.variants,
-        images: merged.length ? merged : p.images,
-      };
-    });
   };
 
   const applyPreset = (key: keyof typeof PRESETS) => {
@@ -394,10 +329,11 @@ export default function AdminProducts() {
       const sleeveTypes = snap.sleeveTypes?.filter(Boolean);
 
       let variantOptionsIn: ProductVariantOption[] = (snap.variantOptions ?? [])
-        .map(v => ({
-          name: v.name.trim(),
-          images: (v.images ?? []).map(s => s.trim()).filter(Boolean),
-        }))
+        .map((v, i) => {
+          const images = (v.images ?? []).map(s => s.trim()).filter(Boolean);
+          const name = v.name.trim() || (images.length > 0 ? `Finish ${i + 1}` : '');
+          return { name, images };
+        })
         .filter(v => v.name.length > 0);
 
       const usingVariantPhotos = variantOptionsIn.length > 0;
@@ -445,8 +381,7 @@ export default function AdminProducts() {
         ? variantOptionsIn.map(v => v.name)
         : (snap.variants ?? []).map(s => s.trim()).filter(Boolean);
 
-      const persistVariantOptions =
-        usingVariantPhotos || Boolean(snap.variantOptions && snap.variantOptions.length > 0);
+      const persistVariantOptions = variantOptionsIn.length > 0;
 
       if (editing.id) {
         await updateProduct(editing.id, {
@@ -543,7 +478,7 @@ export default function AdminProducts() {
         <h1 className="text-2xl font-bold">Products</h1>
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
-            <Button size="sm" className="gap-1" onClick={() => { setEditing(emptyProduct()); setImageUrlDraft(''); setVariantUrlDraft({}); }}>
+            <Button size="sm" className="gap-1" onClick={() => { setEditing(emptyProduct()); setVariantUrlDraft({}); }}>
               <Plus className="h-4 w-4" /> Add Product
             </Button>
           </DialogTrigger>
@@ -567,8 +502,13 @@ export default function AdminProducts() {
                   <Input type="number" placeholder="Original Price" value={editing.originalPrice || ''} onChange={e => setEditing(p => ({ ...p, originalPrice: +e.target.value || undefined }))} />
                 </div>
 
-                <div className="rounded-lg border bg-muted/30 p-3 space-y-3">
-                  <p className="text-sm font-medium">Images</p>
+                <div className="rounded-xl border border-border bg-card p-3 shadow-sm space-y-3">
+                  <div>
+                    <p className="text-sm font-medium">Colors / finishes</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      One card per option. The storefront switches photos when the customer picks a finish.
+                    </p>
+                  </div>
                   <input
                     ref={variantFileRef}
                     type="file"
@@ -576,14 +516,6 @@ export default function AdminProducts() {
                     multiple
                     className="hidden"
                     onChange={handleVariantImageFiles}
-                  />
-                  <input
-                    ref={fileRef}
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    className="hidden"
-                    onChange={handleImageFiles}
                   />
                   <div className="space-y-2">
                     <div className="flex justify-between gap-2 text-xs">
@@ -614,147 +546,75 @@ export default function AdminProducts() {
                     />
                   </div>
 
-                  {editing.variantOptions && editing.variantOptions.length > 0 ? (
-                    <div className="space-y-4 pt-1">
-                      <p className="text-xs text-muted-foreground">
-                        Each color/finish has its own gallery. The storefront switches photos when the customer picks a variant.
-                      </p>
-                      {editing.variantOptions.map((opt, vidx) => (
-                        <div key={vidx} className="rounded-md border bg-background/80 p-3 space-y-2">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Input
-                              className="h-9 max-w-[200px]"
-                              placeholder="Variant name (e.g. Black)"
-                              value={opt.name}
-                              onChange={e => updateVariantName(vidx, e.target.value)}
-                            />
-                            <Button type="button" variant="outline" size="sm" className="h-9" onClick={() => openVariantUpload(vidx)} disabled={imageBusy}>
-                              <Upload className="h-3.5 w-3.5 mr-1" /> Upload
-                            </Button>
-                            <Button type="button" variant="ghost" size="sm" className="h-9 text-destructive" onClick={() => removeVariantRow(vidx)}>
-                              Remove variant
-                            </Button>
-                          </div>
-                          <div className="flex flex-wrap gap-2">
-                            {!(opt.images ?? []).filter(Boolean).length ? (
-                              <div className="flex h-16 w-16 items-center justify-center rounded border border-dashed">
-                                <ImageIcon className="h-6 w-6 text-muted-foreground" />
-                              </div>
-                            ) : (
-                              (opt.images ?? [])
-                                .map((src, idx) => ({ src, idx }))
-                                .filter(x => x.src.trim())
-                                .map(({ src, idx }) => (
-                                  <div key={`${vidx}-${idx}`} className="relative h-16 w-16 shrink-0 overflow-hidden rounded border">
-                                    <img src={src} alt="" className="h-full w-full object-cover" />
-                                    <button
-                                      type="button"
-                                      aria-label="Remove"
-                                      className="absolute right-0.5 top-0.5 rounded bg-background/90 p-0.5 shadow"
-                                      onClick={() => removeVariantImageAt(vidx, idx)}
-                                    >
-                                      <Trash2 className="h-3 w-3" />
-                                    </button>
-                                  </div>
-                                ))
-                            )}
-                          </div>
-                          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-                            <Input
-                              className="h-8 text-xs"
-                              placeholder="https://…"
-                              value={variantUrlDraft[vidx] ?? ''}
-                              onChange={e => setVariantUrlDraft(d => ({ ...d, [vidx]: e.target.value }))}
-                              onKeyDown={e => {
-                                if (e.key === 'Enter') {
-                                  e.preventDefault();
-                                  addVariantImageUrl(vidx);
-                                }
-                              }}
-                            />
-                            <Button type="button" variant="secondary" size="sm" className="h-8 shrink-0" onClick={() => addVariantImageUrl(vidx)}>
-                              Add URL
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
-                      <div className="flex flex-wrap gap-2">
-                        <Button type="button" variant="outline" size="sm" onClick={addVariantRow}>
-                          <Plus className="h-3.5 w-3.5 mr-1" /> Add variant
-                        </Button>
-                        <Button type="button" variant="ghost" size="sm" onClick={clearVariantOptionsMode}>
-                          Use one shared gallery for all colors
-                        </Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      <p className="text-xs text-muted-foreground">
-                        One image set for every variant. To use different photos per color, enter names below then click &quot;Per-variant photos&quot;.
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {(editing.images?.length ? editing.images.filter(Boolean) : []).length === 0 ? (
-                          <div className="flex h-20 w-20 items-center justify-center rounded-md border border-dashed bg-background">
-                            <ImageIcon className="h-8 w-8 text-muted-foreground" />
-                          </div>
-                        ) : (
-                          editing.images
-                            ?.map((src, idx) => ({ src, idx }))
-                            .filter(x => x.src.trim())
-                            .map(({ src, idx }) => (
-                              <div key={`${src.slice(0, 48)}-${idx}`} className="relative h-20 w-20 shrink-0 overflow-hidden rounded-md border bg-background">
-                                <img src={src} alt="" className="h-full w-full object-cover" />
-                                <button
-                                  type="button"
-                                  aria-label="Remove image"
-                                  className="absolute right-0.5 top-0.5 rounded bg-background/90 p-1 shadow hover:bg-destructive hover:text-destructive-foreground"
-                                  onClick={() => removeImageAt(idx)}
-                                >
-                                  <Trash2 className="h-3 w-3" />
-                                </button>
-                              </div>
-                            ))
-                        )}
-                      </div>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        className="gap-1.5"
-                        disabled={imageBusy}
-                        onClick={() => fileRef.current?.click()}
-                      >
-                        <Upload className="h-4 w-4" />
-                        {imageBusy ? 'Processing…' : 'Upload images'}
-                      </Button>
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-                        <div className="flex-1">
-                          <Label htmlFor="img-url-add" className="text-xs text-muted-foreground">
-                            Add image URL
-                          </Label>
+                  <div className="space-y-4 pt-1">
+                    {(editing.variantOptions ?? [{ name: '', images: [] as string[] }]).map((opt, vidx) => (
+                      <div key={vidx} className="rounded-xl border border-border bg-background p-4 shadow-sm space-y-3">
+                        <div className="flex flex-wrap items-center gap-2">
                           <Input
-                            id="img-url-add"
-                            className="mt-1 h-9"
+                            className="h-9 max-w-[220px]"
+                            placeholder="e.g. White Marble"
+                            value={opt.name}
+                            onChange={e => updateVariantName(vidx, e.target.value)}
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-9"
+                            onClick={() => openVariantUpload(vidx)}
+                            disabled={imageBusy}
+                          >
+                            <Upload className="h-3.5 w-3.5 mr-1" /> Upload
+                          </Button>
+                          <button
+                            type="button"
+                            className="text-sm font-medium text-destructive hover:underline"
+                            onClick={() => removeVariantRow(vidx)}
+                          >
+                            Remove variant
+                          </button>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {!(opt.images ?? []).filter(Boolean).length ? (
+                            <div className="flex h-20 w-20 items-center justify-center rounded-lg border border-dashed border-muted-foreground/30 bg-muted/30">
+                              <ImageIcon className="h-7 w-7 text-muted-foreground" />
+                            </div>
+                          ) : (
+                            (opt.images ?? [])
+                              .map((src, idx) => ({ src, idx }))
+                              .filter(x => x.src.trim())
+                              .map(({ src, idx }) => (
+                                <VariantThumbImg
+                                  key={`${vidx}-${idx}`}
+                                  src={src}
+                                  onRemove={() => removeVariantImageAt(vidx, idx)}
+                                />
+                              ))
+                          )}
+                        </div>
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
+                          <Input
+                            className="h-9 text-sm flex-1 min-w-0"
                             placeholder="https://…"
-                            value={imageUrlDraft}
-                            onChange={e => setImageUrlDraft(e.target.value)}
+                            value={variantUrlDraft[vidx] ?? ''}
+                            onChange={e => setVariantUrlDraft(d => ({ ...d, [vidx]: e.target.value }))}
                             onKeyDown={e => {
                               if (e.key === 'Enter') {
                                 e.preventDefault();
-                                addImageUrl();
+                                addVariantImageUrl(vidx);
                               }
                             }}
                           />
+                          <Button type="button" variant="secondary" size="sm" className="h-9 shrink-0" onClick={() => addVariantImageUrl(vidx)}>
+                            Add URL
+                          </Button>
                         </div>
-                        <Button type="button" variant="outline" size="sm" className="h-9 shrink-0" onClick={addImageUrl}>
-                          Add URL
-                        </Button>
                       </div>
-                      <Button type="button" variant="outline" size="sm" onClick={promoteToPerVariantImages}>
-                        Per-variant photos (uses comma names below)
-                      </Button>
-                    </div>
-                  )}
+                    ))}
+                    <Button type="button" variant="outline" size="sm" onClick={addVariantRow}>
+                      <Plus className="h-3.5 w-3.5 mr-1" /> Add variant
+                    </Button>
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <Select value={editing.category || 'fashion'} onValueChange={v => setEditing(p => ({ ...p, category: v as Product['category'] }))}>
@@ -770,15 +630,6 @@ export default function AdminProducts() {
                 </div>
                 <Input placeholder="Subcategory" value={editing.subcategory || ''} onChange={e => setEditing(p => ({ ...p, subcategory: e.target.value }))} />
                 <Input placeholder="Sizes (comma separated, e.g. waist or tee sizes)" value={editing.sizes?.join(',') || ''} onChange={e => setEditing(p => ({ ...p, sizes: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))} />
-                {!(editing.variantOptions && editing.variantOptions.length > 0) && (
-                  <Input
-                    placeholder="Colors / finishes (comma separated) — then use “Per-variant photos” for separate galleries"
-                    value={editing.variants?.join(',') || ''}
-                    onChange={e =>
-                      setEditing(p => ({ ...p, variants: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))
-                    }
-                  />
-                )}
                 <Input placeholder="Sleeve types (comma separated, tees only)" value={editing.sleeveTypes?.join(',') || ''} onChange={e => setEditing(p => ({ ...p, sleeveTypes: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))} />
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input type="checkbox" checked={!!editing.isCustomPrint} onChange={e => setEditing(p => ({ ...p, isCustomPrint: e.target.checked }))} />
@@ -826,7 +677,6 @@ export default function AdminProducts() {
                     className="h-7 w-7"
                     onClick={() => {
                       setEditing(normalizeProductForEditing(p));
-                      setImageUrlDraft('');
                       setVariantUrlDraft({});
                       setOpen(true);
                     }}

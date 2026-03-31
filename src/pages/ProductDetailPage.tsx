@@ -15,6 +15,13 @@ function variantOptionLabel(product: Product): string {
   return 'Color';
 }
 
+const pillOption = (active: boolean) =>
+  `rounded-full px-4 py-2 text-sm font-medium border transition-colors ${
+    active
+      ? 'bg-primary text-primary-foreground border-primary shadow-sm'
+      : 'bg-background text-foreground border-border hover:border-muted-foreground/40'
+  }`;
+
 export default function ProductDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { products } = useProducts();
@@ -67,37 +74,48 @@ export default function ProductDetailPage() {
           productName={product.name}
           resetKey={selectedVariant}
         />
-        <div className="space-y-5">
+        <div className="space-y-6">
           {product.isTrending && (
             <span className="inline-block bg-foreground text-background text-xs font-semibold px-3 py-1 rounded-md">🔥 Trending</span>
           )}
-          <h1 className="text-3xl font-bold">{product.name}</h1>
-          <div className="flex items-baseline gap-3">
-            <span className="text-3xl font-bold text-primary">₹{product.price}</span>
-            {product.originalPrice && (
-              <span className="text-lg text-muted-foreground line-through">₹{product.originalPrice}</span>
+          <h1 className="text-3xl font-bold tracking-tight">{product.name}</h1>
+
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span className="text-4xl font-bold text-primary tabular-nums">₹{product.price}</span>
+            {product.originalPrice != null && product.originalPrice > 0 && (
+              <span className="text-base text-muted-foreground line-through tabular-nums">₹{product.originalPrice}</span>
             )}
             {discount > 0 && (
-              <span className="bg-primary/10 text-primary text-sm font-semibold px-2 py-0.5 rounded">{discount}% OFF</span>
+              <span className="bg-primary/15 text-primary text-xs font-semibold px-2.5 py-1 rounded-md">{discount}% OFF</span>
             )}
           </div>
-          <div className="flex items-center gap-1">
-            <span className="text-yellow-500">{'★'.repeat(Math.round(product.rating))}</span>
-            <span className="text-sm text-muted-foreground">({product.reviews.length} reviews)</span>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex gap-0.5 text-lg leading-none" aria-hidden>
+              {Array.from({ length: 5 }, (_, i) => (
+                <span
+                  key={i}
+                  className={i < Math.round(product.rating) ? 'text-yellow-500' : 'text-muted-foreground/35'}
+                >
+                  ★
+                </span>
+              ))}
+            </span>
+            <span className="text-sm text-muted-foreground">
+              (
+              {product.reviews.length}{' '}
+              {product.reviews.length === 1 ? 'review' : 'reviews'})
+            </span>
           </div>
-          <p className="text-muted-foreground">{product.description}</p>
+
+          <p className="text-muted-foreground text-[15px] leading-relaxed">{product.description}</p>
 
           {product.sizes && product.sizes.length > 0 && (
-            <div>
-              <p className="text-sm font-medium mb-2">Size</p>
+            <div className="space-y-3">
+              <p className="text-base font-semibold text-foreground">Size</p>
               <div className="flex gap-2 flex-wrap">
                 {product.sizes.map(s => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => setSelectedSize(s)}
-                    className={`px-3 py-1.5 text-sm rounded-md border transition-colors ${selectedSize === s ? 'bg-primary text-primary-foreground border-primary' : 'hover:border-foreground'}`}
-                  >
+                  <button key={s} type="button" onClick={() => setSelectedSize(s)} className={pillOption(selectedSize === s)}>
                     {s}
                   </button>
                 ))}
@@ -106,16 +124,11 @@ export default function ProductDetailPage() {
           )}
 
           {product.sleeveTypes && product.sleeveTypes.length > 0 && (
-            <div>
-              <p className="text-sm font-medium mb-2">Sleeve</p>
+            <div className="space-y-3">
+              <p className="text-base font-semibold text-foreground">Sleeve</p>
               <div className="flex gap-2 flex-wrap">
                 {product.sleeveTypes.map(s => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() => setSelectedSleeve(s)}
-                    className={`px-3 py-1.5 text-sm rounded-md border transition-colors ${selectedSleeve === s ? 'bg-primary text-primary-foreground border-primary' : 'hover:border-foreground'}`}
-                  >
+                  <button key={s} type="button" onClick={() => setSelectedSleeve(s)} className={pillOption(selectedSleeve === s)}>
                     {s}
                   </button>
                 ))}
@@ -124,16 +137,11 @@ export default function ProductDetailPage() {
           )}
 
           {variantNames.length > 0 && (
-            <div>
-              <p className="text-sm font-medium mb-2">{variantOptionLabel(product)}</p>
+            <div className="space-y-3">
+              <p className="text-base font-semibold text-foreground">{variantOptionLabel(product)}</p>
               <div className="flex gap-2 flex-wrap">
                 {variantNames.map(v => (
-                  <button
-                    key={v}
-                    type="button"
-                    onClick={() => setSelectedVariant(v)}
-                    className={`px-3 py-1.5 text-sm rounded-md border transition-colors ${selectedVariant === v ? 'bg-primary text-primary-foreground border-primary' : 'hover:border-foreground'}`}
-                  >
+                  <button key={v} type="button" onClick={() => setSelectedVariant(v)} className={pillOption(selectedVariant === v)}>
                     {v}
                   </button>
                 ))}
@@ -143,23 +151,29 @@ export default function ProductDetailPage() {
 
           {product.isCustomPrint && (
             <Link to="/custom-print" className="block">
-              <Button variant="outline" className="w-full">🎨 Upload Custom Design →</Button>
+              <Button variant="outline" className="w-full rounded-full">
+                🎨 Upload Custom Design →
+              </Button>
             </Link>
           )}
 
-          <div className="flex items-center gap-3">
-            <div className="flex items-center border rounded-md">
-              <button type="button" className="px-3 py-2 hover:bg-accent" onClick={() => setQty(Math.max(1, qty - 1))}>
+          <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-stretch">
+            <div className="inline-flex shrink-0 items-stretch overflow-hidden rounded-lg border border-border bg-background text-sm font-medium">
+              <button
+                type="button"
+                className="px-4 py-3 hover:bg-muted/80 min-w-[2.75rem]"
+                onClick={() => setQty(Math.max(1, qty - 1))}
+              >
                 −
               </button>
-              <span className="px-4 py-2 border-x text-sm font-medium">{qty}</span>
-              <button type="button" className="px-3 py-2 hover:bg-accent" onClick={() => setQty(qty + 1)}>
+              <span className="flex min-w-[3rem] items-center justify-center border-x border-border px-2 tabular-nums">{qty}</span>
+              <button type="button" className="px-4 py-3 hover:bg-muted/80 min-w-[2.75rem]" onClick={() => setQty(qty + 1)}>
                 +
               </button>
             </div>
             <Button
               size="lg"
-              className="flex-1 gap-2"
+              className="h-auto min-h-[3rem] flex-1 gap-2 rounded-lg py-3 text-base font-semibold sm:min-w-0"
               onClick={() =>
                 addItem({
                   product,
@@ -170,7 +184,7 @@ export default function ProductDetailPage() {
                 })
               }
             >
-              <ShoppingCart className="h-4 w-4" /> Add to Cart
+              <ShoppingCart className="h-5 w-5" /> Add to Cart
             </Button>
           </div>
 

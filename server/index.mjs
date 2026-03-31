@@ -93,6 +93,10 @@ const app = express();
 app.use(cors({ origin: true }));
 app.use(express.json({ limit: '16mb' }));
 
+app.get('/', (_req, res) => {
+  res.type('text/plain').send('Backend is running 🚀');
+});
+
 app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
@@ -341,7 +345,7 @@ async function main() {
   }
 
   app.listen(PORT, () => {
-    console.log(`API http://localhost:${PORT}`);
+    console.log(`Server running on port ${PORT}`);
   });
 }
 
