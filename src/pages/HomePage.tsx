@@ -90,6 +90,15 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* Custom Print CTA */}
+      <section className="max-w-7xl mx-auto px-4 py-12">
+        <div className="border-2 border-dashed border-primary/30 rounded-2xl p-8 md:p-12 text-center bg-primary/5">
+          <h2 className="text-2xl md:text-3xl font-bold mb-2">🎨 Upload Your Own Design</h2>
+          <p className="text-muted-foreground text-lg mb-4">Get your custom design printed on T-shirts & mugs — starting at ₹499!</p>
+          <Link to="/custom-print"><Button size="lg" className="gap-2">Start Designing <ArrowRight className="h-4 w-4" /></Button></Link>
+        </div>
+      </section>
+
       {/* Offer Banner */}
       <section className="max-w-7xl mx-auto px-4 py-12">
         <div className="bg-primary rounded-2xl p-8 md:p-12 text-primary-foreground text-center">
