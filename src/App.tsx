@@ -3,23 +3,55 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import Index from "./pages/Index.tsx";
-import NotFound from "./pages/NotFound.tsx";
+import { CartProvider } from "@/contexts/CartContext";
+import Layout from "@/components/Layout";
+import HomePage from "@/pages/HomePage";
+import CategoryPage from "@/pages/CategoryPage";
+import ProductDetailPage from "@/pages/ProductDetailPage";
+import CustomPrintPage from "@/pages/CustomPrintPage";
+import CartPage from "@/pages/CartPage";
+import CheckoutPage from "@/pages/CheckoutPage";
+import SearchPage from "@/pages/SearchPage";
+import AdminLayout from "@/pages/admin/AdminLayout";
+import AdminDashboard from "@/pages/admin/AdminDashboard";
+import AdminProducts from "@/pages/admin/AdminProducts";
+import AdminOrders from "@/pages/admin/AdminOrders";
+import AdminCoupons from "@/pages/admin/AdminCoupons";
+import AdminCustomPrints from "@/pages/admin/AdminCustomPrints";
+import AdminCustomers from "@/pages/admin/AdminCustomers";
+import NotFound from "@/pages/NotFound";
 
 const queryClient = new QueryClient();
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Index />} />
-          {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
+      <CartProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
+          <Routes>
+            <Route element={<Layout />}>
+              <Route path="/" element={<HomePage />} />
+              <Route path="/category/:id" element={<CategoryPage />} />
+              <Route path="/product/:id" element={<ProductDetailPage />} />
+              <Route path="/custom-print" element={<CustomPrintPage />} />
+              <Route path="/cart" element={<CartPage />} />
+              <Route path="/checkout" element={<CheckoutPage />} />
+              <Route path="/search" element={<SearchPage />} />
+            </Route>
+            <Route path="/admin" element={<AdminLayout />}>
+              <Route index element={<AdminDashboard />} />
+              <Route path="products" element={<AdminProducts />} />
+              <Route path="orders" element={<AdminOrders />} />
+              <Route path="coupons" element={<AdminCoupons />} />
+              <Route path="custom-prints" element={<AdminCustomPrints />} />
+              <Route path="customers" element={<AdminCustomers />} />
+            </Route>
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </BrowserRouter>
+      </CartProvider>
     </TooltipProvider>
   </QueryClientProvider>
 );
