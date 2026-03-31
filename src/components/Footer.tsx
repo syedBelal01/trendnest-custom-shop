@@ -11,7 +11,7 @@ export default function Footer() {
         <div>
           <h4 className="font-semibold mb-3 text-sm">Shop</h4>
           <div className="space-y-2 text-sm text-muted-foreground">
-            <Link to="/category/fashion" className="block hover:text-foreground">Fashion</Link>
+            <Link to="/" className="block hover:text-foreground">Home</Link>
             <Link to="/category/home" className="block hover:text-foreground">Home Essentials</Link>
             <Link to="/category/printed" className="block hover:text-foreground">Printed Products</Link>
             <Link to="/category/trending" className="block hover:text-foreground">Trending</Link>

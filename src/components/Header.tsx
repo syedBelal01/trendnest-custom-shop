@@ -6,7 +6,6 @@ import { useCart } from '@/contexts/CartContext';
 import { useState } from 'react';
 
 const navLinks = [
-  { label: 'Fashion', to: '/category/fashion' },
   { label: 'Home', to: '/category/home' },
   { label: 'Prints', to: '/category/printed' },
   { label: 'Trending', to: '/category/trending' },

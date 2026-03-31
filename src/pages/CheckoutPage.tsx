@@ -1,15 +1,25 @@
 import { useCart } from '@/contexts/CartContext';
+import { useOrders } from '@/contexts/OrdersContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
-import { sampleOrders } from '@/data/mockData';
-import { Order, CustomerInfo } from '@/types';
+import { Order, CustomerInfo, CartItem } from '@/types';
 import { CheckCircle } from 'lucide-react';
+
+function itemSummary(i: CartItem): string {
+  const parts: string[] = [];
+  if (i.selectedSize) parts.push(`Size ${i.selectedSize}`);
+  if (i.selectedVariant) parts.push(String(i.selectedVariant));
+  if (i.selectedSleeve) parts.push(String(i.selectedSleeve));
+  if (i.customDesignName) parts.push(`Custom: ${i.customDesignName}`);
+  return parts.join(' · ');
+}
 
 export default function CheckoutPage() {
   const { items, subtotal, total, discount, couponCode, clearCart } = useCart();
+  const { orders, addOrder } = useOrders();
   const navigate = useNavigate();
   const [form, setForm] = useState<CustomerInfo>({ name: '', phone: '', address: '', city: '', pincode: '' });
   const [orderPlaced, setOrderPlaced] = useState<string | null>(null);
@@ -22,14 +32,19 @@ export default function CheckoutPage() {
       toast.error('Please fill all fields');
       return;
     }
-    const orderId = `ORD${String(sampleOrders.length + Math.floor(Math.random() * 900 + 100)).padStart(3, '0')}`;
+    const orderId = `ORD${String(orders.length + 1).padStart(3, '0')}-${Date.now().toString(36).slice(-4)}`;
     const order: Order = {
-      id: orderId, items, customer: form,
-      status: 'pending', total, discount, couponCode: couponCode || undefined,
-      createdAt: new Date().toISOString(), hasCustomPrint: items.some(i => !!i.customDesignFile),
+      id: orderId,
+      items,
+      customer: form,
+      status: 'pending',
+      total,
+      discount,
+      couponCode: couponCode || undefined,
+      createdAt: new Date().toISOString(),
+      hasCustomPrint: items.some(i => !!i.customDesignFile),
     };
-    // In the future this will go to MongoDB
-    sampleOrders.push(order);
+    addOrder(order);
     clearCart();
     setOrderPlaced(orderId);
     toast.success('Order placed successfully!');
@@ -41,13 +56,16 @@ export default function CheckoutPage() {
         <CheckCircle className="h-16 w-16 text-primary mx-auto mb-4" />
         <h1 className="text-2xl font-bold mb-2">Order Confirmed!</h1>
         <p className="text-muted-foreground mb-1">Order ID: <span className="font-mono font-semibold text-foreground">{orderPlaced}</span></p>
-        <p className="text-sm text-muted-foreground mb-6">You'll receive updates on WhatsApp.</p>
+        <p className="text-sm text-muted-foreground mb-6">You&apos;ll receive updates on WhatsApp.</p>
         <Button onClick={() => navigate('/')}>Continue Shopping</Button>
       </div>
     );
   }
 
-  if (items.length === 0) { navigate('/cart'); return null; }
+  if (items.length === 0) {
+    navigate('/cart');
+    return null;
+  }
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-8">
@@ -73,9 +91,14 @@ export default function CheckoutPage() {
           <h2 className="font-semibold mb-3">Order Summary</h2>
           <div className="space-y-2 text-sm">
             {items.map(i => (
-              <div key={i.product.id} className="flex justify-between">
-                <span className="truncate pr-2">{i.product.name} ×{i.quantity}</span>
-                <span>₹{i.product.price * i.quantity}</span>
+              <div key={i.cartLineId} className="flex justify-between gap-2">
+                <span className="truncate pr-2">
+                  {i.product.name} ×{i.quantity}
+                  {itemSummary(i) && (
+                    <span className="text-muted-foreground block text-xs truncate">{itemSummary(i)}</span>
+                  )}
+                </span>
+                <span className="shrink-0">₹{i.product.price * i.quantity}</span>
               </div>
             ))}
             <div className="border-t pt-2 space-y-1">

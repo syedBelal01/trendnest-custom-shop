@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useReducer, useEffect } from 'react';
-import { CartItem, Product } from '@/types';
+import { CartItem } from '@/types';
 import { toast } from 'sonner';
 
 interface CartState {
@@ -11,33 +11,80 @@ interface CartState {
 type CartAction =
   | { type: 'ADD_ITEM'; payload: CartItem }
   | { type: 'REMOVE_ITEM'; payload: string }
-  | { type: 'UPDATE_QTY'; payload: { productId: string; quantity: number } }
+  | { type: 'UPDATE_QTY'; payload: { cartLineId: string; quantity: number } }
   | { type: 'APPLY_COUPON'; payload: { code: string; discount: number } }
   | { type: 'CLEAR_CART' };
 
 const initialState: CartState = { items: [], couponCode: null, discount: 0 };
 
+function sameCartLine(a: CartItem, b: CartItem): boolean {
+  const aCustom = !!(a.customDesignFile || a.customDesignName);
+  const bCustom = !!(b.customDesignFile || b.customDesignName);
+  if (aCustom || bCustom) {
+    return (
+      a.product.id === b.product.id &&
+      a.selectedSize === b.selectedSize &&
+      a.selectedVariant === b.selectedVariant &&
+      a.selectedSleeve === b.selectedSleeve &&
+      a.customDesignName === b.customDesignName &&
+      a.customDesignFile === b.customDesignFile &&
+      a.customProductType === b.customProductType
+    );
+  }
+  return (
+    a.product.id === b.product.id &&
+    a.selectedSize === b.selectedSize &&
+    a.selectedVariant === b.selectedVariant &&
+    a.selectedSleeve === b.selectedSleeve
+  );
+}
+
+function normalizeCartItem(item: CartItem): CartItem {
+  return {
+    ...item,
+    cartLineId: item.cartLineId || crypto.randomUUID(),
+  };
+}
+
+function migrateState(raw: unknown): CartState {
+  if (!raw || typeof raw !== 'object') return initialState;
+  const o = raw as CartState;
+  if (!Array.isArray(o.items)) return initialState;
+  return {
+    items: o.items.map((i: CartItem) => normalizeCartItem(i)),
+    couponCode: o.couponCode ?? null,
+    discount: typeof o.discount === 'number' ? o.discount : 0,
+  };
+}
+
 function cartReducer(state: CartState, action: CartAction): CartState {
   switch (action.type) {
     case 'ADD_ITEM': {
-      const existing = state.items.find(
-        i => i.product.id === action.payload.product.id &&
-             i.selectedSize === action.payload.selectedSize &&
-             i.selectedVariant === action.payload.selectedVariant
-      );
+      const payload = normalizeCartItem(action.payload);
+      const existing = state.items.find(i => sameCartLine(i, payload));
       if (existing) {
-        return { ...state, items: state.items.map(i =>
-          i === existing ? { ...i, quantity: i.quantity + action.payload.quantity } : i
-        )};
+        return {
+          ...state,
+          items: state.items.map(i =>
+            i.cartLineId === existing.cartLineId
+              ? { ...i, quantity: i.quantity + payload.quantity }
+              : i
+          ),
+        };
       }
-      return { ...state, items: [...state.items, action.payload] };
+      return { ...state, items: [...state.items, payload] };
     }
     case 'REMOVE_ITEM':
-      return { ...state, items: state.items.filter(i => i.product.id !== action.payload) };
+      return { ...state, items: state.items.filter(i => i.cartLineId !== action.payload) };
     case 'UPDATE_QTY':
-      return { ...state, items: state.items.map(i =>
-        i.product.id === action.payload.productId ? { ...i, quantity: Math.max(1, action.payload.quantity) } : i
-      )};
+      return {
+        ...state,
+        items: state.items.map(i =>
+          i.cartLineId === action.payload.cartLineId
+            ? { ...i, quantity: Math.max(1, action.payload.quantity) }
+            : i
+        ),
+      };
     case 'APPLY_COUPON':
       return { ...state, couponCode: action.payload.code, discount: action.payload.discount };
     case 'CLEAR_CART':
@@ -47,13 +94,15 @@ function cartReducer(state: CartState, action: CartAction): CartState {
   }
 }
 
+export type CartItemInput = Omit<CartItem, 'cartLineId'> & { cartLineId?: string };
+
 interface CartContextType {
   items: CartItem[];
   couponCode: string | null;
   discount: number;
-  addItem: (item: CartItem) => void;
-  removeItem: (productId: string) => void;
-  updateQuantity: (productId: string, quantity: number) => void;
+  addItem: (item: CartItemInput) => void;
+  removeItem: (cartLineId: string) => void;
+  updateQuantity: (cartLineId: string, quantity: number) => void;
   applyCoupon: (code: string, discount: number) => void;
   clearCart: () => void;
   subtotal: number;
@@ -67,8 +116,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(cartReducer, initialState, () => {
     try {
       const saved = localStorage.getItem('trendnest-cart');
-      return saved ? JSON.parse(saved) : initialState;
-    } catch { return initialState; }
+      return saved ? migrateState(JSON.parse(saved)) : initialState;
+    } catch {
+      return initialState;
+    }
   });
 
   useEffect(() => {
@@ -79,20 +130,29 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const total = Math.max(0, subtotal - state.discount);
   const itemCount = state.items.reduce((sum, i) => sum + i.quantity, 0);
 
-  const addItem = (item: CartItem) => {
-    dispatch({ type: 'ADD_ITEM', payload: item });
+  const addItem = (item: CartItemInput) => {
+    const payload: CartItem = normalizeCartItem(item as CartItem);
+    dispatch({ type: 'ADD_ITEM', payload });
     toast.success(`${item.product.name} added to cart`);
   };
 
   return (
-    <CartContext.Provider value={{
-      items: state.items, couponCode: state.couponCode, discount: state.discount,
-      addItem, removeItem: (id) => dispatch({ type: 'REMOVE_ITEM', payload: id }),
-      updateQuantity: (id, qty) => dispatch({ type: 'UPDATE_QTY', payload: { productId: id, quantity: qty } }),
-      applyCoupon: (code, discount) => dispatch({ type: 'APPLY_COUPON', payload: { code, discount } }),
-      clearCart: () => dispatch({ type: 'CLEAR_CART' }),
-      subtotal, total, itemCount,
-    }}>
+    <CartContext.Provider
+      value={{
+        items: state.items,
+        couponCode: state.couponCode,
+        discount: state.discount,
+        addItem,
+        removeItem: id => dispatch({ type: 'REMOVE_ITEM', payload: id }),
+        updateQuantity: (cartLineId, qty) =>
+          dispatch({ type: 'UPDATE_QTY', payload: { cartLineId, quantity: qty } }),
+        applyCoupon: (code, discount) => dispatch({ type: 'APPLY_COUPON', payload: { code, discount } }),
+        clearCart: () => dispatch({ type: 'CLEAR_CART' }),
+        subtotal,
+        total,
+        itemCount,
+      }}
+    >
       {children}
     </CartContext.Provider>
   );

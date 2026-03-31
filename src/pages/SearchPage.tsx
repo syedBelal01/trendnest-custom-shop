@@ -1,11 +1,12 @@
 import { useSearchParams } from 'react-router-dom';
-import { products } from '@/data/mockData';
+import { useProducts } from '@/contexts/ProductsContext';
 import ProductCard from '@/components/ProductCard';
 import { Input } from '@/components/ui/input';
 import { Search } from 'lucide-react';
 import { useState, useMemo } from 'react';
 
 export default function SearchPage() {
+  const { products } = useProducts();
   const [params] = useSearchParams();
   const initial = params.get('q') || '';
   const [query, setQuery] = useState(initial);
@@ -20,7 +21,7 @@ export default function SearchPage() {
       p.subcategory?.toLowerCase().includes(q) ||
       p.tags?.some(t => t.includes(q))
     );
-  }, [query]);
+  }, [query, products]);
 
   return (
     <div className="max-w-7xl mx-auto px-4 py-8">

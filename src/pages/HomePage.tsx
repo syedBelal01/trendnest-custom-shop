@@ -1,12 +1,16 @@
 import { Link } from 'react-router-dom';
-import { products, categories } from '@/data/mockData';
+import { categories } from '@/data/mockData';
+import { useProducts } from '@/contexts/ProductsContext';
 import ProductCard from '@/components/ProductCard';
 import { Button } from '@/components/ui/button';
 import { ArrowRight, Truck, Shield, Headphones } from 'lucide-react';
+import HeroCarousel from '@/components/HeroCarousel';
 
 export default function HomePage() {
+  const { products } = useProducts();
   const trending = products.filter(p => p.isTrending).slice(0, 4);
   const deals = products.filter(p => p.originalPrice).slice(0, 4);
+  const fashion = products.filter(p => p.category === 'fashion');
 
   return (
     <div>
@@ -19,13 +23,11 @@ export default function HomePage() {
             <p className="text-muted-foreground text-lg max-w-md">Discover trending fashion, home essentials & custom prints — all at unbeatable prices.</p>
             <div className="flex gap-3">
               <Link to="/category/trending"><Button size="lg" className="gap-2">Shop Trending <ArrowRight className="h-4 w-4" /></Button></Link>
-              <Link to="/category/fashion"><Button size="lg" variant="outline">Explore Fashion</Button></Link>
+              <Link to="#fashion-picks"><Button size="lg" variant="outline">Shop Style</Button></Link>
             </div>
           </div>
-          <div className="flex-1 relative">
-            <div className="aspect-square max-w-md mx-auto rounded-2xl overflow-hidden shadow-2xl">
-              <img src="https://images.unsplash.com/photo-1441986300917-64674bd600d8?w=600" alt="TrendNest99 Hero" className="w-full h-full object-cover" />
-            </div>
+          <div className="flex-1 relative w-full">
+            <HeroCarousel />
           </div>
         </div>
       </section>
@@ -49,10 +51,21 @@ export default function HomePage() {
         </div>
       </section>
 
+      {/* Fashion — featured on home (no separate category tab) */}
+      <section id="fashion-picks" className="max-w-7xl mx-auto px-4 py-12 scroll-mt-20">
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-2xl font-bold">👔 Style & Apparel</h2>
+          <span className="text-sm text-muted-foreground">Curated on your home page</span>
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          {fashion.map(p => <ProductCard key={p.id} product={p} />)}
+        </div>
+      </section>
+
       {/* Categories */}
       <section className="max-w-7xl mx-auto px-4 py-12">
         <h2 className="text-2xl font-bold mb-6">Shop by Category</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 max-w-5xl">
           {categories.map(c => (
             <Link key={c.id} to={`/category/${c.id}`} className="group relative aspect-[4/3] rounded-xl overflow-hidden border">
               <img src={c.image} alt={c.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" />
@@ -82,7 +95,7 @@ export default function HomePage() {
         <div className="max-w-7xl mx-auto px-4">
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-2xl font-bold">💰 Best Deals</h2>
-            <Link to="/category/fashion" className="text-primary text-sm font-medium hover:underline">View All →</Link>
+            <Link to="/category/trending" className="text-primary text-sm font-medium hover:underline">View All →</Link>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {deals.map(p => <ProductCard key={p.id} product={p} />)}
@@ -94,7 +107,7 @@ export default function HomePage() {
       <section className="max-w-7xl mx-auto px-4 py-12">
         <div className="border-2 border-dashed border-primary/30 rounded-2xl p-8 md:p-12 text-center bg-primary/5">
           <h2 className="text-2xl md:text-3xl font-bold mb-2">🎨 Upload Your Own Design</h2>
-          <p className="text-muted-foreground text-lg mb-4">Get your custom design printed on T-shirts & mugs — starting at ₹499!</p>
+          <p className="text-muted-foreground text-lg mb-4">Get your custom design printed on T-shirts & cups — starting at ₹499!</p>
           <Link to="/custom-print"><Button size="lg" className="gap-2">Start Designing <ArrowRight className="h-4 w-4" /></Button></Link>
         </div>
       </section>

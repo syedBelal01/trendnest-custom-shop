@@ -8,6 +8,11 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+
+# Secrets (copy from .env.example → .env)
+.env
+.env.*.local
+
 dist
 dist-ssr
 *.local

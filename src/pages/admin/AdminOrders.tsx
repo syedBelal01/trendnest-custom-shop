@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { sampleOrders } from '@/data/mockData';
-import { Order, OrderStatus } from '@/types';
+import { useOrders } from '@/contexts/OrdersContext';
+import { OrderStatus } from '@/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 
@@ -11,12 +11,23 @@ const statusColors: Record<OrderStatus, string> = {
   delivered: 'bg-green-100 text-green-800',
 };
 
+function itemDetail(i: import('@/types').CartItem): string {
+  const parts: string[] = [];
+  if (i.selectedSize) parts.push(`Size: ${i.selectedSize}`);
+  if (i.selectedVariant) parts.push(`Color: ${i.selectedVariant}`);
+  if (i.selectedSleeve) parts.push(`Sleeve: ${i.selectedSleeve}`);
+  if (i.customProductType === 'tshirt') parts.push('Type: T-shirt');
+  if (i.customProductType === 'mug') parts.push('Type: Cup');
+  if (i.customDesignName) parts.push(`Design: ${i.customDesignName}`);
+  return parts.join(' · ');
+}
+
 export default function AdminOrders() {
-  const [orders, setOrders] = useState<Order[]>([...sampleOrders]);
+  const { orders, updateOrderStatus } = useOrders();
   const [filter, setFilter] = useState<string>('all');
 
   const updateStatus = (id: string, status: OrderStatus) => {
-    setOrders(prev => prev.map(o => o.id === id ? { ...o, status } : o));
+    updateOrderStatus(id, status);
     toast.success(`Order ${id} marked as ${status}`);
   };
 
@@ -59,8 +70,19 @@ export default function AdminOrders() {
             <div className="text-sm space-y-1">
               <p><span className="text-muted-foreground">Customer:</span> {o.customer.name} • {o.customer.phone}</p>
               <p><span className="text-muted-foreground">Address:</span> {o.customer.address}, {o.customer.city} - {o.customer.pincode}</p>
-              <p><span className="text-muted-foreground">Items:</span> {o.items.map(i => `${i.product.name} ×${i.quantity}`).join(', ')}</p>
-              <p className="font-semibold">Total: ₹{o.total}</p>
+              <div className="text-muted-foreground">Items:</div>
+              <ul className="list-disc pl-5 space-y-1">
+                {o.items.map(i => {
+                  const detail = itemDetail(i);
+                  return (
+                    <li key={i.cartLineId}>
+                      {i.product.name} ×{i.quantity}
+                      {detail && <span className="text-foreground"> — {detail}</span>}
+                    </li>
+                  );
+                })}
+              </ul>
+              <p className="font-semibold pt-1">Total: ₹{o.total}</p>
             </div>
           </div>
         ))}

@@ -1,15 +1,22 @@
-import { useParams } from 'react-router-dom';
-import { products, categories } from '@/data/mockData';
+import { Navigate, useParams } from 'react-router-dom';
+import { categories } from '@/data/mockData';
+import { useProducts } from '@/contexts/ProductsContext';
 import ProductCard from '@/components/ProductCard';
 import { useState } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 export default function CategoryPage() {
   const { id } = useParams<{ id: string }>();
+  const { products } = useProducts();
   const [sort, setSort] = useState('default');
 
+  if (id === 'fashion') {
+    return <Navigate to="/#fashion-picks" replace />;
+  }
+
   const category = categories.find(c => c.id === id);
-  let filtered = products.filter(p => p.category === id);
+  let filtered =
+    id === 'trending' ? products.filter(p => p.isTrending) : products.filter(p => p.category === id);
 
   if (sort === 'low') filtered = [...filtered].sort((a, b) => a.price - b.price);
   if (sort === 'high') filtered = [...filtered].sort((a, b) => b.price - a.price);

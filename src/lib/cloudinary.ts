@@ -1,4 +1,7 @@
-// Cloudinary publishable credentials
+/**
+ * Product images are uploaded through the API (`POST /api/upload/image`), which uses
+ * Cloudinary with your API secret from server `.env` — never put the secret in the browser.
+ *
+ * Optional: cloud name if you add a signed/unsigned widget later.
+ */
 export const CLOUDINARY_CLOUD_NAME = 'diclcqwnm';
-export const CLOUDINARY_API_KEY = '531441233823316';
-export const CLOUDINARY_UPLOAD_URL = `https://api.cloudinary.com/v1_1/${CLOUDINARY_CLOUD_NAME}/image/upload`;

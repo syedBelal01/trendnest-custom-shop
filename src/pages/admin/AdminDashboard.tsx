@@ -1,11 +1,13 @@
-import { sampleOrders } from '@/data/mockData';
-import { products } from '@/data/mockData';
+import { useOrders } from '@/contexts/OrdersContext';
+import { useProducts } from '@/contexts/ProductsContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Package, ShoppingBag, DollarSign, TrendingUp } from 'lucide-react';
 
 export default function AdminDashboard() {
-  const totalRevenue = sampleOrders.reduce((s, o) => s + o.total, 0);
-  const pendingOrders = sampleOrders.filter(o => o.status === 'pending').length;
+  const { orders } = useOrders();
+  const { products } = useProducts();
+  const totalRevenue = orders.reduce((s, o) => s + o.total, 0);
+  const pendingOrders = orders.filter(o => o.status === 'pending').length;
 
   return (
     <div>
@@ -13,7 +15,7 @@ export default function AdminDashboard() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         {[
           { label: 'Total Products', value: products.length, icon: Package, color: 'text-blue-600' },
-          { label: 'Total Orders', value: sampleOrders.length, icon: ShoppingBag, color: 'text-primary' },
+          { label: 'Total Orders', value: orders.length, icon: ShoppingBag, color: 'text-primary' },
           { label: 'Revenue', value: `₹${totalRevenue}`, icon: DollarSign, color: 'text-green-600' },
           { label: 'Pending', value: pendingOrders, icon: TrendingUp, color: 'text-amber-600' },
         ].map(s => (
@@ -34,7 +36,7 @@ export default function AdminDashboard() {
             <tr><th className="text-left p-3">Order ID</th><th className="text-left p-3">Customer</th><th className="text-left p-3">Total</th><th className="text-left p-3">Status</th></tr>
           </thead>
           <tbody>
-            {sampleOrders.slice(-5).reverse().map(o => (
+            {orders.slice(-5).reverse().map(o => (
               <tr key={o.id} className="border-t">
                 <td className="p-3 font-mono">{o.id}</td>
                 <td className="p-3">{o.customer.name}</td>

@@ -1,25 +1,38 @@
-import { useState, useRef } from 'react';
-import { products } from '@/data/mockData';
+import { useState, useRef, useEffect, useMemo } from 'react';
+import { useProducts } from '@/contexts/ProductsContext';
 import { useCart } from '@/contexts/CartContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Upload, ShoppingCart, X } from 'lucide-react';
+import { productVariantNames } from '@/lib/productVariants';
 
 export default function CustomPrintPage() {
-  const customProducts = products.filter(p => p.isCustomPrint);
+  const { products } = useProducts();
+  const customProducts = useMemo(() => products.filter(p => p.isCustomPrint), [products]);
   const { addItem } = useCart();
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [productType, setProductType] = useState<'tshirt' | 'mug'>('tshirt');
   const [selectedSize, setSelectedSize] = useState('M');
   const [selectedVariant, setSelectedVariant] = useState('White');
+  const [selectedSleeve, setSelectedSleeve] = useState('Half sleeve');
   const [designFile, setDesignFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
-  const selectedProduct = customProducts.find(p =>
-    productType === 'tshirt' ? p.name.toLowerCase().includes('t-shirt') : p.name.toLowerCase().includes('mug')
-  ) || customProducts[0];
+  const selectedProduct = useMemo(
+    () =>
+      customProducts.find(p => (productType === 'tshirt' ? p.id === 'custom-tee' : p.id === 'custom-cup')) ||
+      customProducts[0],
+    [customProducts, productType]
+  );
+
+  useEffect(() => {
+    if (!selectedProduct) return;
+    setSelectedVariant(productVariantNames(selectedProduct)[0] || 'White');
+    setSelectedSize(selectedProduct.sizes?.[0] || 'M');
+    setSelectedSleeve(selectedProduct.sleeveTypes?.[0] || 'Half sleeve');
+  }, [selectedProduct]);
 
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -33,7 +46,10 @@ export default function CustomPrintPage() {
     }
   };
 
-  const clearFile = () => { setDesignFile(null); setPreviewUrl(null); };
+  const clearFile = () => {
+    setDesignFile(null);
+    setPreviewUrl(null);
+  };
 
   const handleAddToCart = () => {
     if (!designFile || !selectedProduct) return;
@@ -42,34 +58,43 @@ export default function CustomPrintPage() {
       quantity: 1,
       selectedSize: productType === 'tshirt' ? selectedSize : undefined,
       selectedVariant,
+      selectedSleeve: productType === 'tshirt' && selectedProduct.sleeveTypes?.length ? selectedSleeve : undefined,
       customDesignFile: previewUrl || designFile.name,
       customDesignName: designFile.name,
       customProductType: productType,
     });
   };
 
+  const teeSizes = selectedProduct?.sizes ?? ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
+  const colorOptions =
+    selectedProduct && productVariantNames(selectedProduct).length
+      ? productVariantNames(selectedProduct)
+      : ['White', 'Black', 'Gray'];
+
   return (
     <div className="max-w-4xl mx-auto px-4 py-8">
       <h1 className="text-3xl font-bold mb-2">🎨 Custom Print</h1>
-      <p className="text-muted-foreground mb-8">Upload your design and we'll print it on a premium product.</p>
+      <p className="text-muted-foreground mb-8">Upload your design and we&apos;ll print it on a premium product.</p>
 
       <div className="grid md:grid-cols-2 gap-8">
-        {/* Upload area */}
         <div>
           <div
+            role="button"
+            tabIndex={0}
+            onKeyDown={e => e.key === 'Enter' && fileRef.current?.click()}
             onClick={() => fileRef.current?.click()}
             className="border-2 border-dashed rounded-xl aspect-square flex flex-col items-center justify-center cursor-pointer hover:border-primary transition-colors bg-muted/50 relative overflow-hidden"
           >
             {previewUrl ? (
               <>
                 <img src={previewUrl} alt="Preview" className="w-full h-full object-contain p-4" />
-                <button onClick={e => { e.stopPropagation(); clearFile(); }} className="absolute top-2 right-2 bg-foreground/80 text-background rounded-full p-1"><X className="h-4 w-4" /></button>
+                <button type="button" onClick={e => { e.stopPropagation(); clearFile(); }} className="absolute top-2 right-2 bg-foreground/80 text-background rounded-full p-1"><X className="h-4 w-4" /></button>
               </>
             ) : designFile ? (
               <div className="text-center p-4">
                 <p className="font-medium">{designFile.name}</p>
                 <p className="text-xs text-muted-foreground mt-1">PDF file selected</p>
-                <button onClick={e => { e.stopPropagation(); clearFile(); }} className="mt-2 text-primary text-sm hover:underline">Remove</button>
+                <button type="button" onClick={e => { e.stopPropagation(); clearFile(); }} className="mt-2 text-primary text-sm hover:underline">Remove</button>
               </div>
             ) : (
               <>
@@ -82,7 +107,6 @@ export default function CustomPrintPage() {
           <Input ref={fileRef} type="file" accept="image/*,.pdf" onChange={handleFile} className="hidden" />
         </div>
 
-        {/* Options */}
         <div className="space-y-6">
           <div>
             <label className="text-sm font-medium mb-2 block">Product Type</label>
@@ -90,7 +114,7 @@ export default function CustomPrintPage() {
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="tshirt">T-shirt</SelectItem>
-                <SelectItem value="mug">Mug</SelectItem>
+                <SelectItem value="mug">Cup</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -99,8 +123,19 @@ export default function CustomPrintPage() {
             <div>
               <label className="text-sm font-medium mb-2 block">Size</label>
               <div className="flex gap-2 flex-wrap">
-                {['S','M','L','XL','XXL'].map(s => (
-                  <button key={s} onClick={() => setSelectedSize(s)} className={`px-3 py-1.5 text-sm rounded-md border transition-colors ${selectedSize === s ? 'bg-primary text-primary-foreground border-primary' : 'hover:border-foreground'}`}>{s}</button>
+                {teeSizes.map(s => (
+                  <button key={s} type="button" onClick={() => setSelectedSize(s)} className={`px-3 py-1.5 text-sm rounded-md border transition-colors ${selectedSize === s ? 'bg-primary text-primary-foreground border-primary' : 'hover:border-foreground'}`}>{s}</button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {productType === 'tshirt' && selectedProduct?.sleeveTypes && selectedProduct.sleeveTypes.length > 0 && (
+            <div>
+              <label className="text-sm font-medium mb-2 block">Sleeve</label>
+              <div className="flex gap-2 flex-wrap">
+                {selectedProduct.sleeveTypes.map(s => (
+                  <button key={s} type="button" onClick={() => setSelectedSleeve(s)} className={`px-3 py-1.5 text-sm rounded-md border transition-colors ${selectedSleeve === s ? 'bg-primary text-primary-foreground border-primary' : 'hover:border-foreground'}`}>{s}</button>
                 ))}
               </div>
             </div>
@@ -109,15 +144,15 @@ export default function CustomPrintPage() {
           <div>
             <label className="text-sm font-medium mb-2 block">Color</label>
             <div className="flex gap-2 flex-wrap">
-              {(productType === 'tshirt' ? ['White','Black','Grey'] : ['White','Black']).map(v => (
-                <button key={v} onClick={() => setSelectedVariant(v)} className={`px-3 py-1.5 text-sm rounded-md border transition-colors ${selectedVariant === v ? 'bg-primary text-primary-foreground border-primary' : 'hover:border-foreground'}`}>{v}</button>
+              {colorOptions.map(v => (
+                <button key={v} type="button" onClick={() => setSelectedVariant(v)} className={`px-3 py-1.5 text-sm rounded-md border transition-colors ${selectedVariant === v ? 'bg-primary text-primary-foreground border-primary' : 'hover:border-foreground'}`}>{v}</button>
               ))}
             </div>
           </div>
 
           <div className="border rounded-lg p-4 bg-muted/50">
             <p className="text-sm text-muted-foreground">Price</p>
-            <p className="text-2xl font-bold">₹{selectedProduct?.price || 999}</p>
+            <p className="text-2xl font-bold">₹{selectedProduct?.price ?? 999}</p>
           </div>
 
           <Button size="lg" className="w-full gap-2" disabled={!designFile} onClick={handleAddToCart}>

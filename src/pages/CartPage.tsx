@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Trash2, ShoppingBag } from 'lucide-react';
 import { useState } from 'react';
 import { coupons } from '@/data/mockData';
+import { productImageForVariant } from '@/lib/productImages';
 import { toast } from 'sonner';
 
 export default function CartPage() {
@@ -37,22 +38,24 @@ export default function CartPage() {
       <div className="grid md:grid-cols-3 gap-8">
         <div className="md:col-span-2 space-y-4">
           {items.map(item => (
-            <div key={item.product.id} className="flex gap-4 border rounded-lg p-4">
-              <img src={item.product.images[0]} alt={item.product.name} className="w-20 h-20 object-cover rounded-md" />
+            <div key={item.cartLineId} className="flex gap-4 border rounded-lg p-4">
+              <img src={productImageForVariant(item.product, item.selectedVariant)} alt={item.product.name} className="w-20 h-20 object-cover rounded-md" />
               <div className="flex-1 min-w-0">
                 <Link to={`/product/${item.product.id}`} className="font-medium text-sm hover:text-primary truncate block">{item.product.name}</Link>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  {item.selectedSize && `Size: ${item.selectedSize}`} {item.selectedVariant && `• ${item.selectedVariant}`}
+                  {item.selectedSize && `Size: ${item.selectedSize}`}
+                  {item.selectedVariant && ` • Color: ${item.selectedVariant}`}
+                  {item.selectedSleeve && ` • ${item.selectedSleeve}`}
                 </p>
                 {item.customDesignName && <p className="text-xs text-primary mt-0.5">🎨 Custom: {item.customDesignName}</p>}
                 <div className="flex items-center gap-3 mt-2">
                   <div className="flex items-center border rounded">
-                    <button className="px-2 py-1 text-sm hover:bg-accent" onClick={() => updateQuantity(item.product.id, item.quantity - 1)}>−</button>
+                    <button type="button" className="px-2 py-1 text-sm hover:bg-accent" onClick={() => updateQuantity(item.cartLineId, item.quantity - 1)}>−</button>
                     <span className="px-3 py-1 text-sm border-x">{item.quantity}</span>
-                    <button className="px-2 py-1 text-sm hover:bg-accent" onClick={() => updateQuantity(item.product.id, item.quantity + 1)}>+</button>
+                    <button type="button" className="px-2 py-1 text-sm hover:bg-accent" onClick={() => updateQuantity(item.cartLineId, item.quantity + 1)}>+</button>
                   </div>
                   <span className="font-semibold text-sm">₹{item.product.price * item.quantity}</span>
-                  <button className="ml-auto text-muted-foreground hover:text-destructive" onClick={() => removeItem(item.product.id)}><Trash2 className="h-4 w-4" /></button>
+                  <button type="button" className="ml-auto text-muted-foreground hover:text-destructive" onClick={() => removeItem(item.cartLineId)}><Trash2 className="h-4 w-4" /></button>
                 </div>
               </div>
             </div>

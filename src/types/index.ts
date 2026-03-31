@@ -1,3 +1,9 @@
+/** Color/finish (etc.) with its own image set for PDP gallery. */
+export interface ProductVariantOption {
+  name: string;
+  images: string[];
+}
+
 export interface Product {
   id: string;
   name: string;
@@ -8,7 +14,14 @@ export interface Product {
   category: 'fashion' | 'home' | 'printed' | 'trending';
   subcategory?: string;
   sizes?: string[];
+  /**
+   * When set, each option has its own `images`; PDP switches gallery by selected variant.
+   * `variants` is still stored as names for compatibility (derived on save).
+   */
+  variantOptions?: ProductVariantOption[];
   variants?: string[];
+  /** Half / full sleeve options for T-shirts (printed or custom). */
+  sleeveTypes?: string[];
   stock: number;
   rating: number;
   reviews: Review[];
@@ -26,10 +39,12 @@ export interface Review {
 }
 
 export interface CartItem {
+  cartLineId: string;
   product: Product;
   quantity: number;
   selectedSize?: string;
   selectedVariant?: string;
+  selectedSleeve?: string;
   customDesignFile?: string;
   customDesignName?: string;
   customProductType?: 'tshirt' | 'mug';
