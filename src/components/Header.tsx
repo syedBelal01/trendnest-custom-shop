@@ -10,6 +10,7 @@ const navLinks = [
   { label: 'Home', to: '/category/home' },
   { label: 'Prints', to: '/category/printed' },
   { label: 'Trending', to: '/category/trending' },
+  { label: '🎨 Custom Print', to: '/custom-print' },
 ];
 
 export default function Header() {
