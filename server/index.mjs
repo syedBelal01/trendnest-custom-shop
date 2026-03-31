@@ -12,7 +12,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // Always load .env from project root (folder above server/), not only from process.cwd()
 dotenv.config({ path: join(__dirname, '..', '.env') });
 
-const PORT = Number(process.env.PORT) || 5050;
+const PORT = process.env.PORT || 5000;
 const MONGODB_URI = process.env.MONGODB_URI;
 
 const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
