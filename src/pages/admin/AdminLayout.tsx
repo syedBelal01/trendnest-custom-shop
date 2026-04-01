@@ -14,7 +14,7 @@ function AdminLogoutBar() {
         clearAdminApiKeyAndOrders();
         window.location.reload();
       }}
-      className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground w-full rounded-md hover:bg-accent"
+      className="flex items-center gap-2 px-3 py-2.5 text-sm text-muted-foreground hover:text-foreground w-full rounded-md hover:bg-accent"
     >
       <LogOut className="h-4 w-4" /> Logout
     </button>
@@ -35,8 +35,8 @@ export default function AdminLayout() {
 
   return (
     <AdminGuard>
-      <div className="min-h-screen flex bg-background">
-        <aside className="w-56 border-r bg-card hidden md:flex flex-col shrink-0">
+      <div className="min-h-screen flex flex-col md:flex-row bg-background">
+        <aside className="w-full md:w-56 border-b md:border-b-0 md:border-r bg-card md:flex flex-col shrink-0 hidden md:flex">
           <div className="p-4 border-b">
             <Link to="/" className="font-bold text-lg">Trend<span className="text-primary">Nest</span>99</Link>
             <p className="text-xs text-muted-foreground">Admin Panel</p>
@@ -53,15 +53,15 @@ export default function AdminLayout() {
           </div>
         </aside>
         <div className="flex-1 overflow-auto">
-          {/* Mobile nav */}
-          <div className="md:hidden border-b p-3 flex gap-2 overflow-x-auto">
+          {/* Mobile nav - horizontal scroll */}
+          <div className="md:hidden border-b p-2 sm:p-3 flex gap-1.5 sm:gap-2 overflow-x-auto scrollbar-none">
             {links.map(l => (
-              <Link key={l.to} to={l.to} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md whitespace-nowrap ${pathname === l.to ? 'bg-primary text-primary-foreground' : 'bg-accent text-muted-foreground'}`}>
+              <Link key={l.to} to={l.to} className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-3 py-1.5 text-[11px] sm:text-xs rounded-md whitespace-nowrap shrink-0 ${pathname === l.to ? 'bg-primary text-primary-foreground' : 'bg-accent text-muted-foreground'}`}>
                 <l.icon className="h-3 w-3" />{l.label}
               </Link>
             ))}
           </div>
-          <div className="p-4 md:p-6">
+          <div className="p-3 sm:p-4 md:p-6">
             <AdminApiKeyBar />
             <Outlet />
           </div>

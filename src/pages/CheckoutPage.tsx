@@ -70,16 +70,16 @@ export default function CheckoutPage() {
 
   if (orderPlaced) {
     return (
-      <div className="max-w-md mx-auto px-4 py-20 text-center">
-        <CheckCircle className="h-16 w-16 text-primary mx-auto mb-4" />
-        <h1 className="text-2xl font-bold mb-2">Order Confirmed!</h1>
-        <p className="text-muted-foreground mb-1">
-          Order ID: <span className="font-mono font-semibold text-foreground">{orderPlaced}</span>
+      <div className="max-w-md mx-auto px-3 sm:px-4 py-16 sm:py-20 text-center">
+        <CheckCircle className="h-12 sm:h-16 w-12 sm:w-16 text-primary mx-auto mb-4" />
+        <h1 className="text-xl sm:text-2xl font-bold mb-2">Order Confirmed!</h1>
+        <p className="text-muted-foreground text-sm sm:text-base mb-1">
+          Order ID: <span className="font-mono font-semibold text-foreground break-all">{orderPlaced}</span>
         </p>
-        <p className="text-sm text-muted-foreground mb-6">
+        <p className="text-xs sm:text-sm text-muted-foreground mb-6">
           A confirmation email has been sent to your address. We&apos;ll update you when your order ships.
         </p>
-        <Button onClick={() => navigate('/')}>Continue Shopping</Button>
+        <Button onClick={() => navigate('/')} className="h-10 sm:h-11">Continue Shopping</Button>
       </div>
     );
   }
@@ -90,37 +90,30 @@ export default function CheckoutPage() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8">
-      <h1 className="text-3xl font-bold mb-6">Checkout</h1>
-      <div className="grid md:grid-cols-5 gap-8">
-        <form onSubmit={e => void handleSubmit(e)} className="md:col-span-3 space-y-4">
-          <h2 className="font-semibold">Delivery Details</h2>
-          <Input placeholder="Full Name" value={form.name} onChange={e => set('name', e.target.value)} required />
-          <Input
-            placeholder="Email"
-            type="email"
-            autoComplete="email"
-            value={form.email}
-            onChange={e => set('email', e.target.value)}
-            required
-          />
-          <Input placeholder="Phone Number" type="tel" value={form.phone} onChange={e => set('phone', e.target.value)} required />
-          <Input placeholder="Full Address" value={form.address} onChange={e => set('address', e.target.value)} required />
+    <div className="max-w-3xl mx-auto px-3 sm:px-4 py-6 sm:py-8">
+      <h1 className="text-2xl sm:text-3xl font-bold mb-4 sm:mb-6">Checkout</h1>
+      <div className="flex flex-col md:grid md:grid-cols-5 gap-6 sm:gap-8">
+        <form onSubmit={e => void handleSubmit(e)} className="md:col-span-3 space-y-3 sm:space-y-4">
+          <h2 className="font-semibold text-base">Delivery Details</h2>
+          <Input placeholder="Full Name" value={form.name} onChange={e => set('name', e.target.value)} required className="h-11 sm:h-10" />
+          <Input placeholder="Email" type="email" autoComplete="email" value={form.email} onChange={e => set('email', e.target.value)} required className="h-11 sm:h-10" />
+          <Input placeholder="Phone Number" type="tel" value={form.phone} onChange={e => set('phone', e.target.value)} required className="h-11 sm:h-10" />
+          <Input placeholder="Full Address" value={form.address} onChange={e => set('address', e.target.value)} required className="h-11 sm:h-10" />
           <div className="grid grid-cols-2 gap-3">
-            <Input placeholder="City" value={form.city} onChange={e => set('city', e.target.value)} required />
-            <Input placeholder="Pincode" value={form.pincode} onChange={e => set('pincode', e.target.value)} required />
+            <Input placeholder="City" value={form.city} onChange={e => set('city', e.target.value)} required className="h-11 sm:h-10" />
+            <Input placeholder="Pincode" value={form.pincode} onChange={e => set('pincode', e.target.value)} required className="h-11 sm:h-10" />
           </div>
-          <div className="border rounded-lg p-4 bg-muted/50">
+          <div className="border rounded-lg p-3 sm:p-4 bg-muted/50">
             <p className="text-sm font-medium mb-1">Payment Method</p>
             <p className="text-sm text-muted-foreground">💵 Cash on Delivery (COD)</p>
           </div>
-          <Button type="submit" size="lg" className="w-full" disabled={submitting}>
+          <Button type="submit" size="lg" className="w-full h-12 sm:h-11 text-sm sm:text-base font-semibold" disabled={submitting}>
             {submitting ? 'Placing order…' : `Place Order — ₹${total}`}
           </Button>
         </form>
 
-        <div className="md:col-span-2 border rounded-lg p-4 h-fit">
-          <h2 className="font-semibold mb-3">Order Summary</h2>
+        <div className="md:col-span-2 border rounded-lg p-4 h-fit order-first md:order-none">
+          <h2 className="font-semibold mb-3 text-base">Order Summary</h2>
           <div className="space-y-2 text-sm">
             {items.map(i => (
               <div key={i.cartLineId} className="flex justify-between gap-2">

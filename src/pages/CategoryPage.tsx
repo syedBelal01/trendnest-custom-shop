@@ -23,14 +23,14 @@ export default function CategoryPage() {
   if (sort === 'rating') filtered = [...filtered].sort((a, b) => b.rating - a.rating);
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
+    <div className="max-w-7xl mx-auto px-3 sm:px-4 py-6 sm:py-8">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 mb-6 sm:mb-8">
         <div>
-          <h1 className="text-3xl font-bold">{category?.icon} {category?.name || 'Products'}</h1>
-          <p className="text-muted-foreground mt-1">{filtered.length} products</p>
+          <h1 className="text-2xl sm:text-3xl font-bold">{category?.icon} {category?.name || 'Products'}</h1>
+          <p className="text-sm text-muted-foreground mt-0.5 sm:mt-1">{filtered.length} products</p>
         </div>
         <Select value={sort} onValueChange={setSort}>
-          <SelectTrigger className="w-44">
+          <SelectTrigger className="w-full sm:w-44 h-10 sm:h-9">
             <SelectValue placeholder="Sort by" />
           </SelectTrigger>
           <SelectContent>
@@ -44,7 +44,7 @@ export default function CategoryPage() {
       {filtered.length === 0 ? (
         <p className="text-center text-muted-foreground py-20">No products found in this category.</p>
       ) : (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
           {filtered.map(p => <ProductCard key={p.id} product={p} />)}
         </div>
       )}

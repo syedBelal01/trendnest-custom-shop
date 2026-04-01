@@ -23,13 +23,14 @@ export default function Header() {
     if (search.trim()) {
       navigate(`/search?q=${encodeURIComponent(search.trim())}`);
       setSearch('');
+      setMobileOpen(false);
     }
   };
 
   return (
     <header className="sticky top-0 z-50 bg-background/95 backdrop-blur border-b">
-      <div className="max-w-7xl mx-auto px-4 h-16 flex items-center gap-4">
-        <Link to="/" className="font-bold text-xl tracking-tight shrink-0" style={{ fontFamily: 'Space Grotesk' }}>
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 h-14 sm:h-16 flex items-center gap-2 sm:gap-4">
+        <Link to="/" className="font-bold text-lg sm:text-xl tracking-tight shrink-0" style={{ fontFamily: 'Space Grotesk' }}>
           Trend<span className="text-primary">Nest</span>99
         </Link>
 
@@ -50,7 +51,7 @@ export default function Header() {
         </form>
 
         <Link to="/cart" className="relative ml-auto sm:ml-0">
-          <Button variant="ghost" size="icon" className="relative">
+          <Button variant="ghost" size="icon" className="relative h-10 w-10">
             <ShoppingCart className="h-5 w-5" />
             {itemCount > 0 && (
               <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-xs w-5 h-5 rounded-full flex items-center justify-center font-semibold">{itemCount}</span>
@@ -58,22 +59,22 @@ export default function Header() {
           </Button>
         </Link>
 
-        <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setMobileOpen(!mobileOpen)}>
+        <Button variant="ghost" size="icon" className="md:hidden h-10 w-10" onClick={() => setMobileOpen(!mobileOpen)}>
           {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
         </Button>
       </div>
 
       {/* Mobile menu */}
       {mobileOpen && (
-        <div className="md:hidden border-t bg-background px-4 py-3 space-y-2">
-          <form onSubmit={handleSearch} className="sm:hidden">
+        <div className="md:hidden border-t bg-background px-3 py-3 space-y-1">
+          <form onSubmit={handleSearch} className="sm:hidden mb-2">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search..." className="pl-9 h-9" />
+              <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search..." className="pl-9 h-10" />
             </div>
           </form>
           {navLinks.map(l => (
-            <Link key={l.to} to={l.to} onClick={() => setMobileOpen(false)} className="block px-3 py-2 text-sm font-medium rounded-md hover:bg-accent">{l.label}</Link>
+            <Link key={l.to} to={l.to} onClick={() => setMobileOpen(false)} className="block px-3 py-2.5 text-sm font-medium rounded-md hover:bg-accent active:bg-accent/80">{l.label}</Link>
           ))}
         </div>
       )}
