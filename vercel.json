@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://trendnest-custom-shop.onrender.com/api/:path*"
+    }
+  ]
+}

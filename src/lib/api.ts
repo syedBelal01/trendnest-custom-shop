@@ -1,8 +1,14 @@
 /**
- * API base: empty in dev (Vite proxies /api → server). In production set VITE_API_BASE_URL.
+ * API base:
+ * - Dev: empty → Vite proxies /api to the local server (vite.config.ts).
+ * - Production: VITE_API_BASE_URL from .env.production or the host (e.g. Vercel), else deployed Render API below.
  */
+const PRODUCTION_API_BASE = 'https://trendnest-custom-shop.onrender.com';
+
 export function apiUrl(path: string): string {
-  const base = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? '';
+  let base = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '').trim() ?? '';
+  // Use Render when not in Vite dev (covers production and preview); DEV is always true for vite / vite dev.
+  if (!base && !import.meta.env.DEV) base = PRODUCTION_API_BASE;
   return `${base}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
@@ -34,7 +40,9 @@ export async function fetchProductsApi(): Promise<import('@/types').Product[]> {
     res = await fetch(apiUrl('/api/products'));
   } catch {
     throw new ProductsApiError(
-      'Cannot reach the API. In the project folder run: npm run dev:api (keep that terminal open), or use npm run dev:full to start both Vite and the API.',
+      import.meta.env.DEV
+        ? 'Cannot reach the API. Run npm run dev:api or npm run dev:full so the local server is up (port 5050).'
+        : 'Cannot reach the API. Check your network and that the API is reachable (VITE_API_BASE_URL / Render).',
       'NETWORK'
     );
   }

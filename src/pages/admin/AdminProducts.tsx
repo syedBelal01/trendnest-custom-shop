@@ -461,7 +461,7 @@ export default function AdminProducts() {
           <p className="text-amber-800 dark:text-amber-200/90">{apiIssue.message}</p>
           {apiIssue.code === 'NETWORK' && (
             <p className="text-xs text-amber-800/90 dark:text-amber-200/80">
-              Tip: use <code className="bg-background/80 px-1 rounded">npm run dev:full</code> so Vite and the API start together (API on port 5050).
+              Tip: for local dev use <code className="bg-background/80 px-1 rounded">npm run dev:full</code> (API on port 5050). Production builds use the live API via <code className="bg-background/80 px-1 rounded">VITE_API_BASE_URL</code> / <code className="bg-background/80 px-1 rounded">.env.production</code>.
             </p>
           )}
           <Button type="button" variant="outline" size="sm" className="border-amber-300 dark:border-amber-700" onClick={() => void refreshProducts()}>
