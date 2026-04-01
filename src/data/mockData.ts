@@ -1,4 +1,4 @@
-import { Product, Order, Coupon, CartItem } from '@/types';
+import { Product, Coupon } from '@/types';
 
 const IMG = 'https://images.unsplash.com/photo-';
 
@@ -101,61 +101,6 @@ export const initialProducts: Product[] = [
     reviews: [],
     isCustomPrint: true,
     tags: ['custom', 'gifting'],
-  },
-];
-
-const belt = initialProducts[0];
-const tee = initialProducts[2];
-const customTee = initialProducts[4];
-
-const line = (item: Omit<CartItem, 'cartLineId'> & { cartLineId?: string }): CartItem => ({
-  ...item,
-  cartLineId: item.cartLineId ?? `seed-${item.product.id}-${item.selectedSize}-${item.selectedVariant}`,
-});
-
-export const initialOrders: Order[] = [
-  {
-    id: 'ORD001',
-    items: [
-      line({ product: belt, quantity: 2, selectedSize: '32', selectedVariant: 'Black' }),
-    ],
-    customer: { name: 'Rahul Sharma', phone: '9876543210', address: '42 MG Road, Koramangala', city: 'Bangalore', pincode: '560034' },
-    status: 'pending',
-    total: 1798,
-    discount: 0,
-    createdAt: '2026-03-28T10:30:00',
-    hasCustomPrint: false,
-  },
-  {
-    id: 'ORD002',
-    items: [
-      line({
-        product: customTee,
-        quantity: 1,
-        selectedSize: 'L',
-        selectedVariant: 'White',
-        selectedSleeve: 'Full sleeve',
-        customDesignFile: 'design.png',
-        customDesignName: 'My Logo',
-        customProductType: 'tshirt',
-      }),
-    ],
-    customer: { name: 'Priya Patel', phone: '9123456780', address: '15 Park Street', city: 'Mumbai', pincode: '400001' },
-    status: 'confirmed',
-    total: 999,
-    discount: 0,
-    createdAt: '2026-03-27T14:00:00',
-    hasCustomPrint: true,
-  },
-  {
-    id: 'ORD003',
-    items: [line({ product: tee, quantity: 1, selectedSize: 'M', selectedVariant: 'Gray', selectedSleeve: 'Half sleeve' })],
-    customer: { name: 'Amit K.', phone: '9988776655', address: '12 Residency Road', city: 'Hyderabad', pincode: '500001' },
-    status: 'shipped',
-    total: 749,
-    discount: 0,
-    createdAt: '2026-03-25T09:00:00',
-    hasCustomPrint: false,
   },
 ];
 

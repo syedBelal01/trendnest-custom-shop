@@ -1,6 +1,25 @@
 import { Link, Outlet, useLocation } from 'react-router-dom';
 import AdminGuard from '@/components/AdminGuard';
+import AdminApiKeyBar from '@/components/admin/AdminApiKeyBar';
+import { useOrders } from '@/contexts/OrdersContext';
 import { LayoutDashboard, Package, ShoppingBag, Tag, Palette, Users, LogOut } from 'lucide-react';
+
+function AdminLogoutBar() {
+  const { clearAdminApiKeyAndOrders } = useOrders();
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        sessionStorage.removeItem('admin-auth');
+        clearAdminApiKeyAndOrders();
+        window.location.reload();
+      }}
+      className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground w-full rounded-md hover:bg-accent"
+    >
+      <LogOut className="h-4 w-4" /> Logout
+    </button>
+  );
+}
 
 const links = [
   { to: '/admin', label: 'Dashboard', icon: LayoutDashboard },
@@ -30,9 +49,7 @@ export default function AdminLayout() {
             ))}
           </nav>
           <div className="p-2 border-t">
-            <button onClick={() => { sessionStorage.removeItem('admin-auth'); window.location.reload(); }} className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground w-full rounded-md hover:bg-accent">
-              <LogOut className="h-4 w-4" /> Logout
-            </button>
+            <AdminLogoutBar />
           </div>
         </aside>
         <div className="flex-1 overflow-auto">
@@ -45,6 +62,7 @@ export default function AdminLayout() {
             ))}
           </div>
           <div className="p-4 md:p-6">
+            <AdminApiKeyBar />
             <Outlet />
           </div>
         </div>

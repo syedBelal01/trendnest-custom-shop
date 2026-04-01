@@ -50,20 +50,39 @@ export interface CartItem {
   customProductType?: 'tshirt' | 'mug';
 }
 
+/** Persisted line item (API / admin). */
+export interface OrderLineSnapshot {
+  lineId?: string;
+  productId: string;
+  name: string;
+  price: number;
+  quantity: number;
+  selectedSize?: string;
+  selectedVariant?: string;
+  selectedSleeve?: string;
+  customDesignUrl?: string;
+  customDesignName?: string;
+  customProductType?: string;
+}
+
 export interface Order {
   id: string;
-  items: CartItem[];
+  items: OrderLineSnapshot[];
   customer: CustomerInfo;
-  status: 'pending' | 'confirmed' | 'shipped' | 'delivered';
+  status: 'pending' | 'packed' | 'shipped' | 'delivered';
+  subtotal: number;
   total: number;
   discount: number;
   couponCode?: string;
   createdAt: string;
+  updatedAt?: string;
   hasCustomPrint: boolean;
+  emailError?: string;
 }
 
 export interface CustomerInfo {
   name: string;
+  email: string;
   phone: string;
   address: string;
   city: string;
