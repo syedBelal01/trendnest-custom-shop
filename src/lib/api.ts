@@ -59,10 +59,17 @@ export async function fetchProductsApi(): Promise<import('@/types').Product[]> {
 
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    throw new ProductsApiError(
-      typeof data.error === 'string' ? data.error : `Request failed (${res.status})`,
-      'HTTP'
-    );
+    const serverMsg = typeof data.error === 'string' ? data.error : '';
+    let msg = serverMsg || `Request failed (${res.status})`;
+    // Vite proxy returns 500/502/504 with no JSON body when nothing listens on 127.0.0.1:5050
+    if (
+      import.meta.env.DEV &&
+      !serverMsg &&
+      (res.status === 500 || res.status === 502 || res.status === 504)
+    ) {
+      msg = `Local API is not running (Vite proxy got HTTP ${res.status}). In another terminal run npm run dev:api, or use npm run dev:full to start the web app and API together (API on port 5050).`;
+    }
+    throw new ProductsApiError(msg, 'HTTP');
   }
   return res.json();
 }

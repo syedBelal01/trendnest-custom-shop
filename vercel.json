@@ -3,6 +3,10 @@
     {
       "source": "/api/:path*",
       "destination": "https://trendnest-custom-shop.onrender.com/api/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
     }
   ]
 }

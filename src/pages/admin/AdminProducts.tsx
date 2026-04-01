@@ -456,12 +456,12 @@ export default function AdminProducts() {
           <p className="font-medium">
             {apiIssue.code === 'NETWORK' && 'API server not reachable'}
             {apiIssue.code === 'DATABASE_UNAVAILABLE' && 'API is running — MongoDB is not connected'}
-            {apiIssue.code === 'HTTP' && 'Product API error'}
+            {apiIssue.code === 'HTTP' && 'Product API request failed'}
           </p>
           <p className="text-amber-800 dark:text-amber-200/90">{apiIssue.message}</p>
-          {apiIssue.code === 'NETWORK' && (
+          {(apiIssue.code === 'NETWORK' || apiIssue.code === 'HTTP') && (
             <p className="text-xs text-amber-800/90 dark:text-amber-200/80">
-              Tip: for local dev use <code className="bg-background/80 px-1 rounded">npm run dev:full</code> (API on port 5050). Production builds use the live API via <code className="bg-background/80 px-1 rounded">VITE_API_BASE_URL</code> / <code className="bg-background/80 px-1 rounded">.env.production</code>.
+              Local dev: the storefront talks to the API on port <strong>5050</strong>. If you only ran <code className="bg-background/80 px-1 rounded">npm run dev</code>, also run <code className="bg-background/80 px-1 rounded">npm run dev:api</code> in a second terminal, or use <code className="bg-background/80 px-1 rounded">npm run dev:full</code>. Production uses your hosted API (<code className="bg-background/80 px-1 rounded">.env.production</code> / Render).
             </p>
           )}
           <Button type="button" variant="outline" size="sm" className="border-amber-300 dark:border-amber-700" onClick={() => void refreshProducts()}>
