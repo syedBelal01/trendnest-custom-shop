@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Upload, ShoppingCart, X } from 'lucide-react';
+import { toast } from 'sonner';
+import { uploadCustomDesign } from '@/lib/api';
 import { productVariantNames } from '@/lib/productVariants';
 
 export default function CustomPrintPage() {
@@ -19,6 +21,7 @@ export default function CustomPrintPage() {
   const [selectedSleeve, setSelectedSleeve] = useState('Half sleeve');
   const [designFile, setDesignFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
 
   const selectedProduct = useMemo(
     () =>
@@ -51,18 +54,27 @@ export default function CustomPrintPage() {
     setPreviewUrl(null);
   };
 
-  const handleAddToCart = () => {
-    if (!designFile || !selectedProduct) return;
-    addItem({
-      product: selectedProduct,
-      quantity: 1,
-      selectedSize: productType === 'tshirt' ? selectedSize : undefined,
-      selectedVariant,
-      selectedSleeve: productType === 'tshirt' && selectedProduct.sleeveTypes?.length ? selectedSleeve : undefined,
-      customDesignFile: previewUrl || designFile.name,
-      customDesignName: designFile.name,
-      customProductType: productType,
-    });
+  const handleAddToCart = async () => {
+    if (!designFile || !selectedProduct || uploading) return;
+    setUploading(true);
+    try {
+      const url = await uploadCustomDesign(designFile);
+      addItem({
+        product: selectedProduct,
+        quantity: 1,
+        selectedSize: productType === 'tshirt' ? selectedSize : undefined,
+        selectedVariant,
+        selectedSleeve: productType === 'tshirt' && selectedProduct.sleeveTypes?.length ? selectedSleeve : undefined,
+        customDesignFile: url,
+        customDesignName: designFile.name,
+        customProductType: productType,
+      });
+      toast.success('Added to cart');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not upload design');
+    } finally {
+      setUploading(false);
+    }
   };
 
   const teeSizes = selectedProduct?.sizes ?? ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
@@ -155,8 +167,14 @@ export default function CustomPrintPage() {
             <p className="text-2xl font-bold">₹{selectedProduct?.price ?? 999}</p>
           </div>
 
-          <Button size="lg" className="w-full gap-2" disabled={!designFile} onClick={handleAddToCart}>
-            <ShoppingCart className="h-4 w-4" /> Add to Cart
+          <Button
+            size="lg"
+            className="w-full gap-2"
+            disabled={!designFile || uploading}
+            onClick={() => void handleAddToCart()}
+          >
+            <ShoppingCart className="h-4 w-4" />
+            {uploading ? 'Uploading design…' : 'Add to Cart'}
           </Button>
         </div>
       </div>

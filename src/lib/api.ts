@@ -24,6 +24,18 @@ export async function uploadProductImage(fileOrBlob: Blob, filename = 'product.j
   return data.url as string;
 }
 
+export async function uploadCustomDesign(file: File): Promise<string> {
+  const fd = new FormData();
+  fd.append('design', file, file.name);
+  const res = await fetch(apiUrl('/api/upload/design'), { method: 'POST', body: fd });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(typeof data.error === 'string' ? data.error : 'Design upload failed');
+  }
+  if (!data.url) throw new Error('No design URL returned from server');
+  return data.url as string;
+}
+
 export class ProductsApiError extends Error {
   constructor(
     message: string,

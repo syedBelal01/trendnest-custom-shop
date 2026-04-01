@@ -1,7 +1,36 @@
+import { useState } from 'react';
 import { useOrders } from '@/contexts/OrdersContext';
-import { Download } from 'lucide-react';
+import { Copy, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
 import type { OrderStatus } from '@/types';
+
+function truncateUrl(u: string, max = 72) {
+  if (u.length <= max) return u;
+  return `${u.slice(0, max - 24)}…${u.slice(-20)}`;
+}
+
+function likelyImageDesignUrl(url: string) {
+  if (!/^https:\/\//i.test(url)) return false;
+  if (/\.pdf(\?|#|$)/i.test(url)) return false;
+  if (/\/raw\/upload\//i.test(url)) return false;
+  return (
+    /\.(jpe?g|png|gif|webp|avif|bmp|svg)(\?|#|$)/i.test(url) || /\/image\/upload\//i.test(url)
+  );
+}
+
+function DesignThumbnail({ url }: { url: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed || !likelyImageDesignUrl(url)) return null;
+  return (
+    <img
+      src={url}
+      alt="Design preview"
+      className="mt-2 max-h-28 max-w-[200px] rounded-md border object-contain bg-background"
+      onError={() => setFailed(true)}
+    />
+  );
+}
 
 function statusClass(status: OrderStatus) {
   switch (status) {
@@ -64,11 +93,41 @@ export default function AdminCustomPrints() {
                       </p>
                     )}
                     {i.customDesignUrl && /^https?:\/\//i.test(i.customDesignUrl) && (
-                      <a href={i.customDesignUrl} target="_blank" rel="noreferrer">
-                        <Button variant="outline" size="sm" className="gap-1 mt-1" type="button">
-                          <Download className="h-3 w-3" /> Open design URL
-                        </Button>
-                      </a>
+                      <div className="mt-2 space-y-2">
+                        <DesignThumbnail url={i.customDesignUrl} />
+                        <p className="text-xs break-all">
+                          <a
+                            href={i.customDesignUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-primary hover:underline"
+                            title={i.customDesignUrl}
+                          >
+                            {truncateUrl(i.customDesignUrl)}
+                          </a>
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          <a href={i.customDesignUrl} target="_blank" rel="noreferrer">
+                            <Button variant="outline" size="sm" className="gap-1" type="button">
+                              <Download className="h-3 w-3" /> Open design
+                            </Button>
+                          </a>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="gap-1"
+                            type="button"
+                            onClick={() => {
+                              void navigator.clipboard.writeText(i.customDesignUrl!).then(
+                                () => toast.success('Design URL copied'),
+                                () => toast.error('Could not copy URL')
+                              );
+                            }}
+                          >
+                            <Copy className="h-3 w-3" /> Copy URL
+                          </Button>
+                        </div>
+                      </div>
                     )}
                     {i.customDesignUrl && i.customDesignUrl.startsWith('data:') && (
                       <p className="text-xs text-muted-foreground">Design stored inline with order (no file link).</p>

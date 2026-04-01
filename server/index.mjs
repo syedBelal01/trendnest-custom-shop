@@ -170,6 +170,17 @@ function normalizeOrderItemsFromBody(items) {
     const quantity = Math.max(1, Math.floor(Number(row.quantity) || 1));
     if (!productId || !name || !Number.isFinite(price)) throw new Error(`Invalid line item ${i + 1}`);
     let customDesignUrl = row.customDesignUrl != null ? String(row.customDesignUrl) : row.customDesignFile != null ? String(row.customDesignFile) : '';
+    const hasCustomHint = !!(row.customProductType || row.customDesignName);
+    if (
+      hasCustomHint &&
+      customDesignUrl &&
+      !/^https:\/\//i.test(customDesignUrl) &&
+      !customDesignUrl.startsWith('data:')
+    ) {
+      throw new Error(
+        'Custom design must be uploaded before checkout (use Add to Cart after the file finishes uploading).'
+      );
+    }
     if (customDesignUrl.startsWith('data:') && customDesignUrl.length > MAX_CUSTOM_INLINE_BYTES) {
       throw new Error('Custom design image is too large; upload a smaller file or use a hosted image URL.');
     }
@@ -321,6 +332,20 @@ const upload = multer({
   fileFilter: (_req, file, cb) => {
     if (!file.mimetype.startsWith('image/')) {
       cb(new Error('Only image files are allowed'));
+      return;
+    }
+    cb(null, true);
+  },
+});
+
+const uploadDesign = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ok =
+      file.mimetype.startsWith('image/') || file.mimetype === 'application/pdf';
+    if (!ok) {
+      cb(new Error('Only image or PDF files are allowed for custom designs'));
       return;
     }
     cb(null, true);
@@ -649,6 +674,41 @@ app.post('/api/upload/image', (req, res, next) => {
       res.json({ url: result.secure_url });
     }
   );
+  stream.end(req.file.buffer);
+});
+
+app.post('/api/upload/design', (req, res, next) => {
+  uploadDesign.single('design')(req, res, (err) => {
+    if (err) {
+      res.status(400).json({ error: err.message || 'Upload error' });
+      return;
+    }
+    next();
+  });
+}, (req, res) => {
+  if (!cloudName || !cloudKey || !cloudSecret) {
+    res.status(503).json({ error: 'Cloudinary is not configured on the server (.env)' });
+    return;
+  }
+  if (!req.file?.buffer) {
+    res.status(400).json({ error: 'Missing design file (field name: design)' });
+    return;
+  }
+
+  const isPdf = req.file.mimetype === 'application/pdf';
+  const opts = {
+    folder: 'trendnest/custom-prints',
+    resource_type: isPdf ? 'raw' : 'image',
+  };
+
+  const stream = cloudinary.uploader.upload_stream(opts, (err, result) => {
+    if (err) {
+      console.error(err);
+      res.status(500).json({ error: 'Cloudinary upload failed' });
+      return;
+    }
+    res.json({ url: result.secure_url });
+  });
   stream.end(req.file.buffer);
 });
 
