@@ -24,16 +24,16 @@ export default function SearchPage() {
   }, [query, products]);
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8">
-      <div className="relative max-w-lg mb-8">
+    <div className="max-w-7xl mx-auto px-3 sm:px-4 py-6 sm:py-8">
+      <div className="relative max-w-lg mb-6 sm:mb-8">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
-        <Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search for products..." className="pl-10 h-12 text-base" autoFocus />
+        <Input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search for products..." className="pl-10 h-11 sm:h-12 text-base" autoFocus />
       </div>
       {query.trim() && (
-        <p className="text-sm text-muted-foreground mb-6">{results.length} result{results.length !== 1 ? 's' : ''} for "{query}"</p>
+        <p className="text-sm text-muted-foreground mb-4 sm:mb-6">{results.length} result{results.length !== 1 ? 's' : ''} for "{query}"</p>
       )}
       {results.length > 0 ? (
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
           {results.map(p => <ProductCard key={p.id} product={p} />)}
         </div>
       ) : query.trim() ? (

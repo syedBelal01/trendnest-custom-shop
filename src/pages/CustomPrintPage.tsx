@@ -84,11 +84,11 @@ export default function CustomPrintPage() {
       : ['White', 'Black', 'Gray'];
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-8">
-      <h1 className="text-3xl font-bold mb-2">🎨 Custom Print</h1>
-      <p className="text-muted-foreground mb-8">Upload your design and we&apos;ll print it on a premium product.</p>
+    <div className="max-w-4xl mx-auto px-3 sm:px-4 py-6 sm:py-8">
+      <h1 className="text-2xl sm:text-3xl font-bold mb-1 sm:mb-2">🎨 Custom Print</h1>
+      <p className="text-sm sm:text-base text-muted-foreground mb-6 sm:mb-8">Upload your design and we&apos;ll print it on a premium product.</p>
 
-      <div className="grid md:grid-cols-2 gap-8">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 sm:gap-8">
         <div>
           <div
             role="button"
@@ -100,17 +100,17 @@ export default function CustomPrintPage() {
             {previewUrl ? (
               <>
                 <img src={previewUrl} alt="Preview" className="w-full h-full object-contain p-4" />
-                <button type="button" onClick={e => { e.stopPropagation(); clearFile(); }} className="absolute top-2 right-2 bg-foreground/80 text-background rounded-full p-1"><X className="h-4 w-4" /></button>
+                <button type="button" onClick={e => { e.stopPropagation(); clearFile(); }} className="absolute top-2 right-2 bg-foreground/80 text-background rounded-full p-1.5"><X className="h-4 w-4" /></button>
               </>
             ) : designFile ? (
               <div className="text-center p-4">
-                <p className="font-medium">{designFile.name}</p>
+                <p className="font-medium text-sm">{designFile.name}</p>
                 <p className="text-xs text-muted-foreground mt-1">PDF file selected</p>
                 <button type="button" onClick={e => { e.stopPropagation(); clearFile(); }} className="mt-2 text-primary text-sm hover:underline">Remove</button>
               </div>
             ) : (
               <>
-                <Upload className="h-10 w-10 text-muted-foreground mb-3" />
+                <Upload className="h-8 sm:h-10 w-8 sm:w-10 text-muted-foreground mb-3" />
                 <p className="font-medium text-sm">Click to upload design</p>
                 <p className="text-xs text-muted-foreground mt-1">JPG, PNG, or PDF</p>
               </>
@@ -119,11 +119,11 @@ export default function CustomPrintPage() {
           <Input ref={fileRef} type="file" accept="image/*,.pdf" onChange={handleFile} className="hidden" />
         </div>
 
-        <div className="space-y-6">
+        <div className="space-y-5 sm:space-y-6">
           <div>
             <label className="text-sm font-medium mb-2 block">Product Type</label>
             <Select value={productType} onValueChange={(v: 'tshirt' | 'mug') => setProductType(v)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-10 sm:h-9"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="tshirt">T-shirt</SelectItem>
                 <SelectItem value="mug">Cup</SelectItem>
@@ -162,14 +162,14 @@ export default function CustomPrintPage() {
             </div>
           </div>
 
-          <div className="border rounded-lg p-4 bg-muted/50">
+          <div className="border rounded-lg p-3 sm:p-4 bg-muted/50">
             <p className="text-sm text-muted-foreground">Price</p>
             <p className="text-2xl font-bold">₹{selectedProduct?.price ?? 999}</p>
           </div>
 
           <Button
             size="lg"
-            className="w-full gap-2"
+            className="w-full gap-2 h-12 sm:h-11 text-sm sm:text-base font-semibold"
             disabled={!designFile || uploading}
             onClick={() => void handleAddToCart()}
           >

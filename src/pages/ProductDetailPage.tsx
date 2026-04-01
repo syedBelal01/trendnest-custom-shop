@@ -16,7 +16,7 @@ function variantOptionLabel(product: Product): string {
 }
 
 const pillOption = (active: boolean) =>
-  `rounded-full px-4 py-2 text-sm font-medium border transition-colors ${
+  `rounded-full px-3 sm:px-4 py-1.5 sm:py-2 text-sm font-medium border transition-colors ${
     active
       ? 'bg-primary text-primary-foreground border-primary shadow-sm'
       : 'bg-background text-foreground border-border hover:border-muted-foreground/40'
@@ -48,7 +48,7 @@ export default function ProductDetailPage() {
 
   if (!product) {
     return (
-      <div className="max-w-7xl mx-auto px-4 py-20 text-center">
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 py-20 text-center">
         <p className="text-muted-foreground">Product not found.</p>
         <Link to="/" className="text-primary hover:underline mt-4 inline-block">Go Home</Link>
       </div>
@@ -60,30 +60,30 @@ export default function ProductDetailPage() {
     : 0;
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8">
+    <div className="max-w-7xl mx-auto px-3 sm:px-4 py-6 sm:py-8">
       <Link
         to={product.category === 'fashion' ? '/#fashion-picks' : `/category/${product.category}`}
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-6"
+        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4 sm:mb-6"
       >
         <ArrowLeft className="h-4 w-4" /> Back
       </Link>
-      <div className="grid md:grid-cols-2 gap-8 md:items-start">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 sm:gap-8 md:items-start">
         <ProductImageGallery
           productId={product.id}
           images={galleryImages}
           productName={product.name}
           resetKey={selectedVariant}
         />
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6">
           {product.isTrending && (
             <span className="inline-block bg-foreground text-background text-xs font-semibold px-3 py-1 rounded-md">🔥 Trending</span>
           )}
-          <h1 className="text-3xl font-bold tracking-tight">{product.name}</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">{product.name}</h1>
 
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <span className="text-4xl font-bold text-primary tabular-nums">₹{product.price}</span>
+            <span className="text-3xl sm:text-4xl font-bold text-primary tabular-nums">₹{product.price}</span>
             {product.originalPrice != null && product.originalPrice > 0 && (
-              <span className="text-base text-muted-foreground line-through tabular-nums">₹{product.originalPrice}</span>
+              <span className="text-sm sm:text-base text-muted-foreground line-through tabular-nums">₹{product.originalPrice}</span>
             )}
             {discount > 0 && (
               <span className="bg-primary/15 text-primary text-xs font-semibold px-2.5 py-1 rounded-md">{discount}% OFF</span>
@@ -93,57 +93,42 @@ export default function ProductDetailPage() {
           <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex gap-0.5 text-lg leading-none" aria-hidden>
               {Array.from({ length: 5 }, (_, i) => (
-                <span
-                  key={i}
-                  className={i < Math.round(product.rating) ? 'text-yellow-500' : 'text-muted-foreground/35'}
-                >
-                  ★
-                </span>
+                <span key={i} className={i < Math.round(product.rating) ? 'text-yellow-500' : 'text-muted-foreground/35'}>★</span>
               ))}
             </span>
-            <span className="text-sm text-muted-foreground">
-              (
-              {product.reviews.length}{' '}
-              {product.reviews.length === 1 ? 'review' : 'reviews'})
-            </span>
+            <span className="text-sm text-muted-foreground">({product.reviews.length} {product.reviews.length === 1 ? 'review' : 'reviews'})</span>
           </div>
 
-          <p className="text-muted-foreground text-[15px] leading-relaxed">{product.description}</p>
+          <p className="text-muted-foreground text-sm sm:text-[15px] leading-relaxed">{product.description}</p>
 
           {product.sizes && product.sizes.length > 0 && (
-            <div className="space-y-3">
-              <p className="text-base font-semibold text-foreground">Size</p>
+            <div className="space-y-2 sm:space-y-3">
+              <p className="text-sm sm:text-base font-semibold text-foreground">Size</p>
               <div className="flex gap-2 flex-wrap">
                 {product.sizes.map(s => (
-                  <button key={s} type="button" onClick={() => setSelectedSize(s)} className={pillOption(selectedSize === s)}>
-                    {s}
-                  </button>
+                  <button key={s} type="button" onClick={() => setSelectedSize(s)} className={pillOption(selectedSize === s)}>{s}</button>
                 ))}
               </div>
             </div>
           )}
 
           {product.sleeveTypes && product.sleeveTypes.length > 0 && (
-            <div className="space-y-3">
-              <p className="text-base font-semibold text-foreground">Sleeve</p>
+            <div className="space-y-2 sm:space-y-3">
+              <p className="text-sm sm:text-base font-semibold text-foreground">Sleeve</p>
               <div className="flex gap-2 flex-wrap">
                 {product.sleeveTypes.map(s => (
-                  <button key={s} type="button" onClick={() => setSelectedSleeve(s)} className={pillOption(selectedSleeve === s)}>
-                    {s}
-                  </button>
+                  <button key={s} type="button" onClick={() => setSelectedSleeve(s)} className={pillOption(selectedSleeve === s)}>{s}</button>
                 ))}
               </div>
             </div>
           )}
 
           {variantNames.length > 0 && (
-            <div className="space-y-3">
-              <p className="text-base font-semibold text-foreground">{variantOptionLabel(product)}</p>
+            <div className="space-y-2 sm:space-y-3">
+              <p className="text-sm sm:text-base font-semibold text-foreground">{variantOptionLabel(product)}</p>
               <div className="flex gap-2 flex-wrap">
                 {variantNames.map(v => (
-                  <button key={v} type="button" onClick={() => setSelectedVariant(v)} className={pillOption(selectedVariant === v)}>
-                    {v}
-                  </button>
+                  <button key={v} type="button" onClick={() => setSelectedVariant(v)} className={pillOption(selectedVariant === v)}>{v}</button>
                 ))}
               </div>
             </div>
@@ -151,29 +136,19 @@ export default function ProductDetailPage() {
 
           {product.isCustomPrint && (
             <Link to="/custom-print" className="block">
-              <Button variant="outline" className="w-full rounded-full">
-                🎨 Upload Custom Design →
-              </Button>
+              <Button variant="outline" className="w-full rounded-full h-11">🎨 Upload Custom Design →</Button>
             </Link>
           )}
 
           <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-stretch">
-            <div className="inline-flex shrink-0 items-stretch overflow-hidden rounded-lg border border-border bg-background text-sm font-medium">
-              <button
-                type="button"
-                className="px-4 py-3 hover:bg-muted/80 min-w-[2.75rem]"
-                onClick={() => setQty(Math.max(1, qty - 1))}
-              >
-                −
-              </button>
+            <div className="inline-flex shrink-0 items-stretch overflow-hidden rounded-lg border border-border bg-background text-sm font-medium self-start">
+              <button type="button" className="px-4 py-3 hover:bg-muted/80 active:bg-muted min-w-[2.75rem]" onClick={() => setQty(Math.max(1, qty - 1))}>−</button>
               <span className="flex min-w-[3rem] items-center justify-center border-x border-border px-2 tabular-nums">{qty}</span>
-              <button type="button" className="px-4 py-3 hover:bg-muted/80 min-w-[2.75rem]" onClick={() => setQty(qty + 1)}>
-                +
-              </button>
+              <button type="button" className="px-4 py-3 hover:bg-muted/80 active:bg-muted min-w-[2.75rem]" onClick={() => setQty(qty + 1)}>+</button>
             </div>
             <Button
               size="lg"
-              className="h-auto min-h-[3rem] flex-1 gap-2 rounded-lg py-3 text-base font-semibold sm:min-w-0"
+              className="h-12 sm:h-auto sm:min-h-[3rem] flex-1 gap-2 rounded-lg py-3 text-base font-semibold sm:min-w-0"
               onClick={() =>
                 addItem({
                   product,
@@ -195,11 +170,11 @@ export default function ProductDetailPage() {
       </div>
 
       {product.reviews.length > 0 && (
-        <div className="mt-12">
-          <h2 className="text-xl font-bold mb-4">Customer Reviews</h2>
-          <div className="space-y-4">
+        <div className="mt-8 sm:mt-12">
+          <h2 className="text-lg sm:text-xl font-bold mb-4">Customer Reviews</h2>
+          <div className="space-y-3 sm:space-y-4">
             {product.reviews.map(r => (
-              <div key={r.id} className="border rounded-lg p-4">
+              <div key={r.id} className="border rounded-lg p-3 sm:p-4">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="font-medium text-sm">{r.userName}</span>
                   <span className="text-yellow-500 text-sm">{'★'.repeat(r.rating)}</span>
