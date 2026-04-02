@@ -52,6 +52,7 @@ export type CreateOrderPayload = {
 export async function createOrderApi(payload: CreateOrderPayload): Promise<Order> {
   const res = await fetch(apiUrl('/api/orders'), {
     method: 'POST',
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });

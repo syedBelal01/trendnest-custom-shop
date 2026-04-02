@@ -21,6 +21,13 @@ import AdminOrders from "@/pages/admin/AdminOrders";
 import AdminCoupons from "@/pages/admin/AdminCoupons";
 import AdminCustomPrints from "@/pages/admin/AdminCustomPrints";
 import AdminCustomers from "@/pages/admin/AdminCustomers";
+import UserGuard from "@/components/UserGuard";
+import AccountPage from "@/pages/AccountPage";
+import AccountOrdersPage from "@/pages/AccountOrdersPage";
+import AccountSettingsPage from "@/pages/AccountSettingsPage";
+import AccountAddressesPage from "@/pages/AccountAddressesPage";
+import LoginPage from "@/pages/LoginPage";
+import ForgotPasswordPage from "@/pages/ForgotPasswordPage";
 import NotFound from "@/pages/NotFound";
 import ScrollToTop from "@/components/ScrollToTop";
 
@@ -45,6 +52,40 @@ const App = () => (
                   <Route path="/cart" element={<CartPage />} />
                   <Route path="/checkout" element={<CheckoutPage />} />
                   <Route path="/search" element={<SearchPage />} />
+                <Route
+                  path="/account"
+                  element={
+                    <UserGuard>
+                      <AccountPage />
+                    </UserGuard>
+                  }
+                />
+                <Route
+                  path="/account/orders"
+                  element={
+                    <UserGuard>
+                      <AccountOrdersPage />
+                    </UserGuard>
+                  }
+                />
+                <Route
+                  path="/account/settings"
+                  element={
+                    <UserGuard>
+                      <AccountSettingsPage />
+                    </UserGuard>
+                  }
+                />
+                <Route
+                  path="/account/addresses"
+                  element={
+                    <UserGuard>
+                      <AccountAddressesPage />
+                    </UserGuard>
+                  }
+                />
+                <Route path="/login" element={<LoginPage />} />
+                <Route path="/forgot-password" element={<ForgotPasswordPage />} />
                 </Route>
                 <Route path="/admin" element={<AdminLayout />}>
                   <Route index element={<AdminDashboard />} />

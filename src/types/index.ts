@@ -50,6 +50,23 @@ export interface CartItem {
   customProductType?: 'tshirt' | 'mug';
 }
 
+export interface User {
+  id: string;
+  email: string;
+  phone?: string;
+  name: string;
+  addresses?: {
+    id: string;
+    label: string;
+    address: string;
+    city: string;
+    pincode: string;
+    isDefault?: boolean;
+  }[];
+  mustResetPassword: boolean;
+  createdAt?: string;
+}
+
 /** Persisted line item (API / admin). */
 export interface OrderLineSnapshot {
   lineId?: string;
@@ -69,6 +86,7 @@ export interface Order {
   id: string;
   items: OrderLineSnapshot[];
   customer: CustomerInfo;
+  userId?: string;
   status: 'pending' | 'packed' | 'shipped' | 'delivered';
   subtotal: number;
   total: number;

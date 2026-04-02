@@ -1,5 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { ShoppingCart, Search, Menu, X } from 'lucide-react';
+import { ShoppingCart, Search, Menu, X, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useCart } from '@/contexts/CartContext';
@@ -10,6 +10,7 @@ const navLinks = [
   { label: 'Prints', to: '/category/printed' },
   { label: 'Trending', to: '/category/trending' },
   { label: '🎨 Custom Print', to: '/custom-print' },
+  { label: 'Login', to: '/login' },
 ];
 
 export default function Header() {
@@ -56,6 +57,12 @@ export default function Header() {
             {itemCount > 0 && (
               <span className="absolute -top-1 -right-1 bg-primary text-primary-foreground text-xs w-5 h-5 rounded-full flex items-center justify-center font-semibold">{itemCount}</span>
             )}
+          </Button>
+        </Link>
+
+        <Link to="/login" className="ml-1 sm:ml-2">
+          <Button variant="ghost" size="icon" className="h-10 w-10" aria-label="Login">
+            <User className="h-5 w-5" />
           </Button>
         </Link>
 

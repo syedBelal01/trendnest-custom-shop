@@ -9,6 +9,9 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import nodemailer from 'nodemailer';
 import PDFDocument from 'pdfkit';
+import crypto from 'crypto';
+import session from 'express-session';
+import MongoStore from 'connect-mongo';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Always load .env from project root (folder above server/), not only from process.cwd()
@@ -71,6 +74,51 @@ const ProductSchema = new mongoose.Schema(
 
 const Product = mongoose.model('Product', ProductSchema);
 
+// --- Auth (customer accounts) ---
+const UserSchema = new mongoose.Schema(
+  {
+    _id: { type: String, required: true },
+    email: { type: String, unique: true, sparse: true },
+    phone: { type: String, unique: true, sparse: true },
+    name: { type: String, default: '' },
+    addresses: {
+      type: [
+        {
+          id: String,
+          label: String,
+          address: String,
+          city: String,
+          pincode: String,
+          isDefault: Boolean,
+        },
+      ],
+      default: [],
+    },
+    passwordHash: { type: String, default: null },
+    passwordSalt: { type: String, default: null },
+    mustResetPassword: { type: Boolean, default: true },
+  },
+  { versionKey: false, timestamps: true }
+);
+
+const OtpChallengeSchema = new mongoose.Schema(
+  {
+    challengeId: { type: String, required: true, unique: true },
+    purpose: { type: String, required: true }, // e.g. "checkout" | "password_reset"
+    userId: { type: String, required: true },
+    email: { type: String, required: true },
+    codeHash: { type: String, required: true },
+    codeSalt: { type: String, required: true },
+    expiresAt: { type: Date, required: true },
+    attempts: { type: Number, default: 0 },
+    maxAttempts: { type: Number, default: 5 },
+  },
+  { versionKey: false, timestamps: false }
+);
+
+const User = mongoose.model('User', UserSchema);
+const OtpChallenge = mongoose.model('OtpChallenge', OtpChallengeSchema);
+
 const MAX_CUSTOM_INLINE_BYTES = 500 * 1024;
 const ORDER_STATUSES = ['pending', 'packed', 'shipped', 'delivered'];
 
@@ -102,6 +150,8 @@ const OrderSchema = new mongoose.Schema(
       city: { type: String, required: true },
       pincode: { type: String, required: true },
     },
+    // Optional authenticated customer relation (set after OTP verification).
+    userId: { type: String, default: undefined },
     items: { type: [OrderLineSchema], required: true },
     subtotal: { type: Number, required: true },
     discount: { type: Number, default: 0 },
@@ -353,8 +403,33 @@ const uploadDesign = multer({
 });
 
 const app = express();
-app.use(cors({ origin: true }));
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: '16mb' }));
+
+// Cookie-session auth for logged-in customers.
+const SESSION_SECRET = process.env.SESSION_SECRET;
+const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS || 1000 * 60 * 60 * 24 * 7);
+app.use(
+  session({
+    name: 'tn_session',
+    secret: SESSION_SECRET || 'dev-insecure-session-secret',
+    resave: false,
+    saveUninitialized: false,
+    store: MONGODB_URI
+      ? MongoStore.create({
+          mongoUrl: MONGODB_URI,
+          collectionName: 'sessions',
+          ttl: Math.floor(SESSION_TTL_MS / 1000),
+        })
+      : undefined,
+    cookie: {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: SESSION_TTL_MS,
+    },
+  })
+);
 
 app.get('/', (_req, res) => {
   res.type('text/plain').send('Backend is running 🚀');
@@ -366,6 +441,486 @@ app.get('/api/health', (_req, res) => {
     mongo: mongoose.connection.readyState === 1,
     cloudinary: !!(cloudName && cloudKey && cloudSecret),
   });
+});
+
+function requireAuth(req, res, next) {
+  if (!req.session?.userId) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  next();
+}
+
+function serializeUser(userDoc) {
+  if (!userDoc) return null;
+  return {
+    id: userDoc._id,
+    email: userDoc.email,
+    phone: userDoc.phone,
+    name: userDoc.name,
+    mustResetPassword: !!userDoc.mustResetPassword,
+    createdAt: userDoc.createdAt instanceof Date ? userDoc.createdAt.toISOString() : userDoc.createdAt,
+  };
+}
+
+function maskEmail(email) {
+  const [u, d] = email.split('@');
+  if (!u || !d) return email;
+  const head = u.slice(0, 1);
+  return `${head}***@${d}`;
+}
+
+function sha256Hex(s) {
+  return crypto.createHash('sha256').update(s).digest('hex');
+}
+
+function genNumericCode(length) {
+  const max = 10 ** length;
+  const n = crypto.randomInt(0, max);
+  return String(n).padStart(length, '0');
+}
+
+async function sendOtpEmail({ to, code, purpose }) {
+  const transport = getMailTransport();
+  if (!transport) {
+    return { ok: false, error: 'SMTP not configured on server (.env)' };
+  }
+  const from = process.env.ORDER_FROM_EMAIL || process.env.SMTP_USER || 'trendnest099@gmail.com';
+  const subject = purpose === 'password_reset' ? 'TrendNest99 password reset OTP' : 'TrendNest99 OTP verification';
+  const text = `Your OTP code is: ${code}\n\nThis code will expire soon. If you did not request it, ignore this email.`;
+
+  await transport.sendMail({
+    from,
+    to,
+    subject,
+    text,
+  });
+  return { ok: true };
+}
+
+app.get('/api/auth/me', async (req, res) => {
+  try {
+    if (!req.session?.userId) {
+      res.json({ user: null });
+      return;
+    }
+    const u = await User.findById(req.session.userId).lean();
+    res.json({ user: u ? serializeUser(u) : null });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to load auth user' });
+  }
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  if (!req.session) {
+    res.json({ ok: true });
+    return;
+  }
+  req.session.destroy(() => {
+    res.clearCookie('tn_session');
+    res.json({ ok: true });
+  });
+});
+
+app.post('/api/auth/otp/request', async (req, res) => {
+  try {
+    const email = String(req.body?.email || req.body?.identifier || '').trim();
+    const purpose = String(req.body?.purpose || 'checkout');
+    if (!email || !simpleEmailValid(email)) {
+      res.status(400).json({ error: 'Invalid email' });
+      return;
+    }
+
+    if (!['checkout', 'auth', 'password_reset'].includes(purpose)) {
+      res.status(400).json({ error: 'Invalid OTP purpose' });
+      return;
+    }
+
+    // For this MVP we create/update customer by email only.
+    let user = await User.findOne({ email }).exec();
+    if (!user) {
+      const newId = `usr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      user = await User.create({
+        _id: newId,
+        email,
+        name: String(req.body?.name || '').trim() || '',
+        phone: String(req.body?.phone || '').trim() || undefined,
+        // We will force password set later (after OTP verified + session login).
+        mustResetPassword: true,
+      });
+    }
+
+    // Create OTP challenge and send OTP email.
+    const otpLen = Number(process.env.OTP_CODE_LENGTH || 6);
+    const otpTtlSec = Number(process.env.OTP_TTL_SECONDS || 10 * 60);
+    const maxAttempts = Number(process.env.OTP_MAX_ATTEMPTS || 5);
+    const code = genNumericCode(otpLen);
+    const codeSalt = crypto.randomBytes(16).toString('hex');
+    const codeHash = sha256Hex(`${codeSalt}:${code}`);
+
+    const challengeId = `otp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const expiresAt = new Date(Date.now() + otpTtlSec * 1000);
+
+    await OtpChallenge.create({
+      challengeId,
+      purpose,
+      userId: user._id,
+      email,
+      codeHash,
+      codeSalt,
+      expiresAt,
+      attempts: 0,
+      maxAttempts,
+    });
+
+    const sent = await sendOtpEmail({ to: email, code, purpose });
+    if (!sent.ok) {
+      res.status(503).json({ error: sent.error || 'Could not send OTP' });
+      return;
+    }
+
+    res.json({ challengeId, masked: maskEmail(email) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to request OTP' });
+  }
+});
+
+app.post('/api/auth/otp/verify', async (req, res) => {
+  try {
+    const challengeId = String(req.body?.challengeId || '').trim();
+    const code = String(req.body?.code || '').trim();
+    if (!challengeId || !code) {
+      res.status(400).json({ error: 'Missing challengeId or code' });
+      return;
+    }
+
+    const challenge = await OtpChallenge.findOne({ challengeId }).exec();
+    if (!challenge) {
+      res.status(400).json({ error: 'Invalid or expired OTP' });
+      return;
+    }
+
+    const now = Date.now();
+    if (!challenge.expiresAt || challenge.expiresAt.getTime() <= now) {
+      res.status(400).json({ error: 'Invalid or expired OTP' });
+      return;
+    }
+    if (challenge.attempts >= challenge.maxAttempts) {
+      res.status(400).json({ error: 'OTP attempts exceeded' });
+      return;
+    }
+
+    const candidateHash = sha256Hex(`${challenge.codeSalt}:${code}`);
+    if (candidateHash !== challenge.codeHash) {
+      challenge.attempts += 1;
+      await challenge.save();
+      res.status(400).json({ error: 'Invalid or expired OTP' });
+      return;
+    }
+
+    // OTP verified → login (cookie session).
+    req.session.userId = challenge.userId;
+
+    // Cleanup old challenge.
+    await OtpChallenge.deleteOne({ _id: challenge._id });
+
+    const user = await User.findById(challenge.userId).lean();
+    res.json({ user: user ? serializeUser(user) : null });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to verify OTP' });
+  }
+});
+
+app.get('/api/me/orders', mongoReady, requireAuth, async (req, res) => {
+  try {
+    const docs = await Order.find({ userId: req.session.userId }).sort({ createdAt: -1 }).lean();
+    res.json(docs.map((d) => serializeOrder(d)));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to load your orders' });
+  }
+});
+
+app.get('/api/me/profile', mongoReady, requireAuth, async (req, res) => {
+  try {
+    const u = await User.findById(req.session.userId).lean();
+    res.json({ user: u ? serializeUser(u) : null });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to load profile' });
+  }
+});
+
+app.patch('/api/me/profile', mongoReady, requireAuth, async (req, res) => {
+  try {
+    const name = req.body?.name != null ? String(req.body.name).trim() : undefined;
+    const phone = req.body?.phone != null ? String(req.body.phone).trim() : undefined;
+    const $set = {};
+    if (name !== undefined) $set.name = name;
+    if (phone !== undefined) $set.phone = phone || undefined;
+    if (Object.keys($set).length > 0) {
+      await User.updateOne({ _id: req.session.userId }, { $set });
+    }
+    const u = await User.findById(req.session.userId).lean();
+    res.json({ user: u ? serializeUser(u) : null });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
+app.get('/api/me/addresses', mongoReady, requireAuth, async (req, res) => {
+  try {
+    const u = await User.findById(req.session.userId).lean();
+    res.json({ addresses: Array.isArray(u?.addresses) ? u.addresses : [] });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to load addresses' });
+  }
+});
+
+app.post('/api/me/addresses', mongoReady, requireAuth, async (req, res) => {
+  try {
+    const label = String(req.body?.label || 'Home').trim();
+    const address = String(req.body?.address || '').trim();
+    const city = String(req.body?.city || '').trim();
+    const pincode = String(req.body?.pincode || '').trim();
+    const isDefault = !!req.body?.isDefault;
+    if (!address || !city || !pincode) {
+      res.status(400).json({ error: 'Address, city, and pincode are required' });
+      return;
+    }
+    const id = `addr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const addr = { id, label, address, city, pincode, isDefault };
+    const u = await User.findById(req.session.userId).exec();
+    if (!u) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+    if (isDefault) {
+      u.addresses = (u.addresses || []).map((a) => ({ ...a, isDefault: false }));
+    }
+    u.addresses = [...(u.addresses || []), addr];
+    await u.save();
+    res.status(201).json({ address: addr, addresses: u.addresses });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to add address' });
+  }
+});
+
+app.patch('/api/me/addresses/:id', mongoReady, requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const u = await User.findById(req.session.userId).exec();
+    if (!u) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+    const idx = (u.addresses || []).findIndex((a) => a.id === id);
+    if (idx < 0) {
+      res.status(404).json({ error: 'Address not found' });
+      return;
+    }
+    const cur = u.addresses[idx];
+    const next = {
+      ...cur,
+      label: req.body?.label != null ? String(req.body.label).trim() : cur.label,
+      address: req.body?.address != null ? String(req.body.address).trim() : cur.address,
+      city: req.body?.city != null ? String(req.body.city).trim() : cur.city,
+      pincode: req.body?.pincode != null ? String(req.body.pincode).trim() : cur.pincode,
+      isDefault: req.body?.isDefault != null ? !!req.body.isDefault : cur.isDefault,
+    };
+    if (next.isDefault) {
+      u.addresses = (u.addresses || []).map((a) => ({ ...a, isDefault: a.id === id }));
+      u.addresses[idx] = { ...u.addresses[idx], ...next, isDefault: true };
+    } else {
+      u.addresses[idx] = next;
+    }
+    await u.save();
+    res.json({ address: u.addresses[idx], addresses: u.addresses });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to update address' });
+  }
+});
+
+app.delete('/api/me/addresses/:id', mongoReady, requireAuth, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const u = await User.findById(req.session.userId).exec();
+    if (!u) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+    u.addresses = (u.addresses || []).filter((a) => a.id !== id);
+    await u.save();
+    res.json({ addresses: u.addresses });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to delete address' });
+  }
+});
+
+function hashPassword(password, salt) {
+  // PBKDF2 is built-in (no extra deps). Use a high iteration count for better security.
+  const iters = Number(process.env.PASSWORD_HASH_ITERS || 120000);
+  return crypto.pbkdf2Sync(password, salt, iters, 64, 'sha512').toString('hex');
+}
+
+app.post('/api/auth/password/set', mongoReady, requireAuth, async (req, res) => {
+  try {
+    const password = String(req.body?.password || '').trim();
+    if (!password || password.length < 8) {
+      res.status(400).json({ error: 'Password must be at least 8 characters' });
+      return;
+    }
+    const salt = crypto.randomBytes(16).toString('hex');
+    const passwordHash = hashPassword(password, salt);
+    await User.findByIdAndUpdate(req.session.userId, {
+      passwordSalt: salt,
+      passwordHash,
+      mustResetPassword: false,
+    });
+    const u = await User.findById(req.session.userId).lean();
+    res.json({ user: u ? serializeUser(u) : null });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to set password' });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  try {
+    const email = String(req.body?.email || '').trim();
+    const password = String(req.body?.password || '').trim();
+    if (!email || !password || !simpleEmailValid(email)) {
+      res.status(400).json({ error: 'Invalid email or password' });
+      return;
+    }
+    const user = await User.findOne({ email }).exec();
+    if (!user || !user.passwordHash || !user.passwordSalt) {
+      res.status(401).json({ error: 'Invalid email or password' });
+      return;
+    }
+    const computed = hashPassword(password, user.passwordSalt);
+    if (computed !== user.passwordHash) {
+      res.status(401).json({ error: 'Invalid email or password' });
+      return;
+    }
+    if (user.mustResetPassword) {
+      res.status(403).json({ error: 'Password must be set before login' });
+      return;
+    }
+    req.session.userId = user._id;
+    res.json({ user: serializeUser(await User.findById(user._id).lean()) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+app.post('/api/auth/password/forgot', async (req, res) => {
+  try {
+    const email = String(req.body?.email || '').trim();
+    if (!email || !simpleEmailValid(email)) {
+      res.status(400).json({ error: 'Invalid email' });
+      return;
+    }
+
+    const otpLen = Number(process.env.OTP_CODE_LENGTH || 6);
+    const otpTtlSec = Number(process.env.OTP_TTL_SECONDS || 10 * 60);
+    const maxAttempts = Number(process.env.OTP_MAX_ATTEMPTS || 5);
+
+    const user = await User.findOne({ email }).exec();
+    if (!user) {
+      // Avoid account enumeration. Still respond with a generic success.
+      res.json({ ok: true });
+      return;
+    }
+
+    const code = genNumericCode(otpLen);
+    const codeSalt = crypto.randomBytes(16).toString('hex');
+    const codeHash = sha256Hex(`${codeSalt}:${code}`);
+    const challengeId = `otp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const expiresAt = new Date(Date.now() + otpTtlSec * 1000);
+
+    await OtpChallenge.create({
+      challengeId,
+      purpose: 'password_reset',
+      userId: user._id,
+      email,
+      codeHash,
+      codeSalt,
+      expiresAt,
+      attempts: 0,
+      maxAttempts,
+    });
+
+    const sent = await sendOtpEmail({ to: email, code, purpose: 'password_reset' });
+    if (!sent.ok) {
+      res.status(503).json({ error: sent.error || 'Could not send OTP' });
+      return;
+    }
+
+    res.json({ ok: true, challengeId });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to request password reset' });
+  }
+});
+
+app.post('/api/auth/password/reset', async (req, res) => {
+  try {
+    const challengeId = String(req.body?.challengeId || '').trim();
+    const code = String(req.body?.code || '').trim();
+    const password = String(req.body?.password || '').trim();
+    if (!challengeId || !code || !password) {
+      res.status(400).json({ error: 'Missing challengeId, code, or password' });
+      return;
+    }
+    if (password.length < 8) {
+      res.status(400).json({ error: 'Password must be at least 8 characters' });
+      return;
+    }
+
+    const challenge = await OtpChallenge.findOne({ challengeId, purpose: 'password_reset' }).exec();
+    if (!challenge) {
+      res.status(400).json({ error: 'Invalid or expired OTP' });
+      return;
+    }
+    if (!challenge.expiresAt || challenge.expiresAt.getTime() <= Date.now()) {
+      res.status(400).json({ error: 'Invalid or expired OTP' });
+      return;
+    }
+
+    const candidateHash = sha256Hex(`${challenge.codeSalt}:${code}`);
+    if (candidateHash !== challenge.codeHash) {
+      res.status(400).json({ error: 'Invalid or expired OTP' });
+      return;
+    }
+
+    const salt = crypto.randomBytes(16).toString('hex');
+    const passwordHash = hashPassword(password, salt);
+    await User.findByIdAndUpdate(challenge.userId, {
+      passwordSalt: salt,
+      passwordHash,
+      mustResetPassword: false,
+    });
+
+    await OtpChallenge.deleteOne({ _id: challenge._id });
+
+    // Login after reset.
+    req.session.userId = challenge.userId;
+    const u = await User.findById(challenge.userId).lean();
+    res.json({ user: u ? serializeUser(u) : null });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to reset password' });
+  }
 });
 
 app.get('/api/products', mongoReady, async (_req, res) => {
@@ -560,6 +1115,7 @@ app.post('/api/orders', mongoReady, async (req, res) => {
     await Order.create({
       _id: orderId,
       customer: { name, email, phone, address, city, pincode },
+      userId: req.session?.userId,
       items,
       subtotal,
       discount,
