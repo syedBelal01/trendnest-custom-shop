@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
-import { fetchMeApi, resetPasswordApi, setPasswordApi } from '@/lib/authApi';
+import { fetchMeApi, setPasswordApi } from '@/lib/authApi';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { User } from '@/types';
+import { ArrowLeft, Lock, Mail, ShieldCheck } from 'lucide-react';
 
 export default function AccountSettingsPage() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
@@ -26,9 +27,7 @@ export default function AccountSettingsPage() {
         if (mounted) setLoading(false);
       }
     })();
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, []);
 
   const onSetPassword = async () => {
@@ -45,6 +44,8 @@ export default function AccountSettingsPage() {
     try {
       await setPasswordApi({ password });
       toast.success('Password updated');
+      setPassword('');
+      setConfirm('');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not set password');
     } finally {
@@ -52,37 +53,77 @@ export default function AccountSettingsPage() {
     }
   };
 
-  if (loading) return <div className="py-10 text-center text-muted-foreground">Loading…</div>;
+  if (loading) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
   if (!user) return <div className="py-10 text-center text-muted-foreground">Not logged in</div>;
 
   return (
-    <div className="max-w-3xl mx-auto px-3 sm:px-4 py-8 space-y-6">
-      <h1 className="text-2xl font-bold">Account Settings</h1>
-      <div className="border rounded-lg p-4 bg-muted/30 space-y-4">
-        <div className="text-sm text-muted-foreground">
-          Email: <span className="text-foreground font-medium">{user.email}</span>
-        </div>
+    <div className="max-w-lg mx-auto px-4 py-6 sm:py-8 space-y-5">
+      <div className="flex items-center gap-3">
+        <Link to="/account" className="h-9 w-9 rounded-xl border flex items-center justify-center hover:bg-muted/50 transition-colors">
+          <ArrowLeft className="h-4 w-4" />
+        </Link>
+        <h1 className="text-xl font-bold">Settings</h1>
+      </div>
 
-        <div>
-          <label className="text-sm font-medium">New password</label>
-          <Input
-            type="password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            placeholder="At least 8 characters"
-            className="mt-2"
-          />
+      {/* Account info */}
+      <div className="rounded-2xl border bg-card shadow-sm p-4">
+        <div className="flex items-center gap-3 text-sm">
+          <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+            <Mail className="h-5 w-5 text-primary" />
+          </div>
+          <div>
+            <div className="text-xs text-muted-foreground">Signed in as</div>
+            <div className="font-medium">{user.email}</div>
+          </div>
         </div>
-        <div>
-          <label className="text-sm font-medium">Confirm password</label>
-          <Input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} placeholder="Repeat password" className="mt-2" />
-        </div>
+      </div>
 
-        <Button type="button" disabled={busy} onClick={() => void onSetPassword()} className="w-full">
-          {busy ? 'Updating…' : 'Update Password'}
-        </Button>
+      {/* Password form */}
+      <div className="rounded-2xl border bg-card shadow-sm overflow-hidden">
+        <div className="p-4 border-b bg-muted/30 flex items-center gap-2">
+          <ShieldCheck className="h-4 w-4 text-primary" />
+          <span className="text-sm font-semibold">
+            {user.mustResetPassword ? 'Set Your Password' : 'Update Password'}
+          </span>
+        </div>
+        <div className="p-4 space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">New Password</label>
+            <div className="relative">
+              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                type="password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="At least 8 characters"
+                className="pl-10 h-11 rounded-xl"
+              />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Confirm Password</label>
+            <div className="relative">
+              <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                type="password"
+                value={confirm}
+                onChange={e => setConfirm(e.target.value)}
+                placeholder="Repeat password"
+                className="pl-10 h-11 rounded-xl"
+              />
+            </div>
+          </div>
+          <Button disabled={busy} onClick={() => void onSetPassword()} className="w-full h-11 rounded-xl font-semibold">
+            {busy ? 'Updating…' : 'Update Password'}
+          </Button>
+        </div>
       </div>
     </div>
   );
 }
-

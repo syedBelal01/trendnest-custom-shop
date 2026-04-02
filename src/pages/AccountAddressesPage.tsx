@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { addAddressApi, deleteAddressApi, fetchMyAddressesApi, updateAddressApi, type Address } from '@/lib/authApi';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { ArrowLeft, MapPin, Plus, Star, Trash2 } from 'lucide-react';
 
 export default function AccountAddressesPage() {
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [showForm, setShowForm] = useState(false);
 
   const [label, setLabel] = useState('Home');
   const [address, setAddress] = useState('');
@@ -29,9 +32,7 @@ export default function AccountAddressesPage() {
         if (mounted) setLoading(false);
       }
     })();
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, []);
 
   const add = async () => {
@@ -40,9 +41,8 @@ export default function AccountAddressesPage() {
     try {
       const next = await addAddressApi({ label: label.trim() || 'Home', address: address.trim(), city: city.trim(), pincode: pincode.trim(), isDefault: addresses.length === 0 });
       setAddresses(next);
-      setAddress('');
-      setCity('');
-      setPincode('');
+      setAddress(''); setCity(''); setPincode('');
+      setShowForm(false);
       toast.success('Address added');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not add address');
@@ -77,67 +77,104 @@ export default function AccountAddressesPage() {
     }
   };
 
-  if (loading) return <div className="py-10 text-center text-muted-foreground">Loading…</div>;
+  if (loading) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   return (
-    <div className="max-w-3xl mx-auto px-3 sm:px-4 py-8 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold mb-1">Address Book</h1>
-        <p className="text-sm text-muted-foreground">Save delivery addresses for faster checkout.</p>
-      </div>
-
-      <div className="border rounded-lg p-4 bg-muted/30 space-y-3">
-        <div className="grid sm:grid-cols-2 gap-3">
+    <div className="max-w-lg mx-auto px-4 py-6 sm:py-8 space-y-5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <Link to="/account" className="h-9 w-9 rounded-xl border flex items-center justify-center hover:bg-muted/50 transition-colors">
+            <ArrowLeft className="h-4 w-4" />
+          </Link>
           <div>
-            <label className="text-sm font-medium">Label</label>
-            <Input value={label} onChange={e => setLabel(e.target.value)} className="mt-2" placeholder="Home / Office" />
-          </div>
-          <div>
-            <label className="text-sm font-medium">Pincode</label>
-            <Input value={pincode} onChange={e => setPincode(e.target.value)} className="mt-2" placeholder="123456" />
+            <h1 className="text-xl font-bold">Addresses</h1>
+            <p className="text-xs text-muted-foreground">Manage delivery addresses</p>
           </div>
         </div>
-        <div className="grid sm:grid-cols-2 gap-3">
-          <div>
-            <label className="text-sm font-medium">City</label>
-            <Input value={city} onChange={e => setCity(e.target.value)} className="mt-2" placeholder="City" />
-          </div>
-          <div>
-            <label className="text-sm font-medium">Address</label>
-            <Input value={address} onChange={e => setAddress(e.target.value)} className="mt-2" placeholder="Street / building / area" />
-          </div>
-        </div>
-        <Button disabled={!canAdd || busy} onClick={() => void add()} className="w-full">
-          {busy ? 'Saving…' : 'Add address'}
+        <Button size="sm" onClick={() => setShowForm(v => !v)} className="rounded-xl gap-1.5 h-9">
+          <Plus className="h-4 w-4" /> Add
         </Button>
       </div>
 
-      <div className="space-y-3">
-        {addresses.map(a => (
-          <div key={a.id} className="border rounded-lg p-4 flex items-start justify-between gap-3">
-            <div className="text-sm">
-              <div className="font-medium">
-                {a.label}{' '}
-                {a.isDefault && <span className="text-xs ml-2 px-2 py-0.5 rounded-full bg-primary/10 text-primary">Default</span>}
-              </div>
-              <div className="text-muted-foreground">{a.address}</div>
-              <div className="text-muted-foreground">{a.city} — {a.pincode}</div>
+      {/* Add form */}
+      {showForm && (
+        <div className="rounded-2xl border bg-card shadow-sm p-4 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Label</label>
+              <Input value={label} onChange={e => setLabel(e.target.value)} className="h-10 rounded-xl" placeholder="Home" />
             </div>
-            <div className="flex flex-col gap-2">
-              {!a.isDefault && (
-                <Button variant="outline" size="sm" disabled={busy} onClick={() => void setDefault(a.id)}>
-                  Set default
-                </Button>
-              )}
-              <Button variant="outline" size="sm" disabled={busy} onClick={() => void remove(a.id)}>
-                Delete
-              </Button>
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Pincode</label>
+              <Input value={pincode} onChange={e => setPincode(e.target.value)} className="h-10 rounded-xl" placeholder="123456" />
             </div>
           </div>
-        ))}
-        {addresses.length === 0 && <div className="text-center text-muted-foreground py-10">No saved addresses yet.</div>}
-      </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">City</label>
+            <Input value={city} onChange={e => setCity(e.target.value)} className="h-10 rounded-xl" placeholder="City" />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Full Address</label>
+            <Input value={address} onChange={e => setAddress(e.target.value)} className="h-10 rounded-xl" placeholder="Street, building, area" />
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setShowForm(false)} className="flex-1 h-10 rounded-xl">Cancel</Button>
+            <Button disabled={!canAdd || busy} onClick={() => void add()} className="flex-1 h-10 rounded-xl">
+              {busy ? 'Saving…' : 'Save Address'}
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* List */}
+      {addresses.length === 0 && !showForm ? (
+        <div className="rounded-2xl border bg-card shadow-sm p-8 text-center space-y-3">
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-muted">
+            <MapPin className="h-7 w-7 text-muted-foreground" />
+          </div>
+          <p className="text-sm text-muted-foreground">No saved addresses yet.</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {addresses.map(a => (
+            <div key={a.id} className="rounded-2xl border bg-card shadow-sm p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex gap-3 min-w-0">
+                  <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+                    <MapPin className="h-5 w-5 text-primary" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold">{a.label}</span>
+                      {a.isDefault && (
+                        <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-primary/10 text-primary">Default</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">{a.address}</p>
+                    <p className="text-xs text-muted-foreground">{a.city} — {a.pincode}</p>
+                  </div>
+                </div>
+                <div className="flex gap-1 shrink-0">
+                  {!a.isDefault && (
+                    <button onClick={() => void setDefault(a.id)} disabled={busy} className="h-8 w-8 rounded-lg hover:bg-muted/50 flex items-center justify-center transition-colors" title="Set default">
+                      <Star className="h-4 w-4 text-muted-foreground" />
+                    </button>
+                  )}
+                  <button onClick={() => void remove(a.id)} disabled={busy} className="h-8 w-8 rounded-lg hover:bg-destructive/10 flex items-center justify-center transition-colors" title="Delete">
+                    <Trash2 className="h-4 w-4 text-destructive" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
-

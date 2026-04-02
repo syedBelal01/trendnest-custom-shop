@@ -4,6 +4,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
 import { forgotPasswordOtpApi, resetPasswordApi } from '@/lib/authApi';
+import { ArrowLeft, Lock, Mail, ShieldCheck, ArrowRight } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
@@ -66,49 +68,75 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <div className="max-w-lg mx-auto px-3 sm:px-4 py-8 space-y-6">
-      <h1 className="text-2xl font-bold">Reset Password</h1>
-      <div className="border rounded-lg p-4 bg-muted/30 space-y-4">
-        {!challengeId ? (
-          <>
-            <label className="text-sm font-medium">Email</label>
-            <Input value={email} onChange={e => setEmail(e.target.value)} placeholder="your@email.com" />
-            <Button onClick={() => void requestOtp()} disabled={busy} className="w-full">
-              {busy ? 'Sending…' : 'Send OTP'}
-            </Button>
-          </>
-        ) : (
-          <>
-            <div className="text-sm text-muted-foreground">
-              Enter the OTP sent to <span className="font-medium text-foreground">{email}</span>
-            </div>
-            <InputOTP maxLength={6} value={otp} onChange={setOtp} containerClassName="mx-auto" className="w-full">
-              <InputOTPGroup>
-                <InputOTPSlot index={0} />
-                <InputOTPSlot index={1} />
-                <InputOTPSlot index={2} />
-                <InputOTPSlot index={3} />
-                <InputOTPSlot index={4} />
-                <InputOTPSlot index={5} />
-              </InputOTPGroup>
-            </InputOTP>
+    <div className="min-h-[80vh] flex items-center justify-center px-4 py-8">
+      <div className="w-full max-w-md space-y-6">
+        {/* Header */}
+        <div className="text-center space-y-2">
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-primary/10 mb-2">
+            <ShieldCheck className="h-7 w-7 text-primary" />
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Reset Password</h1>
+          <p className="text-sm text-muted-foreground">We'll send a verification code to your email</p>
+        </div>
 
-            <div>
-              <label className="text-sm font-medium">New password</label>
-              <Input type="password" value={password} onChange={e => setPassword(e.target.value)} className="mt-2" />
-            </div>
-            <div>
-              <label className="text-sm font-medium">Confirm password</label>
-              <Input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} className="mt-2" />
-            </div>
+        {/* Card */}
+        <div className="rounded-2xl border bg-card shadow-lg p-5 sm:p-6 space-y-4">
+          {!challengeId ? (
+            <>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Email</label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input value={email} onChange={e => setEmail(e.target.value)} placeholder="your@email.com" className="pl-10 h-11 rounded-xl" type="email" />
+                </div>
+              </div>
+              <Button onClick={() => void requestOtp()} disabled={busy} className="w-full h-11 rounded-xl font-semibold gap-2">
+                {busy ? 'Sending…' : <>Send OTP <ArrowRight className="h-4 w-4" /></>}
+              </Button>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 rounded-xl p-3">
+                <ShieldCheck className="h-4 w-4 text-primary shrink-0" />
+                <span>OTP sent to <span className="font-medium text-foreground">{email}</span></span>
+              </div>
+              <InputOTP maxLength={6} value={otp} onChange={setOtp} containerClassName="justify-center">
+                <InputOTPGroup>
+                  <InputOTPSlot index={0} />
+                  <InputOTPSlot index={1} />
+                  <InputOTPSlot index={2} />
+                  <InputOTPSlot index={3} />
+                  <InputOTPSlot index={4} />
+                  <InputOTPSlot index={5} />
+                </InputOTPGroup>
+              </InputOTP>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">New Password</label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input type="password" value={password} onChange={e => setPassword(e.target.value)} className="pl-10 h-11 rounded-xl" placeholder="At least 8 characters" />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Confirm Password</label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input type="password" value={confirm} onChange={e => setConfirm(e.target.value)} className="pl-10 h-11 rounded-xl" placeholder="Repeat password" />
+                </div>
+              </div>
+              <Button onClick={() => void onReset()} disabled={busy} className="w-full h-11 rounded-xl font-semibold gap-2">
+                {busy ? 'Resetting…' : <>Reset Password <ArrowRight className="h-4 w-4" /></>}
+              </Button>
+            </>
+          )}
+        </div>
 
-            <Button onClick={() => void onReset()} disabled={busy} className="w-full">
-              {busy ? 'Resetting…' : 'Reset Password'}
-            </Button>
-          </>
-        )}
+        <div className="text-center">
+          <Link to="/login" className="text-xs text-primary hover:underline font-medium inline-flex items-center gap-1">
+            <ArrowLeft className="h-3 w-3" /> Back to Sign In
+          </Link>
+        </div>
       </div>
     </div>
   );
 }
-

@@ -5,14 +5,13 @@ import { Input } from '@/components/ui/input';
 import { fetchMeApi, loginApi, requestAuthOtpApi, verifyOtpApi } from '@/lib/authApi';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
+import { Mail, Lock, User, Phone, ArrowRight, ShieldCheck, Sparkles } from 'lucide-react';
 
 export default function LoginPage() {
   const [checking, setChecking] = useState(true);
-
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
-
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [otpChallengeId, setOtpChallengeId] = useState<string | null>(null);
@@ -34,9 +33,7 @@ export default function LoginPage() {
         if (mounted) setChecking(false);
       }
     })();
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, []);
 
   const onLogin = async () => {
@@ -96,82 +93,137 @@ export default function LoginPage() {
   };
 
   if (checking) {
-    return <div className="py-10 text-center text-muted-foreground">Loading…</div>;
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
   }
 
   return (
-    <div className="max-w-lg mx-auto px-3 sm:px-4 py-8 space-y-6">
-      <h1 className="text-2xl font-bold">Account</h1>
-      <div className="border rounded-lg p-4 bg-muted/30 space-y-4">
-        <Tabs defaultValue="login">
-          <TabsList className="w-full">
-            <TabsTrigger value="login" className="flex-1">Login</TabsTrigger>
-            <TabsTrigger value="register" className="flex-1">Register (OTP)</TabsTrigger>
-          </TabsList>
+    <div className="min-h-[80vh] flex items-center justify-center px-4 py-8">
+      <div className="w-full max-w-md space-y-6">
+        {/* Header */}
+        <div className="text-center space-y-2">
+          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-primary/10 mb-2">
+            <Sparkles className="h-7 w-7 text-primary" />
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Welcome Back</h1>
+          <p className="text-sm text-muted-foreground">Sign in to your account or create a new one</p>
+        </div>
 
-          <TabsContent value="login" className="space-y-4">
-            <div>
-              <label className="text-sm font-medium">Email</label>
-              <Input value={email} onChange={e => setEmail(e.target.value)} className="mt-2" placeholder="you@email.com" />
-            </div>
-            <div>
-              <label className="text-sm font-medium">Password</label>
-              <Input type="password" value={password} onChange={e => setPassword(e.target.value)} className="mt-2" placeholder="••••••••" />
-            </div>
-            <Button onClick={() => void onLogin()} disabled={busy} className="w-full">
-              {busy ? 'Logging in…' : 'Login'}
-            </Button>
-            <div className="text-center text-sm">
-              <a className="text-primary hover:underline" href="/forgot-password">
-                Forgot password?
-              </a>
-            </div>
-          </TabsContent>
+        {/* Card */}
+        <div className="rounded-2xl border bg-card shadow-lg overflow-hidden">
+          <Tabs defaultValue="login" className="w-full">
+            <TabsList className="w-full rounded-none border-b bg-muted/30 h-12 p-0">
+              <TabsTrigger value="login" className="flex-1 rounded-none h-full data-[state=active]:bg-card data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary font-semibold">
+                Sign In
+              </TabsTrigger>
+              <TabsTrigger value="register" className="flex-1 rounded-none h-full data-[state=active]:bg-card data-[state=active]:shadow-none data-[state=active]:border-b-2 data-[state=active]:border-primary font-semibold">
+                Create Account
+              </TabsTrigger>
+            </TabsList>
 
-          <TabsContent value="register" className="space-y-4">
-            <div className="grid gap-3">
-              <div>
-                <label className="text-sm font-medium">Full name</label>
-                <Input value={name} onChange={e => setName(e.target.value)} className="mt-2" placeholder="Your name" />
-              </div>
-              <div>
-                <label className="text-sm font-medium">Email</label>
-                <Input value={email} onChange={e => setEmail(e.target.value)} className="mt-2" placeholder="you@email.com" />
-              </div>
-              <div>
-                <label className="text-sm font-medium">Phone (optional)</label>
-                <Input value={phone} onChange={e => setPhone(e.target.value)} className="mt-2" placeholder="Phone number" />
-              </div>
-            </div>
-
-            {!otpChallengeId ? (
-              <Button onClick={() => void onRequestOtp()} disabled={busy} className="w-full">
-                {busy ? 'Sending OTP…' : 'Send OTP'}
-              </Button>
-            ) : (
-              <>
-                <div className="text-sm text-muted-foreground">
-                  Enter the OTP sent to <span className="font-medium text-foreground">{email}</span>
+            <TabsContent value="login" className="p-5 sm:p-6 space-y-4 mt-0">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Email</label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    value={email}
+                    onChange={e => setEmail(e.target.value)}
+                    className="pl-10 h-11 rounded-xl"
+                    placeholder="you@email.com"
+                    type="email"
+                  />
                 </div>
-                <InputOTP maxLength={6} value={otp} onChange={setOtp} containerClassName="mx-auto" className="w-full">
-                  <InputOTPGroup>
-                    <InputOTPSlot index={0} />
-                    <InputOTPSlot index={1} />
-                    <InputOTPSlot index={2} />
-                    <InputOTPSlot index={3} />
-                    <InputOTPSlot index={4} />
-                    <InputOTPSlot index={5} />
-                  </InputOTPGroup>
-                </InputOTP>
-                <Button onClick={() => void onVerifyOtp()} disabled={busy} className="w-full">
-                  {busy ? 'Verifying…' : 'Verify & Continue'}
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Password</label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    type="password"
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    className="pl-10 h-11 rounded-xl"
+                    placeholder="••••••••"
+                  />
+                </div>
+              </div>
+              <Button
+                onClick={() => void onLogin()}
+                disabled={busy}
+                className="w-full h-11 rounded-xl font-semibold text-sm gap-2"
+              >
+                {busy ? 'Signing in…' : <>Sign In <ArrowRight className="h-4 w-4" /></>}
+              </Button>
+              <div className="text-center">
+                <a className="text-xs text-primary hover:underline font-medium" href="/forgot-password">
+                  Forgot your password?
+                </a>
+              </div>
+            </TabsContent>
+
+            <TabsContent value="register" className="p-5 sm:p-6 space-y-4 mt-0">
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Full Name</label>
+                  <div className="relative">
+                    <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input value={name} onChange={e => setName(e.target.value)} className="pl-10 h-11 rounded-xl" placeholder="Your name" />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Email</label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input value={email} onChange={e => setEmail(e.target.value)} className="pl-10 h-11 rounded-xl" placeholder="you@email.com" type="email" />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Phone (optional)</label>
+                  <div className="relative">
+                    <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input value={phone} onChange={e => setPhone(e.target.value)} className="pl-10 h-11 rounded-xl" placeholder="Phone number" />
+                  </div>
+                </div>
+              </div>
+
+              {!otpChallengeId ? (
+                <Button onClick={() => void onRequestOtp()} disabled={busy} className="w-full h-11 rounded-xl font-semibold text-sm gap-2">
+                  {busy ? 'Sending OTP…' : <>Send OTP <ArrowRight className="h-4 w-4" /></>}
                 </Button>
-              </>
-            )}
-          </TabsContent>
-        </Tabs>
+              ) : (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground bg-muted/50 rounded-xl p-3">
+                    <ShieldCheck className="h-4 w-4 text-primary shrink-0" />
+                    <span>OTP sent to <span className="font-medium text-foreground">{email}</span></span>
+                  </div>
+                  <InputOTP maxLength={6} value={otp} onChange={setOtp} containerClassName="justify-center">
+                    <InputOTPGroup>
+                      <InputOTPSlot index={0} />
+                      <InputOTPSlot index={1} />
+                      <InputOTPSlot index={2} />
+                      <InputOTPSlot index={3} />
+                      <InputOTPSlot index={4} />
+                      <InputOTPSlot index={5} />
+                    </InputOTPGroup>
+                  </InputOTP>
+                  <Button onClick={() => void onVerifyOtp()} disabled={busy} className="w-full h-11 rounded-xl font-semibold text-sm gap-2">
+                    {busy ? 'Verifying…' : <>Verify & Continue <ArrowRight className="h-4 w-4" /></>}
+                  </Button>
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
+        </div>
+
+        {/* Footer trust */}
+        <p className="text-center text-[11px] text-muted-foreground">
+          By continuing, you agree to our Terms of Service & Privacy Policy.
+        </p>
       </div>
     </div>
   );
 }
-
