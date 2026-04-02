@@ -403,12 +403,30 @@ const uploadDesign = multer({
 });
 
 const app = express();
-app.use(cors({ origin: true, credentials: true }));
+// Render runs behind a proxy; required for secure cookies (`SameSite=None; Secure`).
+app.set('trust proxy', 1);
+const FRONTEND_ORIGIN = (process.env.FRONTEND_ORIGIN || '').trim();
+app.use(
+  cors({
+    origin: FRONTEND_ORIGIN ? [FRONTEND_ORIGIN] : true,
+    credentials: true,
+  })
+);
 app.use(express.json({ limit: '16mb' }));
 
 // Cookie-session auth for logged-in customers.
 const SESSION_SECRET = process.env.SESSION_SECRET;
 const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS || 1000 * 60 * 60 * 24 * 7);
+const COOKIE_SAMESITE = (process.env.COOKIE_SAMESITE || '').trim().toLowerCase();
+const COOKIE_SECURE = (process.env.COOKIE_SECURE || '').trim().toLowerCase();
+const isProd = process.env.NODE_ENV === 'production';
+const cookieSameSite =
+  COOKIE_SAMESITE === 'none' || COOKIE_SAMESITE === 'lax' || COOKIE_SAMESITE === 'strict'
+    ? COOKIE_SAMESITE
+    : isProd
+      ? 'none'
+      : 'lax';
+const cookieSecure = COOKIE_SECURE ? COOKIE_SECURE === 'true' : isProd;
 app.use(
   session({
     name: 'tn_session',
@@ -424,8 +442,8 @@ app.use(
       : undefined,
     cookie: {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      secure: cookieSecure,
+      sameSite: cookieSameSite,
       maxAge: SESSION_TTL_MS,
     },
   })
