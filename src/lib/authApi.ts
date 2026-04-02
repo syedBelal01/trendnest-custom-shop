@@ -1,6 +1,19 @@
 import { apiUrl } from '@/lib/api';
 import type { Order, User } from '@/types';
 
+export async function emailExistsApi(email: string): Promise<boolean> {
+  const u = email.trim();
+  const res = await fetch(`${apiUrl('/api/auth/email-exists')}?email=${encodeURIComponent(u)}`, {
+    method: 'GET',
+    credentials: 'include',
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(typeof data.error === 'string' ? data.error : 'Failed to check email');
+  }
+  return !!data.exists;
+}
+
 export async function requestCheckoutOtpApi(params: { email: string; name?: string; phone?: string }): Promise<{ challengeId: string }> {
   const res = await fetch(apiUrl('/api/auth/otp/request'), {
     method: 'POST',

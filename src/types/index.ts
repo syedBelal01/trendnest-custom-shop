@@ -60,6 +60,7 @@ export interface User {
     label: string;
     address: string;
     city: string;
+    state?: string;
     pincode: string;
     isDefault?: boolean;
   }[];
@@ -104,6 +105,7 @@ export interface CustomerInfo {
   phone: string;
   address: string;
   city: string;
+  state?: string;
   pincode: string;
 }
 

@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { addAddressApi, deleteAddressApi, fetchMyAddressesApi, updateAddressApi, type Address } from '@/lib/authApi';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ArrowLeft, MapPin, Plus, Star, Trash2 } from 'lucide-react';
+import { lookupIndianPincode } from '@/lib/pincodeLookup';
 
 export default function AccountAddressesPage() {
   const [addresses, setAddresses] = useState<Address[]>([]);
@@ -15,9 +16,40 @@ export default function AccountAddressesPage() {
   const [label, setLabel] = useState('Home');
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
+  const [state, setState] = useState('');
   const [pincode, setPincode] = useState('');
+  const lastAutoCity = useRef<string | null>(null);
+  const lastAutoState = useRef<string | null>(null);
 
   const canAdd = useMemo(() => !!(address.trim() && city.trim() && pincode.trim()), [address, city, pincode]);
+
+  useEffect(() => {
+    const pin = pincode.replace(/[^\d]/g, '').slice(0, 6);
+    if (pin.length !== 6) return;
+    const t = window.setTimeout(() => {
+      void (async () => {
+        const r = await lookupIndianPincode(pin);
+        if (!r?.city) return;
+        setCity(prev => {
+          const cur = prev.trim();
+          const shouldFill = !cur || (lastAutoCity.current && cur === lastAutoCity.current);
+          if (!shouldFill) return prev;
+          lastAutoCity.current = r.city;
+          return r.city;
+        });
+        if (r.state) {
+          setState(prev => {
+            const cur = prev.trim();
+            const shouldFill = !cur || (lastAutoState.current && cur === lastAutoState.current);
+            if (!shouldFill) return prev;
+            lastAutoState.current = r.state!;
+            return r.state!;
+          });
+        }
+      })();
+    }, 450);
+    return () => window.clearTimeout(t);
+  }, [pincode]);
 
   useEffect(() => {
     let mounted = true;
@@ -39,9 +71,9 @@ export default function AccountAddressesPage() {
     if (!canAdd) return;
     setBusy(true);
     try {
-      const next = await addAddressApi({ label: label.trim() || 'Home', address: address.trim(), city: city.trim(), pincode: pincode.trim(), isDefault: addresses.length === 0 });
+      const next = await addAddressApi({ label: label.trim() || 'Home', address: address.trim(), city: city.trim(), state: state.trim() || undefined, pincode: pincode.trim(), isDefault: addresses.length === 0 });
       setAddresses(next);
-      setAddress(''); setCity(''); setPincode('');
+      setAddress(''); setCity(''); setState(''); setPincode('');
       setShowForm(false);
       toast.success('Address added');
     } catch (e) {
@@ -112,12 +144,16 @@ export default function AccountAddressesPage() {
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Pincode</label>
-              <Input value={pincode} onChange={e => setPincode(e.target.value)} className="h-10 rounded-xl" placeholder="123456" />
+              <Input value={pincode} onChange={e => setPincode(e.target.value.replace(/[^\d]/g, '').slice(0, 6))} className="h-10 rounded-xl" placeholder="123456" />
             </div>
           </div>
           <div className="space-y-1.5">
             <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">City</label>
-            <Input value={city} onChange={e => setCity(e.target.value)} className="h-10 rounded-xl" placeholder="City" />
+            <Input value={city} onChange={e => { lastAutoCity.current = null; setCity(e.target.value); }} className="h-10 rounded-xl" placeholder="City" />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">State</label>
+            <Input value={state} onChange={e => { lastAutoState.current = null; setState(e.target.value); }} className="h-10 rounded-xl" placeholder="State" />
           </div>
           <div className="space-y-1.5">
             <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Full Address</label>

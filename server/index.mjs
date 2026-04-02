@@ -88,6 +88,7 @@ const UserSchema = new mongoose.Schema(
           label: String,
           address: String,
           city: String,
+          state: String,
           pincode: String,
           isDefault: Boolean,
         },
@@ -105,7 +106,7 @@ const OtpChallengeSchema = new mongoose.Schema(
   {
     challengeId: { type: String, required: true, unique: true },
     purpose: { type: String, required: true }, // e.g. "checkout" | "password_reset"
-    userId: { type: String, required: true },
+    userId: { type: String, required: false },
     email: { type: String, required: true },
     codeHash: { type: String, required: true },
     codeSalt: { type: String, required: true },
@@ -148,6 +149,7 @@ const OrderSchema = new mongoose.Schema(
       phone: { type: String, required: true },
       address: { type: String, required: true },
       city: { type: String, required: true },
+      state: { type: String, default: undefined },
       pincode: { type: String, required: true },
     },
     // Optional authenticated customer relation (set after OTP verification).
@@ -541,6 +543,21 @@ app.post('/api/auth/logout', (req, res) => {
   });
 });
 
+app.get('/api/auth/email-exists', async (req, res) => {
+  try {
+    const email = String(req.query?.email || '').trim();
+    if (!email || !simpleEmailValid(email)) {
+      res.status(400).json({ error: 'Invalid email' });
+      return;
+    }
+    const exists = !!(await User.exists({ email }));
+    res.json({ exists });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to check email' });
+  }
+});
+
 app.post('/api/auth/otp/request', async (req, res) => {
   try {
     const email = String(req.body?.email || req.body?.identifier || '').trim();
@@ -555,18 +572,11 @@ app.post('/api/auth/otp/request', async (req, res) => {
       return;
     }
 
-    // For this MVP we create/update customer by email only.
-    let user = await User.findOne({ email }).exec();
-    if (!user) {
-      const newId = `usr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      user = await User.create({
-        _id: newId,
-        email,
-        name: String(req.body?.name || '').trim() || '',
-        phone: String(req.body?.phone || '').trim() || undefined,
-        // We will force password set later (after OTP verified + session login).
-        mustResetPassword: true,
-      });
+    const existingUser = await User.findOne({ email }).exec();
+    if (purpose === 'password_reset' && !existingUser) {
+      // Avoid account enumeration. Still respond with a generic success.
+      res.json({ ok: true });
+      return;
     }
 
     // Create OTP challenge and send OTP email.
@@ -583,7 +593,7 @@ app.post('/api/auth/otp/request', async (req, res) => {
     await OtpChallenge.create({
       challengeId,
       purpose,
-      userId: user._id,
+      userId: existingUser?._id,
       email,
       codeHash,
       codeSalt,
@@ -638,13 +648,32 @@ app.post('/api/auth/otp/verify', async (req, res) => {
       return;
     }
 
+    let userId = challenge.userId ? String(challenge.userId) : '';
+    if (!userId && challenge.purpose !== 'password_reset') {
+      const email = String(challenge.email || '').trim();
+      const existing = email ? await User.findOne({ email }).exec() : null;
+      if (existing) {
+        userId = existing._id;
+      } else {
+        const newId = `usr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        const created = await User.create({
+          _id: newId,
+          email,
+          name: String(req.body?.name || '').trim() || '',
+          phone: String(req.body?.phone || '').trim() || undefined,
+          mustResetPassword: true,
+        });
+        userId = created._id;
+      }
+    }
+
     // OTP verified → login (cookie session).
-    req.session.userId = challenge.userId;
+    if (userId) req.session.userId = userId;
 
     // Cleanup old challenge.
     await OtpChallenge.deleteOne({ _id: challenge._id });
 
-    const user = await User.findById(challenge.userId).lean();
+    const user = userId ? await User.findById(userId).lean() : null;
     res.json({ user: user ? serializeUser(user) : null });
   } catch (e) {
     console.error(e);
@@ -705,6 +734,7 @@ app.post('/api/me/addresses', mongoReady, requireAuth, async (req, res) => {
     const label = String(req.body?.label || 'Home').trim();
     const address = String(req.body?.address || '').trim();
     const city = String(req.body?.city || '').trim();
+    const state = req.body?.state != null ? String(req.body.state).trim() : '';
     const pincode = String(req.body?.pincode || '').trim();
     const isDefault = !!req.body?.isDefault;
     if (!address || !city || !pincode) {
@@ -712,7 +742,7 @@ app.post('/api/me/addresses', mongoReady, requireAuth, async (req, res) => {
       return;
     }
     const id = `addr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const addr = { id, label, address, city, pincode, isDefault };
+    const addr = { id, label, address, city, state: state || undefined, pincode, isDefault };
     const u = await User.findById(req.session.userId).exec();
     if (!u) {
       res.status(404).json({ error: 'User not found' });
@@ -749,6 +779,7 @@ app.patch('/api/me/addresses/:id', mongoReady, requireAuth, async (req, res) => 
       label: req.body?.label != null ? String(req.body.label).trim() : cur.label,
       address: req.body?.address != null ? String(req.body.address).trim() : cur.address,
       city: req.body?.city != null ? String(req.body.city).trim() : cur.city,
+      state: req.body?.state != null ? String(req.body.state).trim() : cur.state,
       pincode: req.body?.pincode != null ? String(req.body.pincode).trim() : cur.pincode,
       isDefault: req.body?.isDefault != null ? !!req.body.isDefault : cur.isDefault,
     };
@@ -1106,6 +1137,7 @@ app.post('/api/orders', mongoReady, async (req, res) => {
     const phone = String(c.phone || '').trim();
     const address = String(c.address || '').trim();
     const city = String(c.city || '').trim();
+    const state = c.state != null ? String(c.state).trim() : '';
     const pincode = String(c.pincode || '').trim();
     if (!name || !email || !phone || !address || !city || !pincode) {
       res.status(400).json({ error: 'All customer fields including email are required.' });
@@ -1132,7 +1164,7 @@ app.post('/api/orders', mongoReady, async (req, res) => {
     const orderId = `ORD-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     await Order.create({
       _id: orderId,
-      customer: { name, email, phone, address, city, pincode },
+      customer: { name, email, phone, address, city, state: state || undefined, pincode },
       userId: req.session?.userId,
       items,
       subtotal,
