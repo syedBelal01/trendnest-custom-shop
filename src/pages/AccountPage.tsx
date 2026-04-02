@@ -4,6 +4,14 @@ import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { fetchMeApi, logoutApi } from '@/lib/authApi';
 import type { User } from '@/types';
+import { ShoppingBag, MapPin, ShoppingCart, Settings, LogOut, Mail, Phone, User as UserIcon, ChevronRight, Headphones } from 'lucide-react';
+
+const menuItems = [
+  { to: '/account/orders', label: 'My Orders', desc: 'Track and manage your orders', icon: ShoppingBag },
+  { to: '/account/addresses', label: 'Address Book', desc: 'Manage delivery addresses', icon: MapPin },
+  { to: '/cart', label: 'My Cart', desc: 'View items in your cart', icon: ShoppingCart },
+  { to: '/account/settings', label: 'Settings', desc: 'Update password & preferences', icon: Settings },
+];
 
 export default function AccountPage() {
   const [user, setUser] = useState<User | null>(null);
@@ -22,9 +30,7 @@ export default function AccountPage() {
         if (mounted) setLoading(false);
       }
     })();
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, []);
 
   const onLogout = async () => {
@@ -37,72 +43,83 @@ export default function AccountPage() {
     }
   };
 
-  if (loading) return <div className="py-10 text-center text-muted-foreground">Loading…</div>;
+  if (loading) {
+    return (
+      <div className="min-h-[60vh] flex items-center justify-center">
+        <div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
   if (!user) return <div className="py-10 text-center text-muted-foreground">Not logged in</div>;
 
+  const initials = (user.name || user.email).slice(0, 2).toUpperCase();
+
   return (
-    <div className="max-w-3xl mx-auto px-3 sm:px-4 py-8 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold mb-1">My Account</h1>
-        <p className="text-sm text-muted-foreground">Manage your profile and orders.</p>
-      </div>
-
-      <div className="border rounded-lg p-4 bg-muted/50 space-y-2">
-        <div className="text-sm">
-          <span className="text-muted-foreground">Name:</span> {user.name || '—'}
-        </div>
-        <div className="text-sm">
-          <span className="text-muted-foreground">Email:</span> {user.email}
-        </div>
-        <div className="text-sm">
-          <span className="text-muted-foreground">Phone:</span> {user.phone || '—'}
-        </div>
-        <div className="text-sm">
-          <span className="text-muted-foreground">Password:</span>{' '}
-          {user.mustResetPassword ? 'Needs setup' : 'Set'}
-        </div>
-        {user.mustResetPassword && (
-          <div className="pt-2">
-            <Link to="/account/settings">
-              <Button size="sm" variant="outline">
-                Set password
-              </Button>
-            </Link>
+    <div className="max-w-lg mx-auto px-4 py-6 sm:py-8 space-y-5">
+      {/* Profile card */}
+      <div className="rounded-2xl border bg-card shadow-sm overflow-hidden">
+        <div className="bg-gradient-to-br from-primary/10 via-primary/5 to-transparent p-5 sm:p-6">
+          <div className="flex items-center gap-4">
+            <div className="h-14 w-14 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-lg font-bold shrink-0">
+              {initials}
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-lg font-bold truncate">{user.name || 'User'}</h1>
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-0.5">
+                <Mail className="h-3 w-3 shrink-0" />
+                <span className="truncate">{user.email}</span>
+              </div>
+              {user.phone && (
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-0.5">
+                  <Phone className="h-3 w-3 shrink-0" />
+                  <span>{user.phone}</span>
+                </div>
+              )}
+            </div>
           </div>
-        )}
+          {user.mustResetPassword && (
+            <Link to="/account/settings" className="mt-3 flex items-center gap-2 text-xs text-primary font-medium bg-primary/10 rounded-lg px-3 py-2">
+              <Settings className="h-3.5 w-3.5" /> Please set your password
+              <ChevronRight className="h-3.5 w-3.5 ml-auto" />
+            </Link>
+          )}
+        </div>
       </div>
 
-      <div className="grid sm:grid-cols-2 gap-3">
-        <Link to="/account/orders">
-          <Button variant="outline" className="w-full justify-start">My Orders</Button>
-        </Link>
-        <Link to="/account/addresses">
-          <Button variant="outline" className="w-full justify-start">Address Book</Button>
-        </Link>
-        <Link to="/cart">
-          <Button variant="outline" className="w-full justify-start">Cart</Button>
-        </Link>
-        <a href="mailto:trendnest099@gmail.com">
-          <Button variant="outline" className="w-full justify-start" type="button">Customer Support</Button>
+      {/* Menu items */}
+      <div className="rounded-2xl border bg-card shadow-sm overflow-hidden divide-y">
+        {menuItems.map(item => (
+          <Link key={item.to} to={item.to} className="flex items-center gap-3.5 p-4 hover:bg-muted/50 transition-colors active:bg-muted/70">
+            <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+              <item.icon className="h-5 w-5 text-primary" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold">{item.label}</div>
+              <div className="text-xs text-muted-foreground">{item.desc}</div>
+            </div>
+            <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+          </Link>
+        ))}
+        <a href="mailto:trendnest099@gmail.com" className="flex items-center gap-3.5 p-4 hover:bg-muted/50 transition-colors active:bg-muted/70">
+          <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+            <Headphones className="h-5 w-5 text-primary" />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-semibold">Customer Support</div>
+            <div className="text-xs text-muted-foreground">Get help via email</div>
+          </div>
+          <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
         </a>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        <Link to="/account/orders">
-          <Button size="sm" variant="outline">
-            View orders
-          </Button>
-        </Link>
-        <Link to="/account/settings">
-          <Button size="sm" variant="outline">
-            Settings
-          </Button>
-        </Link>
-        <Button size="sm" variant="outline" onClick={() => void onLogout()}>
-          Logout
-        </Button>
-      </div>
+      {/* Logout */}
+      <Button
+        variant="outline"
+        onClick={() => void onLogout()}
+        className="w-full h-11 rounded-xl gap-2 text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/20"
+      >
+        <LogOut className="h-4 w-4" /> Sign Out
+      </Button>
     </div>
   );
 }
-
