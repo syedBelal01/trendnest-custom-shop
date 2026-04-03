@@ -105,9 +105,8 @@ export const initialProducts: Product[] = [
 ];
 
 export const coupons: Coupon[] = [
-  { id: 'c1', code: 'WELCOME10', type: 'percentage', value: 10, minOrder: 500, isActive: true, expiresAt: '2026-06-30' },
-  { id: 'c2', code: 'FLAT100', type: 'flat', value: 100, minOrder: 999, isActive: true, expiresAt: '2026-04-30' },
-  { id: 'c3', code: 'FREESHIP', type: 'free_delivery', value: 0, minOrder: 499, isActive: true, expiresAt: '2026-05-31' },
+  { id: 'c1', code: 'WELCOME10', type: 'percentage', value: 10, minOrder: 500, isActive: true, scope: 'cart' },
+  { id: 'c2', code: 'FLAT100', type: 'flat', value: 100, minOrder: 999, isActive: true, scope: 'cart' },
 ];
 
 export const categories = [

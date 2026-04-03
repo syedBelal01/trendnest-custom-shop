@@ -150,7 +150,12 @@ export default function CheckoutPage() {
     }
     setOtpBusy(true);
     try {
-      await verifyOtpApi({ challengeId: otpChallengeId, code: otpCode });
+      await verifyOtpApi({
+        challengeId: otpChallengeId,
+        code: otpCode,
+        name: form.name,
+        phone: form.phone,
+      });
       setOtpVerified(true);
       toast.success('Email verified');
     } catch (err) {

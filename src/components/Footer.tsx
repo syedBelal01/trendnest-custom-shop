@@ -28,8 +28,20 @@ export default function Footer() {
         <div>
           <h4 className="font-semibold mb-2 sm:mb-3 text-sm">Contact</h4>
           <div className="space-y-1.5 sm:space-y-2 text-sm text-muted-foreground">
-            <span className="block break-all">support@trendnest99.com</span>
-            <a href="https://wa.me/919876543210" target="_blank" rel="noreferrer" className="block hover:text-foreground">WhatsApp Order</a>
+            <a
+              href="mailto:trendnest099@gmail.com"
+              className="block break-all hover:text-foreground"
+            >
+              trendnest099@gmail.com
+            </a>
+            <a
+              href="https://wa.me/918543841110"
+              target="_blank"
+              rel="noreferrer"
+              className="block hover:text-foreground"
+            >
+              WhatsApp: 8543841110
+            </a>
           </div>
         </div>
       </div>

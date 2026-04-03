@@ -82,7 +82,12 @@ export default function LoginPage() {
     }
     setBusy(true);
     try {
-      const { user } = await verifyOtpApi({ challengeId: otpChallengeId, code: otp });
+      const { user } = await verifyOtpApi({
+        challengeId: otpChallengeId,
+        code: otp,
+        name: name.trim() || undefined,
+        phone: phone.trim() || undefined,
+      });
       toast.success('Logged in');
       window.location.href = user?.mustResetPassword ? '/account/settings' : '/account';
     } catch (e) {

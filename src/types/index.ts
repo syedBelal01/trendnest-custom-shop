@@ -112,11 +112,21 @@ export interface CustomerInfo {
 export interface Coupon {
   id: string;
   code: string;
-  type: 'percentage' | 'flat' | 'free_delivery';
+  type: 'percentage' | 'flat';
   value: number;
   minOrder: number;
   isActive: boolean;
-  expiresAt: string;
+  // Optional richer rules (server-driven)
+  maxDiscount?: number;
+  scope?: 'cart' | 'products' | 'categories';
+  productIds?: string[];
+  categoryIds?: string[];
+  startAt?: string;
+  endAt?: string;
+  usageTotalLimit?: number;
+  usagePerUserLimit?: number;
+  newUsersOnly?: boolean;
+  allowedUserGroups?: string[];
 }
 
 export type OrderStatus = Order['status'];

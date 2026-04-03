@@ -4,21 +4,31 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Trash2, ShoppingBag } from 'lucide-react';
 import { useState } from 'react';
-import { coupons } from '@/data/mockData';
 import { productImageForVariant } from '@/lib/productImages';
 import { toast } from 'sonner';
+import { validateCouponApi } from '@/lib/couponsApi';
 
 export default function CartPage() {
   const { items, removeItem, updateQuantity, subtotal, total, discount, couponCode, applyCoupon } = useCart();
   const [code, setCode] = useState('');
 
-  const handleCoupon = () => {
-    const coupon = coupons.find(c => c.code.toLowerCase() === code.toLowerCase() && c.isActive);
-    if (!coupon) { toast.error('Invalid or expired coupon'); return; }
-    if (subtotal < coupon.minOrder) { toast.error(`Min order ₹${coupon.minOrder} required`); return; }
-    const disc = coupon.type === 'percentage' ? Math.round(subtotal * coupon.value / 100) : coupon.type === 'flat' ? coupon.value : 0;
-    applyCoupon(coupon.code, disc);
-    toast.success(`Coupon applied! You save ₹${disc}`);
+  const handleCoupon = async () => {
+    const trimmed = code.trim();
+    if (!trimmed) {
+      toast.error('Enter coupon code');
+      return;
+    }
+    try {
+      const r = await validateCouponApi({
+        code: trimmed,
+        subtotal,
+        items: items.map(i => ({ productId: i.product.id, quantity: i.quantity })),
+      });
+      applyCoupon(r.couponCode, r.discount);
+      toast.success(`Coupon applied! You save ₹${r.discount}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Invalid or expired coupon');
+    }
   };
 
   if (items.length === 0) {

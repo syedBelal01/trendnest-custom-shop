@@ -42,12 +42,22 @@ export async function requestAuthOtpApi(params: { email: string; name?: string; 
   return { challengeId: String(data.challengeId) };
 }
 
-export async function verifyOtpApi(params: { challengeId: string; code: string }): Promise<{ user: User | null }> {
+export async function verifyOtpApi(params: {
+  challengeId: string;
+  code: string;
+  name?: string;
+  phone?: string;
+}): Promise<{ user: User | null }> {
   const res = await fetch(apiUrl('/api/auth/otp/verify'), {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ challengeId: params.challengeId, code: params.code }),
+    body: JSON.stringify({
+      challengeId: params.challengeId,
+      code: params.code,
+      name: params.name,
+      phone: params.phone,
+    }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {

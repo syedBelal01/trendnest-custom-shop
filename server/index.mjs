@@ -120,6 +120,159 @@ const OtpChallengeSchema = new mongoose.Schema(
 const User = mongoose.model('User', UserSchema);
 const OtpChallenge = mongoose.model('OtpChallenge', OtpChallengeSchema);
 
+const CouponSchema = new mongoose.Schema(
+  {
+    code: { type: String, required: true, unique: true },
+    type: { type: String, required: true, enum: ['percentage', 'flat'] }, // free_delivery is not supported
+    value: { type: Number, required: true }, // percentage or flat amount
+    maxDiscount: { type: Number, default: undefined }, // optional cap on discount amount
+    minOrder: { type: Number, default: 0 },
+
+    // Applicability
+    scope: { type: String, required: true, enum: ['cart', 'products', 'categories'] },
+    productIds: { type: [String], default: [] },
+    categoryIds: { type: [String], default: [] },
+
+    // Valid time period
+    startAt: { type: Date, default: undefined },
+    endAt: { type: Date, default: undefined },
+
+    isActive: { type: Boolean, default: true },
+
+    // Usage limits
+    usageTotalLimit: { type: Number, default: undefined }, // optional total times coupon can be used
+    usagePerUserLimit: { type: Number, default: undefined }, // optional times per user
+
+    // Restrictions (optional)
+    newUsersOnly: { type: Boolean, default: false },
+    allowedUserGroups: { type: [String], default: [] }, // placeholder for future group model
+  },
+  { versionKey: false, timestamps: true }
+);
+
+const Coupon = mongoose.model('Coupon', CouponSchema);
+
+const CouponUsageSchema = new mongoose.Schema(
+  {
+    couponId: { type: String, required: true, index: true },
+    userId: { type: String, required: true, index: true },
+    count: { type: Number, default: 0 },
+    lastUsedAt: { type: Date, default: undefined },
+  },
+  { versionKey: false, timestamps: true }
+);
+
+CouponUsageSchema.index({ couponId: 1, userId: 1 }, { unique: true });
+
+const CouponUsage = mongoose.model('CouponUsage', CouponUsageSchema);
+
+function normalizeCouponCode(code) {
+  return String(code || '').trim().toUpperCase();
+}
+
+function toDateOrUndefined(raw) {
+  if (raw == null || raw === '') return undefined;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return undefined;
+  return d;
+}
+
+async function validateCouponForCart({ code, subtotal, items, userId }) {
+  const couponCode = normalizeCouponCode(code);
+  if (!couponCode) {
+    return { ok: false, error: 'Coupon code is required' };
+  }
+
+  const coupon = await Coupon.findOne({ code: couponCode }).lean();
+  if (!coupon || !coupon.isActive) {
+    return { ok: false, error: 'Invalid or expired coupon' };
+  }
+
+  const now = Date.now();
+  if (coupon.startAt && coupon.startAt.getTime && coupon.startAt.getTime() > now) {
+    return { ok: false, error: 'Coupon is not active yet' };
+  }
+  if (coupon.endAt && coupon.endAt.getTime && coupon.endAt.getTime() < now) {
+    return { ok: false, error: 'Coupon has expired' };
+  }
+
+  const sub = Number(subtotal);
+  if (!Number.isFinite(sub) || sub < 0) return { ok: false, error: 'Invalid cart subtotal' };
+  if (sub < Number(coupon.minOrder || 0)) {
+    return { ok: false, error: `Minimum order ₹${coupon.minOrder || 0} required` };
+  }
+
+  const productIds = (items || []).map(i => String(i.productId)).filter(Boolean);
+  const uniqIds = [...new Set(productIds)];
+  const products = uniqIds.length ? await Product.find({ _id: { $in: uniqIds } }).lean() : [];
+  const productById = new Map(products.map(p => [String(p._id), p]));
+
+  const cartProductIds = new Set(productIds);
+  const cartCategories = new Set(
+    products
+      .map(p => p?.category)
+      .filter(Boolean)
+      .map(String)
+  );
+
+  if (coupon.scope === 'products') {
+    if (!Array.isArray(coupon.productIds) || coupon.productIds.length === 0) {
+      return { ok: false, error: 'Coupon is not configured for products' };
+    }
+    const ok = coupon.productIds.some(pid => cartProductIds.has(String(pid)));
+    if (!ok) return { ok: false, error: 'Coupon does not apply to selected products' };
+  }
+
+  if (coupon.scope === 'categories') {
+    if (!Array.isArray(coupon.categoryIds) || coupon.categoryIds.length === 0) {
+      return { ok: false, error: 'Coupon is not configured for categories' };
+    }
+    const ok = coupon.categoryIds.some(cid => cartCategories.has(String(cid)));
+    if (!ok) return { ok: false, error: 'Coupon does not apply to selected categories' };
+  }
+
+  if (coupon.newUsersOnly) {
+    if (!userId) return { ok: false, error: 'This coupon is for new users only' };
+    const u = await User.findById(userId).lean();
+    // In this app, "new users" are accounts that haven't set a password yet.
+    const isNew = !!u?.mustResetPassword;
+    if (!isNew) return { ok: false, error: 'This coupon is for new users only' };
+  }
+
+  // Usage validation (best-effort: enforce total and per-user only when userId exists)
+  if (coupon.usageTotalLimit != null && Number.isFinite(Number(coupon.usageTotalLimit))) {
+    const usedTotal = await CouponUsage.countDocuments({ couponId: String(coupon._id) });
+    if (usedTotal >= Number(coupon.usageTotalLimit)) {
+      return { ok: false, error: 'Coupon usage limit reached' };
+    }
+  }
+
+  if (coupon.usagePerUserLimit != null && userId) {
+    const u = await CouponUsage.findOne({ couponId: String(coupon._id), userId: String(userId) }).lean();
+    const usedByUser = u?.count ? Number(u.count) : 0;
+    if (usedByUser >= Number(coupon.usagePerUserLimit)) {
+      return { ok: false, error: 'You already used this coupon' };
+    }
+  }
+
+  // Compute discount amount
+  const val = Number(coupon.value);
+  let discount = 0;
+  if (coupon.type === 'percentage') {
+    discount = Math.round((sub * val) / 100);
+  } else if (coupon.type === 'flat') {
+    discount = val;
+  }
+
+  if (coupon.maxDiscount != null && Number.isFinite(Number(coupon.maxDiscount))) {
+    discount = Math.min(discount, Number(coupon.maxDiscount));
+  }
+
+  discount = Math.max(0, Math.min(discount, sub));
+
+  return { ok: true, couponCode: coupon.code, discount, couponId: String(coupon._id) };
+}
+
 const MAX_CUSTOM_INLINE_BYTES = 500 * 1024;
 const ORDER_STATUSES = ['pending', 'packed', 'shipped', 'delivered'];
 
@@ -558,6 +711,168 @@ app.get('/api/auth/email-exists', async (req, res) => {
   }
 });
 
+function serializeCoupon(doc) {
+  if (!doc) return null;
+  const out = doc.toObject ? doc.toObject({ flattenMaps: true, versionKey: false }) : { ...doc };
+  const id = out._id;
+  delete out._id;
+  return { id, ...out };
+}
+
+function parseIdList(raw) {
+  if (raw == null) return [];
+  if (Array.isArray(raw)) return raw.map(s => String(s)).map(s => s.trim()).filter(Boolean);
+  if (typeof raw === 'string') {
+    return raw.split(',').map(s => s.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+app.get('/api/coupons', mongoReady, adminKeyRequired, async (_req, res) => {
+  try {
+    const docs = await Coupon.find().sort({ createdAt: -1 }).lean();
+    res.json(docs.map(d => serializeCoupon(d)));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to list coupons' });
+  }
+});
+
+app.post('/api/coupons', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const code = normalizeCouponCode(body.code);
+    const type = String(body.type || '').trim();
+
+    if (!code) {
+      res.status(400).json({ error: 'Coupon code is required' });
+      return;
+    }
+    if (!['percentage', 'flat'].includes(type)) {
+      res.status(400).json({ error: 'Coupon type must be percentage or flat' });
+      return;
+    }
+
+    const scope = String(body.scope || 'cart').trim();
+    if (!['cart', 'products', 'categories'].includes(scope)) {
+      res.status(400).json({ error: 'Invalid coupon scope' });
+      return;
+    }
+
+    const coupon = await Coupon.create({
+      code,
+      type,
+      value: Number(body.value ?? 0),
+      maxDiscount: body.maxDiscount != null && body.maxDiscount !== '' ? Number(body.maxDiscount) : undefined,
+      minOrder: Number(body.minOrder ?? 0),
+
+      scope,
+      productIds: parseIdList(body.productIds),
+      categoryIds: parseIdList(body.categoryIds),
+
+      startAt: toDateOrUndefined(body.startAt),
+      endAt: toDateOrUndefined(body.endAt),
+
+      isActive: body.isActive !== false,
+
+      usageTotalLimit: body.usageTotalLimit != null && body.usageTotalLimit !== '' ? Number(body.usageTotalLimit) : undefined,
+      usagePerUserLimit: body.usagePerUserLimit != null && body.usagePerUserLimit !== '' ? Number(body.usagePerUserLimit) : undefined,
+
+      newUsersOnly: !!body.newUsersOnly,
+      allowedUserGroups: parseIdList(body.allowedUserGroups),
+    });
+
+    res.status(201).json(serializeCoupon(coupon));
+  } catch (e) {
+    console.error(e);
+    if (e && e.code === 11000) {
+      res.status(409).json({ error: 'Coupon code already exists' });
+      return;
+    }
+    res.status(400).json({ error: e instanceof Error ? e.message : 'Failed to create coupon' });
+  }
+});
+
+app.patch('/api/coupons/:id', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const body = req.body || {};
+
+    const patch = {};
+    if (body.code != null) patch.code = normalizeCouponCode(body.code);
+    if (body.type != null) {
+      const type = String(body.type).trim();
+      if (type === 'free_delivery') {
+        res.status(400).json({ error: 'free_delivery is not supported' });
+        return;
+      }
+      patch.type = type;
+    }
+    if (body.value != null) patch.value = Number(body.value);
+    if (body.maxDiscount != null) patch.maxDiscount = body.maxDiscount === '' ? undefined : Number(body.maxDiscount);
+    if (body.minOrder != null) patch.minOrder = Number(body.minOrder);
+    if (body.scope != null) patch.scope = String(body.scope).trim();
+    if (body.productIds != null) patch.productIds = parseIdList(body.productIds);
+    if (body.categoryIds != null) patch.categoryIds = parseIdList(body.categoryIds);
+    if (body.startAt !== undefined) patch.startAt = toDateOrUndefined(body.startAt);
+    if (body.endAt !== undefined) patch.endAt = toDateOrUndefined(body.endAt);
+    if (body.isActive != null) patch.isActive = !!body.isActive;
+    if (body.usageTotalLimit !== undefined)
+      patch.usageTotalLimit = body.usageTotalLimit === '' ? undefined : Number(body.usageTotalLimit);
+    if (body.usagePerUserLimit !== undefined)
+      patch.usagePerUserLimit = body.usagePerUserLimit === '' ? undefined : Number(body.usagePerUserLimit);
+    if (body.newUsersOnly != null) patch.newUsersOnly = !!body.newUsersOnly;
+    if (body.allowedUserGroups != null) patch.allowedUserGroups = parseIdList(body.allowedUserGroups);
+
+    const updated = await Coupon.findByIdAndUpdate(id, { $set: patch }, { new: true }).lean();
+    if (!updated) {
+      res.status(404).json({ error: 'Coupon not found' });
+      return;
+    }
+
+    res.json(serializeCoupon(updated));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to update coupon' });
+  }
+});
+
+app.delete('/api/coupons/:id', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const r = await Coupon.findByIdAndDelete(id);
+    if (!r) {
+      res.status(404).json({ error: 'Coupon not found' });
+      return;
+    }
+    res.status(204).end();
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to delete coupon' });
+  }
+});
+
+app.post('/api/coupons/validate', mongoReady, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const code = String(body.code || '');
+    const subtotal = Number(body.subtotal);
+    const items = Array.isArray(body.items) ? body.items : [];
+    const userId = req.session?.userId ? String(req.session.userId) : undefined;
+
+    const result = await validateCouponForCart({ code, subtotal, items, userId });
+    if (!result.ok) {
+      res.status(400).json({ error: result.error || 'Invalid coupon' });
+      return;
+    }
+
+    res.json({ ok: true, couponCode: result.couponCode, discount: result.discount });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to validate coupon' });
+  }
+});
+
 app.post('/api/auth/otp/request', async (req, res) => {
   try {
     const email = String(req.body?.email || req.body?.identifier || '').trim();
@@ -672,6 +987,24 @@ app.post('/api/auth/otp/verify', async (req, res) => {
 
     // Cleanup old challenge.
     await OtpChallenge.deleteOne({ _id: challenge._id });
+
+    // Safety net: backfill missing profile fields from the verified flow.
+    if (userId) {
+      const name = String(req.body?.name || '').trim();
+      const phoneRaw = String(req.body?.phone || '').trim();
+      const phone = phoneRaw || undefined;
+      if (name || phone) {
+        const existingUser = await User.findById(userId).lean();
+        if (existingUser) {
+          const $set = {};
+          if (name && !String(existingUser.name || '').trim()) $set.name = name;
+          if (phone && !String(existingUser.phone || '').trim()) $set.phone = phone;
+          if (Object.keys($set).length > 0) {
+            await User.updateOne({ _id: userId }, { $set });
+          }
+        }
+      }
+    }
 
     const user = userId ? await User.findById(userId).lean() : null;
     res.json({ user: user ? serializeUser(user) : null });
@@ -1147,6 +1480,13 @@ app.post('/api/orders', mongoReady, async (req, res) => {
       res.status(400).json({ error: 'Invalid email address.' });
       return;
     }
+
+    // Ensure authenticated user relation when email exists (needed for coupons + per-user limits).
+    if (!req.session?.userId) {
+      const u = await User.findOne({ email }).exec();
+      if (u) req.session.userId = u._id;
+    }
+
     let items;
     try {
       items = normalizeOrderItemsFromBody(body.items);
@@ -1155,12 +1495,74 @@ app.post('/api/orders', mongoReady, async (req, res) => {
       return;
     }
     const subtotal = Number(body.subtotal);
-    const discount = Number(body.discount) || 0;
-    const total = Number(body.total);
-    if (!Number.isFinite(subtotal) || !Number.isFinite(total)) {
+    if (!Number.isFinite(subtotal)) {
       res.status(400).json({ error: 'Invalid totals' });
       return;
     }
+
+    // Coupon enforcement (server-side): compute discount and total again to prevent tampering.
+    let discount = Number(body.discount) || 0;
+    let couponCode = body.couponCode ? normalizeCouponCode(body.couponCode) : undefined;
+    let total = Number(body.total);
+    if (!Number.isFinite(total)) {
+      res.status(400).json({ error: 'Invalid totals' });
+      return;
+    }
+
+    if (couponCode) {
+      const itemsForValidate = items.map(l => ({ productId: l.productId, quantity: l.quantity }));
+      const sessionUserId = req.session?.userId ? String(req.session.userId) : undefined;
+      const validation = await validateCouponForCart({
+        code: couponCode,
+        subtotal,
+        items: itemsForValidate,
+        userId: sessionUserId,
+      });
+      if (!validation.ok) {
+        res.status(400).json({ error: validation.error || 'Invalid coupon' });
+        return;
+      }
+
+      // Enforce usage limits again only when we have userId (required for usage accounting).
+      const couponDoc = await Coupon.findById(validation.couponId).lean();
+      if (!couponDoc) {
+        res.status(400).json({ error: 'Invalid coupon' });
+        return;
+      }
+      const couponId = String(couponDoc._id);
+      const userId = req.session?.userId ? String(req.session.userId) : undefined;
+      if (!userId) {
+        res.status(400).json({ error: 'Login is required to use coupons' });
+        return;
+      }
+
+      if (couponDoc.usageTotalLimit != null && Number.isFinite(Number(couponDoc.usageTotalLimit))) {
+        const usedTotal = await CouponUsage.countDocuments({ couponId });
+        if (usedTotal >= Number(couponDoc.usageTotalLimit)) {
+          res.status(400).json({ error: 'Coupon usage limit reached' });
+          return;
+        }
+      }
+      if (couponDoc.usagePerUserLimit != null && Number.isFinite(Number(couponDoc.usagePerUserLimit))) {
+        const u = await CouponUsage.findOne({ couponId, userId }).lean();
+        const usedByUser = u?.count ? Number(u.count) : 0;
+        if (usedByUser >= Number(couponDoc.usagePerUserLimit)) {
+          res.status(400).json({ error: 'You already used this coupon' });
+          return;
+        }
+      }
+
+      discount = validation.discount;
+      couponCode = validation.couponCode;
+      total = Math.max(0, subtotal - discount);
+
+      await CouponUsage.findOneAndUpdate(
+        { couponId, userId },
+        { $inc: { count: 1 }, $set: { lastUsedAt: new Date() } },
+        { upsert: true, new: false }
+      );
+    }
+
     const orderId = `ORD-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     await Order.create({
       _id: orderId,
@@ -1169,7 +1571,7 @@ app.post('/api/orders', mongoReady, async (req, res) => {
       items,
       subtotal,
       discount,
-      couponCode: body.couponCode ? String(body.couponCode) : undefined,
+      couponCode,
       total,
       hasCustomPrint: !!body.hasCustomPrint,
       status: 'pending',
