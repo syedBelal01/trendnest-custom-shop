@@ -8,6 +8,7 @@ import { ShoppingCart, ArrowLeft } from 'lucide-react';
 import type { Product } from '@/types';
 import { productVariantNames } from '@/lib/productVariants';
 import { galleryImagesForSelection } from '@/lib/productImages';
+import { fetchProductReviewsApi, type Review as ApiReview } from '@/lib/reviewsApi';
 
 function variantOptionLabel(product: Product): string {
   if (product.subcategory === 'Belts') return 'Leather color';
@@ -24,13 +25,16 @@ const pillOption = (active: boolean) =>
 
 export default function ProductDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const { products } = useProducts();
+  const { products, ratingSummary } = useProducts();
   const product = products.find(p => p.id === id);
   const { addItem } = useCart();
   const [selectedSize, setSelectedSize] = useState('');
   const [selectedVariant, setSelectedVariant] = useState('');
   const [selectedSleeve, setSelectedSleeve] = useState('');
   const [qty, setQty] = useState(1);
+  const [reviews, setReviews] = useState<ApiReview[]>([]);
+  const [reviewsCursor, setReviewsCursor] = useState<string | null>(null);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
 
   useEffect(() => {
     if (!product) return;
@@ -39,6 +43,37 @@ export default function ProductDetailPage() {
     setSelectedSleeve(product.sleeveTypes?.[0] || '');
     setQty(1);
   }, [product]);
+
+  useEffect(() => {
+    if (!product?.id) return;
+    let mounted = true;
+    setReviewsLoading(true);
+    void (async () => {
+      try {
+        const r = await fetchProductReviewsApi({ productId: product.id, limit: 5 });
+        if (!mounted) return;
+        setReviews(r.reviews);
+        setReviewsCursor(r.nextCursor);
+      } finally {
+        if (mounted) setReviewsLoading(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [product?.id]);
+
+  const loadMoreReviews = async () => {
+    if (!product?.id || !reviewsCursor || reviewsLoading) return;
+    setReviewsLoading(true);
+    try {
+      const r = await fetchProductReviewsApi({ productId: product.id, limit: 10, cursor: reviewsCursor });
+      setReviews(prev => [...prev, ...r.reviews]);
+      setReviewsCursor(r.nextCursor);
+    } finally {
+      setReviewsLoading(false);
+    }
+  };
 
   const variantNames = product ? productVariantNames(product) : [];
   const galleryImages = useMemo(
@@ -58,6 +93,11 @@ export default function ProductDetailPage() {
   const discount = product.originalPrice
     ? Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100)
     : 0;
+
+  const summary = ratingSummary[product.id];
+  const avg = summary?.avgRating ?? 0;
+  const count = summary?.reviewCount ?? 0;
+  const filled = Math.round(avg);
 
   return (
     <div className="max-w-7xl mx-auto px-3 sm:px-4 py-6 sm:py-8">
@@ -91,12 +131,19 @@ export default function ProductDetailPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex gap-0.5 text-lg leading-none" aria-hidden>
+            <button
+              type="button"
+              className="inline-flex gap-0.5 text-lg leading-none"
+              onClick={() => document.getElementById('customer-reviews')?.scrollIntoView({ behavior: 'smooth' })}
+              aria-label="Scroll to reviews"
+            >
               {Array.from({ length: 5 }, (_, i) => (
-                <span key={i} className={i < Math.round(product.rating) ? 'text-yellow-500' : 'text-muted-foreground/35'}>★</span>
+                <span key={i} className={i < filled ? 'text-yellow-500' : 'text-muted-foreground/35'} aria-hidden>
+                  ★
+                </span>
               ))}
-            </span>
-            <span className="text-sm text-muted-foreground">({product.reviews.length} {product.reviews.length === 1 ? 'review' : 'reviews'})</span>
+            </button>
+            <span className="text-sm text-muted-foreground">({count} {count === 1 ? 'review' : 'reviews'})</span>
           </div>
 
           <p className="text-muted-foreground text-sm sm:text-[15px] leading-relaxed">{product.description}</p>
@@ -169,21 +216,42 @@ export default function ProductDetailPage() {
         </div>
       </div>
 
-      {product.reviews.length > 0 && (
-        <div className="mt-8 sm:mt-12">
+      {(reviewsLoading || reviews.length > 0) && (
+        <div id="customer-reviews" className="mt-8 sm:mt-12 scroll-mt-24">
           <h2 className="text-lg sm:text-xl font-bold mb-4">Customer Reviews</h2>
           <div className="space-y-3 sm:space-y-4">
-            {product.reviews.map(r => (
+            {reviews.map(r => (
               <div key={r.id} className="border rounded-lg p-3 sm:p-4">
                 <div className="flex items-center gap-2 mb-1">
                   <span className="font-medium text-sm">{r.userName}</span>
                   <span className="text-yellow-500 text-sm">{'★'.repeat(r.rating)}</span>
                 </div>
                 <p className="text-sm text-muted-foreground">{r.comment}</p>
-                <p className="text-xs text-muted-foreground mt-1">{r.date}</p>
+                {r.images?.length ? (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {r.images.slice(0, 4).map((img, idx) => (
+                      <a key={idx} href={img.url} target="_blank" rel="noreferrer">
+                        <img src={img.url} alt="Review" className="h-16 w-16 rounded-md object-cover border" />
+                      </a>
+                    ))}
+                  </div>
+                ) : null}
+                <p className="text-xs text-muted-foreground mt-1">
+                  {r.createdAt ? new Date(r.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
+                </p>
               </div>
             ))}
+            {reviewsLoading && (
+              <div className="text-sm text-muted-foreground">Loading reviews…</div>
+            )}
           </div>
+          {reviewsCursor && (
+            <div className="mt-4">
+              <Button variant="outline" onClick={() => void loadMoreReviews()} disabled={reviewsLoading} className="w-full sm:w-auto">
+                {reviewsLoading ? 'Loading…' : 'See More'}
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </div>

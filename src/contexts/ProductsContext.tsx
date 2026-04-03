@@ -8,6 +8,7 @@ import {
   deleteProductApi,
   ProductsApiError,
 } from '@/lib/api';
+import { fetchReviewsSummaryApi, type RatingSummary } from '@/lib/reviewsSummaryApi';
 
 export type ProductApiIssue = {
   code: ProductsApiError['code'];
@@ -16,6 +17,7 @@ export type ProductApiIssue = {
 
 type ProductsContextValue = {
   products: Product[];
+  ratingSummary: Record<string, RatingSummary>;
   loading: boolean;
   apiAvailable: boolean;
   /** Why the API is not usable (null when connected). */
@@ -30,6 +32,7 @@ const ProductsContext = createContext<ProductsContextValue | undefined>(undefine
 
 export function ProductsProvider({ children }: { children: ReactNode }) {
   const [products, setProducts] = useState<Product[]>(() => [...initialProducts]);
+  const [ratingSummary, setRatingSummary] = useState<Record<string, RatingSummary>>({});
   const [loading, setLoading] = useState(true);
   const [apiAvailable, setApiAvailable] = useState(false);
   const [apiIssue, setApiIssue] = useState<ProductApiIssue | null>(null);
@@ -38,11 +41,18 @@ export function ProductsProvider({ children }: { children: ReactNode }) {
     try {
       const list = await fetchProductsApi();
       setProducts(list);
+      try {
+        const summary = await fetchReviewsSummaryApi(list.map(p => p.id));
+        setRatingSummary(summary);
+      } catch {
+        setRatingSummary({});
+      }
       setApiAvailable(true);
       setApiIssue(null);
     } catch (e) {
       setApiAvailable(false);
       setProducts([...initialProducts]);
+      setRatingSummary({});
       if (e instanceof ProductsApiError) {
         setApiIssue({ code: e.code, message: e.message });
       } else {
@@ -62,6 +72,12 @@ export function ProductsProvider({ children }: { children: ReactNode }) {
         const list = await fetchProductsApi();
         if (!cancelled) {
           setProducts(list);
+          try {
+            const summary = await fetchReviewsSummaryApi(list.map(p => p.id));
+            if (!cancelled) setRatingSummary(summary);
+          } catch {
+            if (!cancelled) setRatingSummary({});
+          }
           setApiAvailable(true);
           setApiIssue(null);
         }
@@ -69,6 +85,7 @@ export function ProductsProvider({ children }: { children: ReactNode }) {
         if (!cancelled) {
           setApiAvailable(false);
           setProducts([...initialProducts]);
+          setRatingSummary({});
           if (e instanceof ProductsApiError) {
             setApiIssue({ code: e.code, message: e.message });
           } else {
@@ -129,6 +146,7 @@ export function ProductsProvider({ children }: { children: ReactNode }) {
     <ProductsContext.Provider
       value={{
         products,
+        ratingSummary,
         loading,
         apiAvailable,
         apiIssue,

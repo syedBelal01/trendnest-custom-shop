@@ -32,7 +32,7 @@ if (cloudName && cloudKey && cloudSecret) {
   });
 }
 
-const ReviewSchema = new mongoose.Schema(
+const ProductEmbeddedReviewSchema = new mongoose.Schema(
   {
     id: String,
     userName: String,
@@ -64,7 +64,7 @@ const ProductSchema = new mongoose.Schema(
     sleeveTypes: [String],
     stock: { type: Number, default: 0 },
     rating: { type: Number, default: 4 },
-    reviews: { type: [ReviewSchema], default: [] },
+    reviews: { type: [ProductEmbeddedReviewSchema], default: [] },
     isCustomPrint: Boolean,
     isTrending: Boolean,
     tags: [String],
@@ -169,6 +169,45 @@ const CouponUsage = mongoose.model('CouponUsage', CouponUsageSchema);
 function normalizeCouponCode(code) {
   return String(code || '').trim().toUpperCase();
 }
+
+const ReviewSchema = new mongoose.Schema(
+  {
+    _id: { type: String, required: true },
+    productId: { type: String, required: true, index: true },
+    userId: { type: String, required: true, index: true },
+    userName: { type: String, default: '' },
+    rating: { type: Number, required: true, min: 1, max: 5 },
+    comment: { type: String, default: '' },
+    images: {
+      type: [
+        {
+          url: { type: String, required: true },
+          publicId: { type: String, default: '' },
+        },
+      ],
+      default: [],
+      _id: false,
+    },
+  },
+  { versionKey: false, timestamps: true }
+);
+
+ReviewSchema.index({ productId: 1, userId: 1 }, { unique: true });
+
+const Review = mongoose.model('Review', ReviewSchema);
+
+const ReviewPromptDismissalSchema = new mongoose.Schema(
+  {
+    userId: { type: String, required: true, index: true },
+    productId: { type: String, required: true, index: true },
+    dismissedAt: { type: Date, default: () => new Date() },
+  },
+  { versionKey: false, timestamps: true }
+);
+
+ReviewPromptDismissalSchema.index({ userId: 1, productId: 1 }, { unique: true });
+
+const ReviewPromptDismissal = mongoose.model('ReviewPromptDismissal', ReviewPromptDismissalSchema);
 
 function toDateOrUndefined(raw) {
   if (raw == null || raw === '') return undefined;
@@ -318,6 +357,10 @@ const OrderSchema = new mongoose.Schema(
       enum: ORDER_STATUSES,
       default: 'pending',
     },
+    shippedAt: Date,
+    deliveredAt: Date,
+    shippedEmailSentAt: Date,
+    deliveredEmailSentAt: Date,
     emailSentAt: Date,
     emailError: String,
   },
@@ -467,12 +510,93 @@ async function sendOrderEmails(orderLean) {
   return { ok: true };
 }
 
+async function sendOrderStatusEmail({ orderLean, kind }) {
+  const from = process.env.ORDER_FROM_EMAIL || process.env.SMTP_USER || 'trendnest099@gmail.com';
+  const transport = getMailTransport();
+  if (!transport) {
+    console.warn('Status email skipped: SMTP_USER/SMTP_PASS (or ORDER_FROM_EMAIL) not set.');
+    return { ok: false, error: 'SMTP not configured' };
+  }
+  const id = orderLean._id || orderLean.id;
+  const { customer } = orderLean;
+
+  if (kind === 'shipped') {
+    const subject = `Your order is shipped — ${id} — TrendNest`;
+    const text = `Hi ${customer.name},\n\nGood news! Your order has been shipped.\n\nOrder ID: ${id}\n\nWe will notify you when it is delivered.\n\n— TrendNest`;
+    const html = `<p>Hi ${escapeHtml(customer.name)},</p><p><strong>Good news!</strong> Your order has been shipped.</p><p><strong>Order ID:</strong> ${escapeHtml(id)}</p><p>We will notify you when it is delivered.</p><p>— TrendNest</p>`;
+    await transport.sendMail({
+      from: `"TrendNest" <${from}>`,
+      to: customer.email.trim(),
+      subject,
+      text,
+      html,
+    });
+    return { ok: true };
+  }
+
+  if (kind === 'delivered') {
+    const subject = `Delivered — Thank you for shopping — ${id} — TrendNest`;
+    const text = `Hi ${customer.name},\n\nThank you for shopping with TrendNest99.\n\nYour order has been delivered.\nOrder ID: ${id}\n\nWe would love your feedback. If you liked the product, please leave a review.\n\n— TrendNest`;
+    const html = `<p>Hi ${escapeHtml(customer.name)},</p><p>Thank you for shopping with TrendNest99.</p><p><strong>Your order has been delivered.</strong></p><p><strong>Order ID:</strong> ${escapeHtml(id)}</p><p>We would love your feedback. If you liked the product, please leave a review.</p><p>— TrendNest</p>`;
+    await transport.sendMail({
+      from: `"TrendNest" <${from}>`,
+      to: customer.email.trim(),
+      subject,
+      text,
+      html,
+    });
+    return { ok: true };
+  }
+
+  return { ok: false, error: 'Unknown status email type' };
+}
+
 function escapeHtml(s) {
   return String(s)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+function serializeReview(doc) {
+  if (!doc) return null;
+  const o = doc.toObject ? doc.toObject({ flattenMaps: true, versionKey: false }) : { ...doc };
+  const id = o._id;
+  delete o._id;
+  const out = { id, ...o };
+  if (out.createdAt instanceof Date) out.createdAt = out.createdAt.toISOString();
+  if (out.updatedAt instanceof Date) out.updatedAt = out.updatedAt.toISOString();
+  return out;
+}
+
+async function canUserReviewProduct({ userId, productId }) {
+  const u = String(userId || '').trim();
+  const p = String(productId || '').trim();
+  if (!u || !p) return { ok: false, error: 'Invalid user or product' };
+
+  const now = Date.now();
+  const fifteenDaysMs = 15 * 24 * 60 * 60 * 1000;
+  const minDeliveredAt = new Date(now - fifteenDaysMs);
+
+  // Must have a delivered order within last 15 days containing the product.
+  const order = await Order.findOne({
+    userId: u,
+    status: 'delivered',
+    deliveredAt: { $gte: minDeliveredAt },
+    items: { $elemMatch: { productId: p } },
+  })
+    .sort({ deliveredAt: -1 })
+    .lean();
+
+  if (!order) {
+    return { ok: false, error: 'You can review only after delivery (within 15 days)' };
+  }
+
+  const existing = await Review.findOne({ productId: p, userId: u }).lean();
+  if (existing) return { ok: false, error: 'You already reviewed this product' };
+
+  return { ok: true, order };
 }
 
 function streamInvoicePdf(order, res) {
@@ -1062,6 +1186,168 @@ app.get('/api/me/addresses', mongoReady, requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/products/:id/reviews', mongoReady, async (req, res) => {
+  try {
+    const productId = String(req.params.id || '').trim();
+    const limit = Math.max(1, Math.min(50, Number(req.query?.limit || 5)));
+    const cursor = req.query?.cursor ? String(req.query.cursor) : '';
+
+    const q = { productId };
+    if (cursor) {
+      const d = new Date(cursor);
+      if (!Number.isNaN(d.getTime())) q.createdAt = { $lt: d };
+    }
+
+    const docs = await Review.find(q).sort({ createdAt: -1 }).limit(limit + 1).lean();
+    const hasMore = docs.length > limit;
+    const slice = hasMore ? docs.slice(0, limit) : docs;
+    const last = slice[slice.length - 1];
+    const nextCursor =
+      hasMore && last
+        ? (last.createdAt instanceof Date ? last.createdAt.toISOString() : String(last.createdAt))
+        : null;
+
+    res.json({
+      reviews: slice.map(r => serializeReview(r)),
+      nextCursor,
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to load reviews' });
+  }
+});
+
+app.post('/api/reviews', mongoReady, requireAuth, async (req, res) => {
+  try {
+    const userId = String(req.session.userId);
+    const productId = String(req.body?.productId || '').trim();
+    const rating = Number(req.body?.rating);
+    const comment = String(req.body?.comment || '').trim();
+    const images = Array.isArray(req.body?.images) ? req.body.images : [];
+
+    if (!productId) {
+      res.status(400).json({ error: 'Missing productId' });
+      return;
+    }
+    if (!Number.isFinite(rating) || rating < 1 || rating > 5) {
+      res.status(400).json({ error: 'Rating must be 1 to 5' });
+      return;
+    }
+    if (comment.length > 2000) {
+      res.status(400).json({ error: 'Comment is too long' });
+      return;
+    }
+
+    const eligibility = await canUserReviewProduct({ userId, productId });
+    if (!eligibility.ok) {
+      res.status(403).json({ error: eligibility.error || 'Not eligible to review' });
+      return;
+    }
+
+    const user = await User.findById(userId).lean();
+    const userName = String(user?.name || '').trim();
+    const id = `rev-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    const safeImages = images
+      .slice(0, 6)
+      .map((x) => ({
+        url: String(x?.url || '').trim(),
+        publicId: String(x?.publicId || '').trim(),
+      }))
+      .filter((x) => x.url.length > 0);
+
+    const created = await Review.create({
+      _id: id,
+      productId,
+      userId,
+      userName: userName || 'Customer',
+      rating,
+      comment,
+      images: safeImages,
+    });
+
+    res.status(201).json({ review: serializeReview(created) });
+  } catch (e) {
+    console.error(e);
+    if (e && e.code === 11000) {
+      res.status(409).json({ error: 'You already reviewed this product' });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to create review' });
+  }
+});
+
+app.get('/api/me/review-prompts', mongoReady, requireAuth, async (req, res) => {
+  try {
+    const userId = String(req.session.userId);
+    const now = Date.now();
+    const fifteenDaysMs = 15 * 24 * 60 * 60 * 1000;
+    const minDeliveredAt = new Date(now - fifteenDaysMs);
+
+    const delivered = await Order.find({
+      userId,
+      status: 'delivered',
+      deliveredAt: { $gte: minDeliveredAt },
+    })
+      .sort({ deliveredAt: -1 })
+      .limit(30)
+      .lean();
+
+    const productIds = [];
+    for (const o of delivered) {
+      for (const it of o.items || []) productIds.push(String(it.productId));
+    }
+    const uniq = [...new Set(productIds)].filter(Boolean);
+    if (uniq.length === 0) {
+      res.json({ prompts: [] });
+      return;
+    }
+
+    const existingReviews = await Review.find({ userId, productId: { $in: uniq } }).select({ productId: 1 }).lean();
+    const reviewedSet = new Set(existingReviews.map(r => String(r.productId)));
+
+    const dismissals = await ReviewPromptDismissal.find({ userId, productId: { $in: uniq } }).select({ productId: 1 }).lean();
+    const dismissedSet = new Set(dismissals.map(d => String(d.productId)));
+
+    const prompts = [];
+    for (const o of delivered) {
+      const deliveredAtIso = o.deliveredAt instanceof Date ? o.deliveredAt.toISOString() : (o.deliveredAt ? String(o.deliveredAt) : null);
+      for (const it of o.items || []) {
+        const pid = String(it.productId);
+        if (!pid) continue;
+        if (reviewedSet.has(pid)) continue;
+        if (dismissedSet.has(pid)) continue;
+        prompts.push({ productId: pid, orderId: o._id, deliveredAt: deliveredAtIso });
+      }
+    }
+
+    res.json({ prompts });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to load review prompts' });
+  }
+});
+
+app.post('/api/me/review-prompts/dismiss', mongoReady, requireAuth, async (req, res) => {
+  try {
+    const userId = String(req.session.userId);
+    const productId = String(req.body?.productId || '').trim();
+    if (!productId) {
+      res.status(400).json({ error: 'Missing productId' });
+      return;
+    }
+    await ReviewPromptDismissal.updateOne(
+      { userId, productId },
+      { $set: { dismissedAt: new Date() } },
+      { upsert: true }
+    );
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to dismiss prompt' });
+  }
+});
+
 app.post('/api/me/addresses', mongoReady, requireAuth, async (req, res) => {
   try {
     const label = String(req.body?.label || 'Home').trim();
@@ -1312,6 +1598,49 @@ app.get('/api/products', mongoReady, async (_req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Failed to list products' });
+  }
+});
+
+app.get('/api/reviews/summary', mongoReady, async (req, res) => {
+  try {
+    const raw = String(req.query?.productIds || '').trim();
+    const productIds = raw
+      ? raw
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .slice(0, 200)
+      : [];
+
+    const match = productIds.length ? { productId: { $in: productIds } } : {};
+    const rows = await Review.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: '$productId',
+          reviewCount: { $sum: 1 },
+          avgRating: { $avg: '$rating' },
+        },
+      },
+    ]);
+
+    const summary = {};
+    for (const r of rows) {
+      summary[String(r._id)] = {
+        reviewCount: Number(r.reviewCount || 0),
+        avgRating: Number(r.avgRating || 0),
+      };
+    }
+
+    // Fill in missing IDs with zeros so UI always has deterministic values.
+    for (const pid of productIds) {
+      if (!summary[pid]) summary[pid] = { reviewCount: 0, avgRating: 0 };
+    }
+
+    res.json({ summary });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to load rating summary' });
   }
 });
 
@@ -1641,11 +1970,37 @@ app.patch('/api/orders/:id', mongoReady, adminKeyRequired, async (req, res) => {
       res.status(400).json({ error: 'Invalid status' });
       return;
     }
-    const r = await Order.findByIdAndUpdate(id, { $set: { status } }, { new: true }).lean();
+    const before = await Order.findById(id).lean();
+    if (!before) {
+      res.status(404).json({ error: 'Order not found' });
+      return;
+    }
+
+    const $set = { status };
+    const now = new Date();
+    if (status === 'shipped' && !before.shippedAt) $set.shippedAt = now;
+    if (status === 'delivered' && !before.deliveredAt) $set.deliveredAt = now;
+
+    const r = await Order.findByIdAndUpdate(id, { $set }, { new: true }).lean();
     if (!r) {
       res.status(404).json({ error: 'Order not found' });
       return;
     }
+
+    // Send post-order notifications (idempotent)
+    try {
+      if (before.status !== 'shipped' && status === 'shipped' && !before.shippedEmailSentAt) {
+        await sendOrderStatusEmail({ orderLean: { ...r, _id: r._id || id }, kind: 'shipped' });
+        await Order.updateOne({ _id: id }, { $set: { shippedEmailSentAt: new Date() } });
+      }
+      if (before.status !== 'delivered' && status === 'delivered' && !before.deliveredEmailSentAt) {
+        await sendOrderStatusEmail({ orderLean: { ...r, _id: r._id || id }, kind: 'delivered' });
+        await Order.updateOne({ _id: id }, { $set: { deliveredEmailSentAt: new Date() } });
+      }
+    } catch (mailErr) {
+      console.error('Status email failed:', mailErr);
+    }
+
     res.json(serializeOrder(r));
   } catch (e) {
     console.error(e);
@@ -1717,6 +2072,38 @@ app.post('/api/upload/design', (req, res, next) => {
     }
     res.json({ url: result.secure_url });
   });
+  stream.end(req.file.buffer);
+});
+
+app.post('/api/upload/review-image', mongoReady, requireAuth, (req, res, next) => {
+  upload.single('image')(req, res, (err) => {
+    if (err) {
+      res.status(400).json({ error: err.message || 'Upload error' });
+      return;
+    }
+    next();
+  });
+}, (req, res) => {
+  if (!cloudName || !cloudKey || !cloudSecret) {
+    res.status(503).json({ error: 'Cloudinary is not configured on the server (.env)' });
+    return;
+  }
+  if (!req.file?.buffer) {
+    res.status(400).json({ error: 'Missing image file (field name: image)' });
+    return;
+  }
+
+  const stream = cloudinary.uploader.upload_stream(
+    { folder: 'trendnest/reviews', resource_type: 'image' },
+    (err, result) => {
+      if (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Cloudinary upload failed' });
+        return;
+      }
+      res.json({ url: result.secure_url, publicId: result.public_id });
+    }
+  );
   stream.end(req.file.buffer);
 });
 

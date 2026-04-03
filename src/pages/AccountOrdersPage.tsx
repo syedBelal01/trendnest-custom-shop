@@ -4,6 +4,9 @@ import { toast } from 'sonner';
 import { fetchMyOrdersApi } from '@/lib/authApi';
 import type { Order } from '@/types';
 import { ArrowLeft, Package, Clock } from 'lucide-react';
+import { fetchReviewPromptsApi } from '@/lib/reviewsApi';
+import ReviewDialog from '@/components/reviews/ReviewDialog';
+import { useProducts } from '@/contexts/ProductsContext';
 
 const statusColor: Record<string, string> = {
   pending: 'bg-yellow-100 text-yellow-800',
@@ -16,6 +19,10 @@ const statusColor: Record<string, string> = {
 export default function AccountOrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
+  const [promptIds, setPromptIds] = useState<Set<string>>(new Set());
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewProductId, setReviewProductId] = useState<string | null>(null);
+  const { products } = useProducts();
 
   useEffect(() => {
     let mounted = true;
@@ -24,6 +31,13 @@ export default function AccountOrdersPage() {
         const list = await fetchMyOrdersApi();
         if (!mounted) return;
         setOrders(list);
+        try {
+          const prompts = await fetchReviewPromptsApi();
+          if (!mounted) return;
+          setPromptIds(new Set(prompts.map(p => p.productId)));
+        } catch {
+          // ignore prompts failure
+        }
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Could not load orders');
       } finally {
@@ -32,6 +46,14 @@ export default function AccountOrdersPage() {
     })();
     return () => { mounted = false; };
   }, []);
+
+  const openReview = (productId: string) => {
+    setReviewProductId(productId);
+    setReviewOpen(true);
+  };
+
+  const reviewProductName =
+    (reviewProductId ? products.find(p => p.id === reviewProductId)?.name : null) || 'Product';
 
   if (loading) {
     return (
@@ -75,9 +97,20 @@ export default function AccountOrdersPage() {
                 </div>
                 <div className="space-y-1.5">
                   {o.items.map(i => (
-                    <div key={i.lineId ?? `${o.id}-${i.productId}`} className="text-sm flex justify-between gap-2">
-                      <span className="truncate">{i.name} × {i.quantity}</span>
-                      {i.customDesignName && <span className="text-xs text-muted-foreground shrink-0">✦ {i.customDesignName}</span>}
+                    <div key={i.lineId ?? `${o.id}-${i.productId}`} className="text-sm flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <span className="truncate block">{i.name} × {i.quantity}</span>
+                        {i.customDesignName && <span className="text-xs text-muted-foreground shrink-0">✦ {i.customDesignName}</span>}
+                      </div>
+                      {o.status === 'delivered' && promptIds.has(i.productId) && (
+                        <button
+                          type="button"
+                          className="text-xs font-semibold text-primary hover:underline shrink-0"
+                          onClick={() => openReview(i.productId)}
+                        >
+                          Write a Review
+                        </button>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -89,6 +122,23 @@ export default function AccountOrdersPage() {
             </div>
           ))}
         </div>
+      )}
+
+      {reviewProductId && (
+        <ReviewDialog
+          open={reviewOpen}
+          onOpenChange={setReviewOpen}
+          productId={reviewProductId}
+          productName={reviewProductName}
+          onSubmitted={async () => {
+            try {
+              const prompts = await fetchReviewPromptsApi();
+              setPromptIds(new Set(prompts.map(p => p.productId)));
+            } catch {
+              // ignore
+            }
+          }}
+        />
       )}
     </div>
   );

@@ -5,12 +5,19 @@ import { productVariantNames } from '@/lib/productVariants';
 import { Button } from '@/components/ui/button';
 import { useCart } from '@/contexts/CartContext';
 import { ShoppingCart } from 'lucide-react';
+import { useProducts } from '@/contexts/ProductsContext';
 
 export default function ProductCard({ product }: { product: Product }) {
   const { addItem } = useCart();
+  const { ratingSummary } = useProducts();
   const discount = product.originalPrice
     ? Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100)
     : 0;
+
+  const summary = ratingSummary[product.id];
+  const avg = summary?.avgRating ?? 0;
+  const count = summary?.reviewCount ?? 0;
+  const filled = Math.round(avg);
 
   return (
     <div className="group bg-card rounded-xl border overflow-hidden hover:shadow-lg transition-shadow">
@@ -34,8 +41,12 @@ export default function ProductCard({ product }: { product: Product }) {
           )}
         </div>
         <div className="flex items-center gap-1 mt-0.5 sm:mt-1">
-          <span className="text-yellow-500 text-[10px] sm:text-xs">{'★'.repeat(Math.round(product.rating))}</span>
-          <span className="text-[10px] sm:text-xs text-muted-foreground">({product.reviews.length})</span>
+          <span className="text-[10px] sm:text-xs leading-none" aria-hidden>
+            {Array.from({ length: 5 }, (_, i) => (
+              <span key={i} className={i < filled ? 'text-yellow-500' : 'text-muted-foreground/35'}>★</span>
+            ))}
+          </span>
+          <span className="text-[10px] sm:text-xs text-muted-foreground">({count})</span>
         </div>
         <Button size="sm" className="w-full mt-2 sm:mt-3 h-8 sm:h-8 text-xs gap-1" onClick={() => addItem({
           product, quantity: 1,
