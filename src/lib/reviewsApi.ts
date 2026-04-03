@@ -45,9 +45,16 @@ export async function dismissReviewPromptApi(productId: string): Promise<void> {
   if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Failed to dismiss prompt');
 }
 
-export async function uploadReviewImageApi(file: File): Promise<ReviewImage> {
+export async function uploadReviewImageApi(
+  fileOrBlob: File | Blob,
+  opts?: { filename?: string }
+): Promise<ReviewImage> {
   const fd = new FormData();
-  fd.append('image', file);
+  const filename =
+    opts?.filename ||
+    (fileOrBlob instanceof File ? fileOrBlob.name : '') ||
+    `review-${Date.now()}.jpg`;
+  fd.append('image', fileOrBlob, filename);
   const res = await fetch(apiUrl('/api/upload/review-image'), {
     method: 'POST',
     credentials: 'include',

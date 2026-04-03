@@ -1249,7 +1249,7 @@ app.post('/api/reviews', mongoReady, requireAuth, async (req, res) => {
     const id = `rev-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     const safeImages = images
-      .slice(0, 6)
+      .slice(0, 3)
       .map((x) => ({
         url: String(x?.url || '').trim(),
         publicId: String(x?.publicId || '').trim(),
