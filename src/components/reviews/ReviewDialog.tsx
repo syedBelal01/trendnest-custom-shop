@@ -78,7 +78,6 @@ export default function ReviewDialog(props: {
       if (photos.length) {
         images = [];
         for (const p of photos.slice(0, MAX_PHOTOS)) {
-          // sequential uploads to keep it simple + reliable
           const img = await uploadReviewImageApi(p.file);
           images.push(img);
         }
@@ -116,18 +115,19 @@ export default function ReviewDialog(props: {
 
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent>
+      <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-md mx-auto rounded-2xl p-4 sm:p-6">
         <DialogHeader>
-          <DialogTitle>Write a review</DialogTitle>
+          <DialogTitle className="text-base sm:text-lg">Write a review</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
           <div className="text-sm">
-            <div className="font-semibold">{props.productName}</div>
+            <div className="font-semibold truncate">{props.productName}</div>
             <div className="text-muted-foreground text-xs">Rate 1–5 stars and share your experience.</div>
           </div>
 
-          <div className="flex items-center gap-2">
+          {/* Stars — larger touch targets */}
+          <div className="flex items-center gap-3">
             {Array.from({ length: 5 }, (_, i) => {
               const v = i + 1;
               const active = v <= rating;
@@ -136,7 +136,7 @@ export default function ReviewDialog(props: {
                   key={v}
                   type="button"
                   onClick={() => setRating(v)}
-                  className={`text-2xl leading-none ${active ? 'text-yellow-500' : 'text-muted-foreground/40'}`}
+                  className={`text-3xl sm:text-2xl leading-none p-1 ${active ? 'text-yellow-500' : 'text-muted-foreground/40'}`}
                   aria-label={`${v} star`}
                 >
                   ★
@@ -146,13 +146,14 @@ export default function ReviewDialog(props: {
           </div>
 
           <textarea
-            className="w-full min-h-[96px] rounded-md border bg-background px-3 py-2 text-sm"
+            className="w-full min-h-[80px] sm:min-h-[96px] rounded-xl border bg-background px-3 py-2.5 text-sm resize-none"
             placeholder="Write a short comment (optional)"
             value={comment}
             onChange={e => setComment(e.target.value)}
           />
 
-          <div className="space-y-2">
+          {/* Photo section */}
+          <div className="space-y-2.5">
             <div className="flex items-center justify-between gap-2">
               <div className="text-xs text-muted-foreground">Add photos (optional, up to {MAX_PHOTOS})</div>
               <div className="text-xs text-muted-foreground">{photos.length}/{MAX_PHOTOS}</div>
@@ -190,44 +191,49 @@ export default function ReviewDialog(props: {
               }}
             />
 
-            <div className="flex flex-wrap gap-2">
+            {/* Buttons — full width stacked on mobile */}
+            <div className="flex flex-col sm:flex-row gap-2">
               <Button
                 type="button"
                 variant="secondary"
                 disabled={!canAddMore}
+                className="h-10 text-xs sm:text-sm flex-1"
                 onClick={() => {
                   setRetakeIdx(null);
                   captureInputRef.current?.click();
                 }}
               >
-                Capture Image
+                📷 Capture Image
               </Button>
               <Button
                 type="button"
                 variant="outline"
                 disabled={!canAddMore}
+                className="h-10 text-xs sm:text-sm flex-1"
                 onClick={() => {
                   setRetakeIdx(null);
                   galleryInputRef.current?.click();
                 }}
               >
-                Add from gallery
+                🖼️ Add from gallery
               </Button>
             </div>
 
+            {/* Photo previews — responsive grid */}
             {photos.length ? (
               <div className="grid grid-cols-3 gap-2">
                 {photos.map((p, idx) => (
-                  <div key={p.id} className="rounded-md border bg-muted/20 overflow-hidden">
+                  <div key={p.id} className="rounded-xl border bg-muted/20 overflow-hidden">
                     <div className="aspect-square w-full bg-muted">
                       <img src={p.previewUrl} alt={`Review photo ${idx + 1}`} className="w-full h-full object-cover" />
                     </div>
-                    <div className="p-2 flex items-center justify-between gap-2">
+                    <div className="p-1.5 flex items-center justify-between gap-1">
                       <Button
                         type="button"
                         size="sm"
                         variant="secondary"
                         disabled={busy}
+                        className="text-[10px] h-7 px-2 flex-1"
                         onClick={() => {
                           setRetakeIdx(idx);
                           captureInputRef.current?.click();
@@ -240,9 +246,10 @@ export default function ReviewDialog(props: {
                         size="sm"
                         variant="ghost"
                         disabled={busy}
+                        className="text-[10px] h-7 px-2"
                         onClick={() => removePhoto(idx)}
                       >
-                        Delete
+                        ✕
                       </Button>
                     </div>
                   </div>
@@ -251,7 +258,7 @@ export default function ReviewDialog(props: {
             ) : null}
           </div>
 
-          <Button className="w-full" disabled={!canSubmit} onClick={() => void submit()}>
+          <Button className="w-full h-11 rounded-xl text-sm" disabled={!canSubmit} onClick={() => void submit()}>
             {busy ? 'Submitting…' : 'Submit Review'}
           </Button>
         </div>
@@ -259,4 +266,3 @@ export default function ReviewDialog(props: {
     </Dialog>
   );
 }
-

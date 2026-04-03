@@ -1,72 +1,85 @@
 import { Link } from 'react-router-dom';
+import { Home, ShoppingBag, Paintbrush, TrendingUp, MessageCircle, HelpCircle, RotateCcw, Truck, Package, Mail, Phone } from 'lucide-react';
+
+const shopLinks = [
+  { to: '/', label: 'Home', icon: Home },
+  { to: '/category/home', label: 'Home Essentials', icon: ShoppingBag },
+  { to: '/category/printed', label: 'Printed Products', icon: Paintbrush },
+  { to: '/category/trending', label: 'Trending', icon: TrendingUp },
+];
+
+const helpLinks = [
+  { to: '/contact', label: 'Contact Us', icon: MessageCircle },
+  { to: '/faqs', label: 'FAQs', icon: HelpCircle },
+  { to: '/returns', label: 'Return Policy', icon: RotateCcw },
+  { to: '/shipping', label: 'Shipping Policy', icon: Truck },
+  { to: '/account/orders', label: 'Track My Order', icon: Package },
+];
 
 export default function Footer() {
   return (
     <footer className="bg-card border-t mt-12 sm:mt-16">
-      <div className="max-w-7xl mx-auto px-3 sm:px-4 py-8 sm:py-12 grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-6 sm:gap-8">
-        <div className="col-span-2 sm:col-span-1">
-          <h3 className="font-bold text-lg mb-2 sm:mb-3">
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 py-6 sm:py-12">
+        {/* Brand */}
+        <div className="mb-5 sm:mb-0">
+          <h3 className="font-bold text-lg mb-1">
             Trend<span className="text-primary">Nest</span>99
           </h3>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed max-w-xs">
             Your one-stop shop for trendy fashion, home essentials, and custom prints.
           </p>
         </div>
-        <div>
-          <h4 className="font-semibold mb-2 sm:mb-3 text-sm">Shop</h4>
-          <div className="space-y-1.5 sm:space-y-2 text-sm text-muted-foreground">
-            <Link to="/" className="block hover:text-foreground transition-colors">
-              Home
-            </Link>
-            <Link to="/category/home" className="block hover:text-foreground transition-colors">
-              Home Essentials
-            </Link>
-            <Link to="/category/printed" className="block hover:text-foreground transition-colors">
-              Printed Products
-            </Link>
-            <Link to="/category/trending" className="block hover:text-foreground transition-colors">
-              Trending
-            </Link>
+
+        {/* Links grid — 2 cols on mobile, 4 on md+ */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-5 sm:gap-8 mt-5 sm:mt-8">
+          {/* Shop */}
+          <div>
+            <h4 className="font-semibold mb-2 text-sm">Shop</h4>
+            <div className="space-y-2">
+              {shopLinks.map(l => (
+                <Link key={l.to} to={l.to} className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors py-0.5">
+                  <l.icon className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{l.label}</span>
+                </Link>
+              ))}
+            </div>
           </div>
-        </div>
-        <div>
-          <h4 className="font-semibold mb-2 sm:mb-3 text-sm">Help</h4>
-          <div className="space-y-1.5 sm:space-y-2 text-sm text-muted-foreground">
-            <Link to="/contact" className="block hover:text-foreground transition-colors">
-              Contact Us
-            </Link>
-            <Link to="/faqs" className="block hover:text-foreground transition-colors">
-              FAQs
-            </Link>
-            <Link to="/returns" className="block hover:text-foreground transition-colors">
-              Return Policy
-            </Link>
-            <Link to="/shipping" className="block hover:text-foreground transition-colors">
-              Shipping Policy
-            </Link>
-            <Link to="/account/orders" className="block hover:text-foreground transition-colors">
-              Track My Order
-            </Link>
+
+          {/* Help */}
+          <div>
+            <h4 className="font-semibold mb-2 text-sm">Help</h4>
+            <div className="space-y-2">
+              {helpLinks.map(l => (
+                <Link key={l.to} to={l.to} className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors py-0.5">
+                  <l.icon className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{l.label}</span>
+                </Link>
+              ))}
+            </div>
           </div>
-        </div>
-        <div>
-          <h4 className="font-semibold mb-2 sm:mb-3 text-sm">Contact</h4>
-          <div className="space-y-1.5 sm:space-y-2 text-sm text-muted-foreground">
-            <a href="mailto:trendnest099@gmail.com" className="block break-all hover:text-foreground transition-colors">
-              trendnest099@gmail.com
-            </a>
-            <a
-              href="https://wa.me/918543841110"
-              target="_blank"
-              rel="noreferrer"
-              className="block hover:text-foreground transition-colors"
-            >
-              WhatsApp: 8543841110
-            </a>
+
+          {/* Contact — spans full width on mobile */}
+          <div className="col-span-2 md:col-span-2">
+            <h4 className="font-semibold mb-2 text-sm">Contact</h4>
+            <div className="flex flex-col gap-2">
+              <a href="mailto:trendnest099@gmail.com" className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors py-0.5">
+                <Mail className="h-3.5 w-3.5 shrink-0" />
+                <span className="break-all">trendnest099@gmail.com</span>
+              </a>
+              <a
+                href="https://wa.me/918543841110"
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors py-0.5"
+              >
+                <Phone className="h-3.5 w-3.5 shrink-0" />
+                <span>WhatsApp: 8543841110</span>
+              </a>
+            </div>
           </div>
         </div>
       </div>
-      <div className="border-t py-3 sm:py-4 text-center text-xs text-muted-foreground">
+      <div className="border-t py-3 text-center text-[10px] sm:text-xs text-muted-foreground">
         © 2026 TrendNest99. All rights reserved.
       </div>
     </footer>

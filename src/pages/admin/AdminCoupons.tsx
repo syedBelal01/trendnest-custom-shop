@@ -464,7 +464,50 @@ export default function AdminCoupons() {
         </Dialog>
       </div>
 
-      <div className="border rounded-lg overflow-x-auto">
+      {/* Mobile: card layout / Desktop: table */}
+      {/* Cards for mobile */}
+      <div className="space-y-3 md:hidden">
+        {list.map(c => (
+          <div key={c.id} className="rounded-2xl border bg-card shadow-sm p-3.5 space-y-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-mono font-bold text-sm">{c.code}</span>
+              <Switch checked={c.isActive} onCheckedChange={checked => void toggleActive(c.id, checked)} />
+            </div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+              <span className="capitalize">{c.type}: {c.type === 'percentage' ? `${c.value}%` : `₹${c.value}`}</span>
+              {c.maxDiscount != null && <span>Cap ₹{c.maxDiscount}</span>}
+              <span>Min ₹{c.minOrder}</span>
+              <span>Scope: {c.scope || 'cart'}</span>
+            </div>
+            <div className="flex items-center gap-2 pt-1 border-t">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-xs h-8 flex-1"
+                onClick={() => { setEditingId(c.id); setFormFromCoupon(c); setOpen(true); }}
+                disabled={loading}
+              >
+                Edit
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-xs h-8 text-destructive"
+                onClick={() => void remove(c.id)}
+                disabled={loading}
+              >
+                <Trash2 className="h-3 w-3 mr-1" /> Delete
+              </Button>
+            </div>
+          </div>
+        ))}
+        {list.length === 0 && !loading && (
+          <div className="rounded-2xl border bg-card p-6 text-center text-sm text-muted-foreground">No coupons yet.</div>
+        )}
+      </div>
+
+      {/* Table for desktop */}
+      <div className="hidden md:block border rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-muted text-muted-foreground">
             <tr>
@@ -492,26 +535,10 @@ export default function AdminCoupons() {
                   <Switch checked={c.isActive} onCheckedChange={checked => void toggleActive(c.id, checked)} />
                 </td>
                 <td className="p-3 text-center">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-destructive"
-                    onClick={() => void remove(c.id)}
-                    disabled={loading}
-                  >
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => void remove(c.id)} disabled={loading}>
                     <Trash2 className="h-3 w-3" />
                   </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="ml-2"
-                    onClick={() => {
-                      setEditingId(c.id);
-                      setFormFromCoupon(c);
-                      setOpen(true);
-                    }}
-                    disabled={loading}
-                  >
+                  <Button variant="ghost" size="sm" className="ml-2" onClick={() => { setEditingId(c.id); setFormFromCoupon(c); setOpen(true); }} disabled={loading}>
                     Edit
                   </Button>
                 </td>
@@ -519,9 +546,7 @@ export default function AdminCoupons() {
             ))}
             {list.length === 0 && !loading && (
               <tr>
-                <td colSpan={7} className="p-6 text-center text-muted-foreground">
-                  No coupons yet.
-                </td>
+                <td colSpan={7} className="p-6 text-center text-muted-foreground">No coupons yet.</td>
               </tr>
             )}
           </tbody>
