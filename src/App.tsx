@@ -28,6 +28,10 @@ import AccountSettingsPage from "@/pages/AccountSettingsPage";
 import AccountAddressesPage from "@/pages/AccountAddressesPage";
 import LoginPage from "@/pages/LoginPage";
 import ForgotPasswordPage from "@/pages/ForgotPasswordPage";
+import ContactPage from "@/pages/ContactPage";
+import FaqsPage from "@/pages/FaqsPage";
+import ReturnPolicyPage from "@/pages/ReturnPolicyPage";
+import ShippingPolicyPage from "@/pages/ShippingPolicyPage";
 import NotFound from "@/pages/NotFound";
 import ScrollToTop from "@/components/ScrollToTop";
 import { AuthProvider } from "@/contexts/AuthContext";
@@ -54,6 +58,10 @@ const App = () => (
                   <Route path="/cart" element={<CartPage />} />
                   <Route path="/checkout" element={<CheckoutPage />} />
                   <Route path="/search" element={<SearchPage />} />
+                  <Route path="/contact" element={<ContactPage />} />
+                  <Route path="/faqs" element={<FaqsPage />} />
+                  <Route path="/returns" element={<ReturnPolicyPage />} />
+                  <Route path="/shipping" element={<ShippingPolicyPage />} />
                 <Route
                   path="/account"
                   element={

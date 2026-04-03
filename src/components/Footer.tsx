@@ -5,40 +5,61 @@ export default function Footer() {
     <footer className="bg-card border-t mt-12 sm:mt-16">
       <div className="max-w-7xl mx-auto px-3 sm:px-4 py-8 sm:py-12 grid grid-cols-2 sm:grid-cols-2 md:grid-cols-4 gap-6 sm:gap-8">
         <div className="col-span-2 sm:col-span-1">
-          <h3 className="font-bold text-lg mb-2 sm:mb-3">Trend<span className="text-primary">Nest</span>99</h3>
-          <p className="text-sm text-muted-foreground">Your one-stop shop for trendy fashion, home essentials, and custom prints.</p>
+          <h3 className="font-bold text-lg mb-2 sm:mb-3">
+            Trend<span className="text-primary">Nest</span>99
+          </h3>
+          <p className="text-sm text-muted-foreground">
+            Your one-stop shop for trendy fashion, home essentials, and custom prints.
+          </p>
         </div>
         <div>
           <h4 className="font-semibold mb-2 sm:mb-3 text-sm">Shop</h4>
           <div className="space-y-1.5 sm:space-y-2 text-sm text-muted-foreground">
-            <Link to="/" className="block hover:text-foreground">Home</Link>
-            <Link to="/category/home" className="block hover:text-foreground">Home Essentials</Link>
-            <Link to="/category/printed" className="block hover:text-foreground">Printed Products</Link>
-            <Link to="/category/trending" className="block hover:text-foreground">Trending</Link>
+            <Link to="/" className="block hover:text-foreground transition-colors">
+              Home
+            </Link>
+            <Link to="/category/home" className="block hover:text-foreground transition-colors">
+              Home Essentials
+            </Link>
+            <Link to="/category/printed" className="block hover:text-foreground transition-colors">
+              Printed Products
+            </Link>
+            <Link to="/category/trending" className="block hover:text-foreground transition-colors">
+              Trending
+            </Link>
           </div>
         </div>
         <div>
           <h4 className="font-semibold mb-2 sm:mb-3 text-sm">Help</h4>
           <div className="space-y-1.5 sm:space-y-2 text-sm text-muted-foreground">
-            <span className="block">Track Order</span>
-            <span className="block">Returns</span>
-            <span className="block">Shipping Info</span>
+            <Link to="/contact" className="block hover:text-foreground transition-colors">
+              Contact Us
+            </Link>
+            <Link to="/faqs" className="block hover:text-foreground transition-colors">
+              FAQs
+            </Link>
+            <Link to="/returns" className="block hover:text-foreground transition-colors">
+              Return Policy
+            </Link>
+            <Link to="/shipping" className="block hover:text-foreground transition-colors">
+              Shipping Policy
+            </Link>
+            <Link to="/account/orders" className="block hover:text-foreground transition-colors">
+              Track My Order
+            </Link>
           </div>
         </div>
         <div>
           <h4 className="font-semibold mb-2 sm:mb-3 text-sm">Contact</h4>
           <div className="space-y-1.5 sm:space-y-2 text-sm text-muted-foreground">
-            <a
-              href="mailto:trendnest099@gmail.com"
-              className="block break-all hover:text-foreground"
-            >
+            <a href="mailto:trendnest099@gmail.com" className="block break-all hover:text-foreground transition-colors">
               trendnest099@gmail.com
             </a>
             <a
               href="https://wa.me/918543841110"
               target="_blank"
               rel="noreferrer"
-              className="block hover:text-foreground"
+              className="block hover:text-foreground transition-colors"
             >
               WhatsApp: 8543841110
             </a>

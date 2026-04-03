@@ -1,16 +1,18 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useCallback, useEffect, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { loginApi, requestAuthOtpApi, verifyOtpApi } from '@/lib/authApi';
 import { useAuth } from '@/contexts/AuthContext';
+import { getSafePostLoginRedirect } from '@/lib/safeRedirect';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
 import { Mail, Lock, User, Phone, ArrowRight, ShieldCheck, Sparkles } from 'lucide-react';
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { user, loading: authLoading, refreshAuth } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -20,12 +22,21 @@ export default function LoginPage() {
   const [otpChallengeId, setOtpChallengeId] = useState<string | null>(null);
   const [otp, setOtp] = useState('');
 
+  const postLoginPath = useCallback(
+    (mustReset: boolean) => {
+      if (mustReset) return '/account/settings';
+      const r = getSafePostLoginRedirect(searchParams.get('redirect'));
+      return r ?? '/account';
+    },
+    [searchParams]
+  );
+
   useEffect(() => {
     if (authLoading) return;
     if (user) {
-      navigate(user.mustResetPassword ? '/account/settings' : '/account', { replace: true });
+      navigate(postLoginPath(!!user.mustResetPassword), { replace: true });
     }
-  }, [authLoading, user, navigate]);
+  }, [authLoading, user, navigate, postLoginPath]);
 
   const onLogin = async () => {
     if (!email.trim() || !password) {
@@ -37,7 +48,7 @@ export default function LoginPage() {
       const loggedIn = await loginApi({ email, password });
       await refreshAuth();
       toast.success('Logged in');
-      navigate(loggedIn?.mustResetPassword ? '/account/settings' : '/account', { replace: true });
+      navigate(postLoginPath(!!loggedIn?.mustResetPassword), { replace: true });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Login failed');
     } finally {
@@ -81,7 +92,7 @@ export default function LoginPage() {
       });
       await refreshAuth();
       toast.success('Logged in');
-      navigate(verified?.mustResetPassword ? '/account/settings' : '/account', { replace: true });
+      navigate(postLoginPath(!!verified?.mustResetPassword), { replace: true });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'OTP verification failed');
     } finally {
