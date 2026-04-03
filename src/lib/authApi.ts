@@ -72,6 +72,9 @@ export async function fetchMeApi(): Promise<User | null> {
     credentials: 'include',
   });
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401 || res.status === 403) {
+    return null;
+  }
   if (!res.ok) {
     throw new Error(typeof data.error === 'string' ? data.error : 'Failed to load auth user');
   }

@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { X } from 'lucide-react';
-import { fetchMeApi } from '@/lib/authApi';
 import { dismissReviewPromptApi, fetchReviewPromptsApi } from '@/lib/reviewsApi';
 import { useProducts } from '@/contexts/ProductsContext';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function ReviewPromptBar() {
   const { products } = useProducts();
+  const { user, loading: authLoading } = useAuth();
   const [open, setOpen] = useState(false);
   const [productId, setProductId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -15,8 +16,7 @@ export default function ReviewPromptBar() {
     let mounted = true;
     void (async () => {
       try {
-        const me = await fetchMeApi();
-        if (!mounted || !me) return;
+        if (authLoading || !user) return;
         const prompts = await fetchReviewPromptsApi();
         if (!mounted) return;
         const first = prompts[0];
@@ -30,7 +30,7 @@ export default function ReviewPromptBar() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [authLoading, user]);
 
   const productName = useMemo(() => {
     if (!productId) return 'your product';

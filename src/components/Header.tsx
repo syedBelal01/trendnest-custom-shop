@@ -3,6 +3,7 @@ import { ShoppingCart, Search, Menu, X, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useCart } from '@/contexts/CartContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { useState } from 'react';
 
 const navLinks = [
@@ -14,6 +15,7 @@ const navLinks = [
 
 export default function Header() {
   const { itemCount } = useCart();
+  const { user } = useAuth();
   const [search, setSearch] = useState('');
   const [mobileOpen, setMobileOpen] = useState(false);
   const navigate = useNavigate();
@@ -59,8 +61,8 @@ export default function Header() {
           </Button>
         </Link>
 
-        <Link to="/login" className="ml-1 sm:ml-2">
-          <Button variant="ghost" size="icon" className="h-10 w-10" aria-label="Login">
+        <Link to={user ? '/account' : '/login'} className="ml-1 sm:ml-2">
+          <Button variant="ghost" size="icon" className="h-10 w-10" aria-label={user ? 'Account' : 'Login'}>
             <User className="h-5 w-5" />
           </Button>
         </Link>

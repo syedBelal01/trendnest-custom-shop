@@ -1,14 +1,17 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { fetchMeApi, loginApi, requestAuthOtpApi, verifyOtpApi } from '@/lib/authApi';
+import { loginApi, requestAuthOtpApi, verifyOtpApi } from '@/lib/authApi';
+import { useAuth } from '@/contexts/AuthContext';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
 import { Mail, Lock, User, Phone, ArrowRight, ShieldCheck, Sparkles } from 'lucide-react';
 
 export default function LoginPage() {
-  const [checking, setChecking] = useState(true);
+  const navigate = useNavigate();
+  const { user, loading: authLoading, refreshAuth } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -18,23 +21,11 @@ export default function LoginPage() {
   const [otp, setOtp] = useState('');
 
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const u = await fetchMeApi();
-        if (!mounted) return;
-        if (u) {
-          window.location.href = u.mustResetPassword ? '/account/settings' : '/account';
-          return;
-        }
-      } catch {
-        // ignore
-      } finally {
-        if (mounted) setChecking(false);
-      }
-    })();
-    return () => { mounted = false; };
-  }, []);
+    if (authLoading) return;
+    if (user) {
+      navigate(user.mustResetPassword ? '/account/settings' : '/account', { replace: true });
+    }
+  }, [authLoading, user, navigate]);
 
   const onLogin = async () => {
     if (!email.trim() || !password) {
@@ -43,10 +34,10 @@ export default function LoginPage() {
     }
     setBusy(true);
     try {
-      const user = await loginApi({ email, password });
+      const loggedIn = await loginApi({ email, password });
+      await refreshAuth();
       toast.success('Logged in');
-      if (user?.mustResetPassword) window.location.href = '/account/settings';
-      else window.location.href = '/account';
+      navigate(loggedIn?.mustResetPassword ? '/account/settings' : '/account', { replace: true });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Login failed');
     } finally {
@@ -82,14 +73,15 @@ export default function LoginPage() {
     }
     setBusy(true);
     try {
-      const { user } = await verifyOtpApi({
+      const { user: verified } = await verifyOtpApi({
         challengeId: otpChallengeId,
         code: otp,
         name: name.trim() || undefined,
         phone: phone.trim() || undefined,
       });
+      await refreshAuth();
       toast.success('Logged in');
-      window.location.href = user?.mustResetPassword ? '/account/settings' : '/account';
+      navigate(verified?.mustResetPassword ? '/account/settings' : '/account', { replace: true });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'OTP verification failed');
     } finally {
@@ -97,7 +89,7 @@ export default function LoginPage() {
     }
   };
 
-  if (checking) {
+  if (authLoading) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center">
         <div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />

@@ -684,10 +684,35 @@ const uploadDesign = multer({
 const app = express();
 // Render runs behind a proxy; required for secure cookies (`SameSite=None; Secure`).
 app.set('trust proxy', 1);
-const FRONTEND_ORIGIN = (process.env.FRONTEND_ORIGIN || '').trim();
+
+/** Comma-separated URLs allowed to call this API with credentials (Vercel prod, preview, www). */
+function parseFrontendOrigins() {
+  const raw = [process.env.FRONTEND_ORIGIN, process.env.FRONTEND_ORIGINS].filter(Boolean).join(',');
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+const allowedFrontendOrigins = parseFrontendOrigins();
+
 app.use(
   cors({
-    origin: FRONTEND_ORIGIN ? [FRONTEND_ORIGIN] : true,
+    origin: (requestOrigin, callback) => {
+      if (allowedFrontendOrigins.length === 0) {
+        callback(null, requestOrigin || true);
+        return;
+      }
+      if (!requestOrigin) {
+        callback(null, true);
+        return;
+      }
+      if (allowedFrontendOrigins.includes(requestOrigin)) {
+        callback(null, requestOrigin);
+        return;
+      }
+      callback(new Error(`Not allowed by CORS: ${requestOrigin}`));
+    },
     credentials: true,
   })
 );
@@ -723,10 +748,24 @@ app.use(
       httpOnly: true,
       secure: cookieSecure,
       sameSite: cookieSameSite,
+      path: '/',
       maxAge: SESSION_TTL_MS,
     },
   })
 );
+
+function saveSession(req) {
+  return new Promise((resolve, reject) => {
+    if (!req.session) {
+      resolve();
+      return;
+    }
+    req.session.save((err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+}
 
 app.get('/', (_req, res) => {
   res.type('text/plain').send('Backend is running 🚀');
@@ -1131,6 +1170,9 @@ app.post('/api/auth/otp/verify', async (req, res) => {
     }
 
     const user = userId ? await User.findById(userId).lean() : null;
+    if (userId) {
+      await saveSession(req);
+    }
     res.json({ user: user ? serializeUser(user) : null });
   } catch (e) {
     console.error(e);
@@ -1484,6 +1526,7 @@ app.post('/api/auth/login', async (req, res) => {
       return;
     }
     req.session.userId = user._id;
+    await saveSession(req);
     res.json({ user: serializeUser(await User.findById(user._id).lean()) });
   } catch (e) {
     console.error(e);
@@ -1583,6 +1626,7 @@ app.post('/api/auth/password/reset', async (req, res) => {
 
     // Login after reset.
     req.session.userId = challenge.userId;
+    await saveSession(req);
     const u = await User.findById(challenge.userId).lean();
     res.json({ user: u ? serializeUser(u) : null });
   } catch (e) {
@@ -1811,9 +1855,16 @@ app.post('/api/orders', mongoReady, async (req, res) => {
     }
 
     // Ensure authenticated user relation when email exists (needed for coupons + per-user limits).
+    let sessionTouched = false;
     if (!req.session?.userId) {
       const u = await User.findOne({ email }).exec();
-      if (u) req.session.userId = u._id;
+      if (u) {
+        req.session.userId = u._id;
+        sessionTouched = true;
+      }
+    }
+    if (sessionTouched) {
+      await saveSession(req);
     }
 
     let items;
@@ -1905,17 +1956,22 @@ app.post('/api/orders', mongoReady, async (req, res) => {
       hasCustomPrint: !!body.hasCustomPrint,
       status: 'pending',
     });
-    const leanForMail = (await Order.findById(orderId).lean()) || {};
-    try {
-      await sendOrderEmails({ ...leanForMail, _id: orderId });
-      await Order.updateOne({ _id: orderId }, { $set: { emailSentAt: new Date(), emailError: null } });
-    } catch (mailErr) {
-      const emailErr = mailErr instanceof Error ? mailErr.message : String(mailErr);
-      console.error('Order email failed:', mailErr);
-      await Order.updateOne({ _id: orderId }, { $set: { emailError: emailErr } });
-    }
     const fresh = await Order.findById(orderId).lean();
     res.status(201).json(serializeOrder(fresh));
+
+    setImmediate(() => {
+      void (async () => {
+        const leanForMail = (await Order.findById(orderId).lean()) || {};
+        try {
+          await sendOrderEmails({ ...leanForMail, _id: orderId });
+          await Order.updateOne({ _id: orderId }, { $set: { emailSentAt: new Date(), emailError: null } });
+        } catch (mailErr) {
+          const emailErr = mailErr instanceof Error ? mailErr.message : String(mailErr);
+          console.error('Order email failed:', mailErr);
+          await Order.updateOne({ _id: orderId }, { $set: { emailError: emailErr } });
+        }
+      })();
+    });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Failed to create order' });

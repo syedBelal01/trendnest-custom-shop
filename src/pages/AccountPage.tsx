@@ -1,10 +1,8 @@
-import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { fetchMeApi, logoutApi } from '@/lib/authApi';
-import type { User } from '@/types';
-import { ShoppingBag, MapPin, ShoppingCart, Settings, LogOut, Mail, Phone, User as UserIcon, ChevronRight, Headphones } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { ShoppingBag, MapPin, ShoppingCart, Settings, LogOut, Mail, Phone, ChevronRight, Headphones } from 'lucide-react';
 
 const menuItems = [
   { to: '/account/orders', label: 'My Orders', desc: 'Track and manage your orders', icon: ShoppingBag },
@@ -14,28 +12,11 @@ const menuItems = [
 ];
 
 export default function AccountPage() {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const u = await fetchMeApi();
-        if (!mounted) return;
-        setUser(u);
-      } catch {
-        toast.error('Could not load profile');
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    })();
-    return () => { mounted = false; };
-  }, []);
+  const { user, logout } = useAuth();
 
   const onLogout = async () => {
     try {
-      await logoutApi();
+      await logout();
       toast.success('Logged out');
       window.location.href = '/';
     } catch {
@@ -43,14 +24,13 @@ export default function AccountPage() {
     }
   };
 
-  if (loading) {
+  if (!user) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center">
         <div className="h-8 w-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
-  if (!user) return <div className="py-10 text-center text-muted-foreground">Not logged in</div>;
 
   const initials = (user.name || user.email).slice(0, 2).toUpperCase();
 

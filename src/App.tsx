@@ -30,6 +30,7 @@ import LoginPage from "@/pages/LoginPage";
 import ForgotPasswordPage from "@/pages/ForgotPasswordPage";
 import NotFound from "@/pages/NotFound";
 import ScrollToTop from "@/components/ScrollToTop";
+import { AuthProvider } from "@/contexts/AuthContext";
 
 const queryClient = new QueryClient();
 
@@ -42,6 +43,7 @@ const App = () => (
             <Toaster />
             <Sonner />
             <BrowserRouter>
+              <AuthProvider>
               <ScrollToTop />
               <Routes>
                 <Route element={<Layout />}>
@@ -97,6 +99,7 @@ const App = () => (
                 </Route>
                 <Route path="*" element={<NotFound />} />
               </Routes>
+              </AuthProvider>
             </BrowserRouter>
           </CartProvider>
         </OrdersProvider>
