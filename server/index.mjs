@@ -86,6 +86,9 @@ const UserSchema = new mongoose.Schema(
         {
           id: String,
           label: String,
+          /** Delivery contact (required for new addresses). */
+          recipientName: String,
+          recipientPhone: String,
           address: String,
           city: String,
           state: String,
@@ -1393,17 +1396,33 @@ app.post('/api/me/review-prompts/dismiss', mongoReady, requireAuth, async (req, 
 app.post('/api/me/addresses', mongoReady, requireAuth, async (req, res) => {
   try {
     const label = String(req.body?.label || 'Home').trim();
+    const recipientName = String(req.body?.recipientName || '').trim();
+    const recipientPhone = String(req.body?.recipientPhone || '').trim();
     const address = String(req.body?.address || '').trim();
     const city = String(req.body?.city || '').trim();
     const state = req.body?.state != null ? String(req.body.state).trim() : '';
     const pincode = String(req.body?.pincode || '').trim();
     const isDefault = !!req.body?.isDefault;
+    if (!recipientName || !recipientPhone) {
+      res.status(400).json({ error: 'Recipient name and phone are required' });
+      return;
+    }
     if (!address || !city || !pincode) {
       res.status(400).json({ error: 'Address, city, and pincode are required' });
       return;
     }
     const id = `addr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const addr = { id, label, address, city, state: state || undefined, pincode, isDefault };
+    const addr = {
+      id,
+      label,
+      recipientName,
+      recipientPhone,
+      address,
+      city,
+      state: state || undefined,
+      pincode,
+      isDefault,
+    };
     const u = await User.findById(req.session.userId).exec();
     if (!u) {
       res.status(404).json({ error: 'User not found' });
@@ -1438,6 +1457,10 @@ app.patch('/api/me/addresses/:id', mongoReady, requireAuth, async (req, res) => 
     const next = {
       ...cur,
       label: req.body?.label != null ? String(req.body.label).trim() : cur.label,
+      recipientName:
+        req.body?.recipientName != null ? String(req.body.recipientName).trim() : cur.recipientName,
+      recipientPhone:
+        req.body?.recipientPhone != null ? String(req.body.recipientPhone).trim() : cur.recipientPhone,
       address: req.body?.address != null ? String(req.body.address).trim() : cur.address,
       city: req.body?.city != null ? String(req.body.city).trim() : cur.city,
       state: req.body?.state != null ? String(req.body.state).trim() : cur.state,
@@ -1488,6 +1511,25 @@ app.post('/api/auth/password/set', mongoReady, requireAuth, async (req, res) => 
       res.status(400).json({ error: 'Password must be at least 8 characters' });
       return;
     }
+    const user = await User.findById(req.session.userId).lean();
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+    const hasExistingPassword = !!(user.passwordHash && user.passwordSalt);
+    const currentPassword = String(req.body?.currentPassword || '').trim();
+    if (hasExistingPassword) {
+      if (!currentPassword) {
+        res.status(400).json({ error: 'Current password is required' });
+        return;
+      }
+      const computed = hashPassword(currentPassword, user.passwordSalt);
+      if (computed !== user.passwordHash) {
+        res.status(401).json({ error: 'Current password is incorrect' });
+        return;
+      }
+    }
+
     const salt = crypto.randomBytes(16).toString('hex');
     const passwordHash = hashPassword(password, salt);
     await User.findByIdAndUpdate(req.session.userId, {

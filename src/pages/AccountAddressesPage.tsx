@@ -4,33 +4,92 @@ import { toast } from 'sonner';
 import { addAddressApi, deleteAddressApi, fetchMyAddressesApi, updateAddressApi, type Address } from '@/lib/authApi';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ArrowLeft, MapPin, Plus, Star, Trash2 } from 'lucide-react';
+import {
+  ArrowLeft,
+  ChevronRight,
+  Crosshair,
+  MoreVertical,
+  Plus,
+  Search,
+  Share2,
+  Star,
+  Trash2,
+} from 'lucide-react';
 import { lookupIndianPincode } from '@/lib/pincodeLookup';
+import { reverseGeocodeLatLng } from '@/lib/reverseGeocode';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Checkbox } from '@/components/ui/checkbox';
+import { AddressLabelIcon } from '@/components/address/AddressLabelIcon';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+
+function matchesAddressSearch(a: Address, q: string): boolean {
+  if (!q.trim()) return true;
+  const s = q.trim().toLowerCase();
+  const blob = [a.label, a.recipientName, a.recipientPhone, a.address, a.city, a.state, a.pincode]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return blob.includes(s);
+}
 
 export default function AccountAddressesPage() {
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [showForm, setShowForm] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [geoBusy, setGeoBusy] = useState(false);
 
-  const [label, setLabel] = useState('Home');
-  const [address, setAddress] = useState('');
-  const [city, setCity] = useState('');
-  const [state, setState] = useState('');
-  const [pincode, setPincode] = useState('');
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editLabel, setEditLabel] = useState('Home');
+  const [editRecipientName, setEditRecipientName] = useState('');
+  const [editRecipientPhone, setEditRecipientPhone] = useState('');
+  const [editAddress, setEditAddress] = useState('');
+  const [editCity, setEditCity] = useState('');
+  const [editState, setEditState] = useState('');
+  const [editPincode, setEditPincode] = useState('');
+  const [editDefault, setEditDefault] = useState(false);
+  const [editBusy, setEditBusy] = useState(false);
+
   const lastAutoCity = useRef<string | null>(null);
   const lastAutoState = useRef<string | null>(null);
 
-  const canAdd = useMemo(() => !!(address.trim() && city.trim() && pincode.trim()), [address, city, pincode]);
+  const filtered = useMemo(
+    () => addresses.filter(a => matchesAddressSearch(a, searchQuery)),
+    [addresses, searchQuery]
+  );
+
+  const canSaveDialog = useMemo(
+    () =>
+      !!(
+        editRecipientName.trim() &&
+        editRecipientPhone.trim() &&
+        editAddress.trim() &&
+        editCity.trim() &&
+        editPincode.trim()
+      ),
+    [editRecipientName, editRecipientPhone, editAddress, editCity, editPincode]
+  );
 
   useEffect(() => {
-    const pin = pincode.replace(/[^\d]/g, '').slice(0, 6);
-    if (pin.length !== 6) return;
+    const pin = editPincode.replace(/[^\d]/g, '').slice(0, 6);
+    if (pin.length !== 6 || !dialogOpen) return;
     const t = window.setTimeout(() => {
       void (async () => {
         const r = await lookupIndianPincode(pin);
         if (!r?.city) return;
-        setCity(prev => {
+        setEditCity(prev => {
           const cur = prev.trim();
           const shouldFill = !cur || (lastAutoCity.current && cur === lastAutoCity.current);
           if (!shouldFill) return prev;
@@ -38,7 +97,7 @@ export default function AccountAddressesPage() {
           return r.city;
         });
         if (r.state) {
-          setState(prev => {
+          setEditState(prev => {
             const cur = prev.trim();
             const shouldFill = !cur || (lastAutoState.current && cur === lastAutoState.current);
             if (!shouldFill) return prev;
@@ -49,7 +108,7 @@ export default function AccountAddressesPage() {
       })();
     }, 450);
     return () => window.clearTimeout(t);
-  }, [pincode]);
+  }, [editPincode, dialogOpen]);
 
   useEffect(() => {
     let mounted = true;
@@ -64,22 +123,77 @@ export default function AccountAddressesPage() {
         if (mounted) setLoading(false);
       }
     })();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  const add = async () => {
-    if (!canAdd) return;
-    setBusy(true);
+  const openAddDialog = (preset?: { address?: string; city?: string; state?: string; pincode?: string }) => {
+    setEditingId(null);
+    setEditLabel('Home');
+    setEditRecipientName('');
+    setEditRecipientPhone('');
+    setEditAddress(preset?.address ?? '');
+    setEditCity(preset?.city ?? '');
+    setEditState(preset?.state ?? '');
+    setEditPincode(preset?.pincode ?? '');
+    setEditDefault(addresses.length === 0);
+    lastAutoCity.current = preset?.city ?? null;
+    lastAutoState.current = preset?.state ?? null;
+    setDialogOpen(true);
+  };
+
+  const openEditDialog = (a: Address) => {
+    setEditingId(a.id);
+    setEditLabel(a.label || 'Home');
+    setEditRecipientName(a.recipientName?.trim() || '');
+    setEditRecipientPhone(a.recipientPhone?.trim() || '');
+    setEditAddress(a.address);
+    setEditCity(a.city);
+    setEditState(a.state || '');
+    setEditPincode(a.pincode);
+    setEditDefault(!!a.isDefault);
+    lastAutoCity.current = null;
+    lastAutoState.current = null;
+    setDialogOpen(true);
+  };
+
+  const saveDialog = async () => {
+    if (!canSaveDialog) return;
+    setEditBusy(true);
     try {
-      const next = await addAddressApi({ label: label.trim() || 'Home', address: address.trim(), city: city.trim(), state: state.trim() || undefined, pincode: pincode.trim(), isDefault: addresses.length === 0 });
-      setAddresses(next);
-      setAddress(''); setCity(''); setState(''); setPincode('');
-      setShowForm(false);
-      toast.success('Address added');
+      if (!editingId) {
+        const next = await addAddressApi({
+          label: editLabel.trim() || 'Home',
+          recipientName: editRecipientName.trim(),
+          recipientPhone: editRecipientPhone.trim(),
+          address: editAddress.trim(),
+          city: editCity.trim(),
+          state: editState.trim() || undefined,
+          pincode: editPincode.trim(),
+          isDefault: editDefault,
+        });
+        setAddresses(next);
+        toast.success('Address added');
+      } else {
+        const next = await updateAddressApi(editingId, {
+          label: editLabel.trim() || 'Home',
+          recipientName: editRecipientName.trim(),
+          recipientPhone: editRecipientPhone.trim(),
+          address: editAddress.trim(),
+          city: editCity.trim(),
+          state: editState.trim() || undefined,
+          pincode: editPincode.trim(),
+          isDefault: editDefault,
+        });
+        setAddresses(next);
+        toast.success('Address updated');
+      }
+      setDialogOpen(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Could not add address');
+      toast.error(e instanceof Error ? e.message : 'Could not save address');
     } finally {
-      setBusy(false);
+      setEditBusy(false);
     }
   };
 
@@ -109,6 +223,59 @@ export default function AccountAddressesPage() {
     }
   };
 
+  const handleUseLocation = () => {
+    if (!navigator.geolocation) {
+      toast.error('Location is not supported in this browser');
+      return;
+    }
+    setGeoBusy(true);
+    navigator.geolocation.getCurrentPosition(
+      async pos => {
+        try {
+          const { latitude, longitude } = pos.coords;
+          const geo = await reverseGeocodeLatLng(latitude, longitude);
+          if (geo) {
+            openAddDialog({
+              address: geo.address || '',
+              city: geo.city || '',
+              state: geo.state || '',
+              pincode: geo.pincode || '',
+            });
+            toast.success('Location filled — add name, phone, and review the address');
+          } else {
+            openAddDialog();
+            toast.message('Could not resolve address. Enter details manually.');
+          }
+        } catch {
+          toast.error('Could not look up this location');
+        } finally {
+          setGeoBusy(false);
+        }
+      },
+      () => {
+        setGeoBusy(false);
+        toast.error('Location permission denied or unavailable');
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 60_000 }
+    );
+  };
+
+  const shareAddress = (a: Address) => {
+    const lines = [
+      a.recipientName,
+      a.recipientPhone,
+      [a.address, a.city, a.state, a.pincode].filter(Boolean).join(', '),
+    ].filter(Boolean);
+    const text = lines.join('\n');
+    if (navigator.share) {
+      void navigator.share({ title: a.label || 'Address', text }).catch(() => {
+        void navigator.clipboard.writeText(text).then(() => toast.success('Copied to clipboard'));
+      });
+    } else {
+      void navigator.clipboard.writeText(text).then(() => toast.success('Copied to clipboard'));
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-[60vh] flex items-center justify-center">
@@ -118,99 +285,233 @@ export default function AccountAddressesPage() {
   }
 
   return (
-    <div className="max-w-lg mx-auto px-4 py-6 sm:py-8 space-y-5">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <Link to="/account" className="h-9 w-9 rounded-xl border flex items-center justify-center hover:bg-muted/50 transition-colors">
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-          <div>
-            <h1 className="text-xl font-bold">Addresses</h1>
-            <p className="text-xs text-muted-foreground">Manage delivery addresses</p>
-          </div>
+    <div className="max-w-lg mx-auto px-4 py-6 sm:py-8 space-y-4">
+      <div className="flex items-center gap-3">
+        <Link
+          to="/account"
+          className="h-9 w-9 rounded-xl border flex items-center justify-center hover:bg-muted/50 transition-colors shrink-0"
+        >
+          <ArrowLeft className="h-4 w-4" />
+        </Link>
+        <div>
+          <h1 className="text-xl font-bold">Addresses</h1>
+          <p className="text-xs text-muted-foreground">Manage delivery addresses</p>
         </div>
-        <Button size="sm" onClick={() => setShowForm(v => !v)} className="rounded-xl gap-1.5 h-9">
-          <Plus className="h-4 w-4" /> Add
-        </Button>
       </div>
 
-      {/* Add form */}
-      {showForm && (
-        <div className="rounded-2xl border bg-card shadow-sm p-4 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Label</label>
-              <Input value={label} onChange={e => setLabel(e.target.value)} className="h-10 rounded-xl" placeholder="Home" />
-            </div>
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Pincode</label>
-              <Input value={pincode} onChange={e => setPincode(e.target.value.replace(/[^\d]/g, '').slice(0, 6))} className="h-10 rounded-xl" placeholder="123456" />
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">City</label>
-            <Input value={city} onChange={e => { lastAutoCity.current = null; setCity(e.target.value); }} className="h-10 rounded-xl" placeholder="City" />
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">State</label>
-            <Input value={state} onChange={e => { lastAutoState.current = null; setState(e.target.value); }} className="h-10 rounded-xl" placeholder="State" />
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Full Address</label>
-            <Input value={address} onChange={e => setAddress(e.target.value)} className="h-10 rounded-xl" placeholder="Street, building, area" />
-          </div>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setShowForm(false)} className="flex-1 h-10 rounded-xl">Cancel</Button>
-            <Button disabled={!canAdd || busy} onClick={() => void add()} className="flex-1 h-10 rounded-xl">
-              {busy ? 'Saving…' : 'Save Address'}
-            </Button>
-          </div>
-        </div>
-      )}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+        <Input
+          value={searchQuery}
+          onChange={e => setSearchQuery(e.target.value)}
+          placeholder="Search Address"
+          className="h-11 pl-9 rounded-xl bg-background"
+        />
+      </div>
 
-      {/* List */}
-      {addresses.length === 0 && !showForm ? (
-        <div className="rounded-2xl border bg-card shadow-sm p-8 text-center space-y-3">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-muted">
-            <MapPin className="h-7 w-7 text-muted-foreground" />
+      <div className="rounded-2xl border bg-card overflow-hidden divide-y divide-border">
+        <button
+          type="button"
+          disabled={geoBusy}
+          onClick={() => void handleUseLocation()}
+          className="w-full flex items-center gap-3 px-4 py-3.5 text-left text-sm font-medium hover:bg-muted/40 transition-colors disabled:opacity-60"
+        >
+          <Crosshair className="h-5 w-5 text-primary shrink-0" />
+          {geoBusy ? 'Getting location…' : 'Use my Current Location'}
+        </button>
+        <button
+          type="button"
+          onClick={() => openAddDialog()}
+          className="w-full flex items-center gap-3 px-4 py-3.5 text-left text-sm font-medium hover:bg-muted/40 transition-colors"
+        >
+          <Plus className="h-5 w-5 text-primary shrink-0" />
+          <span className="flex-1">Add New Address</span>
+          <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+        </button>
+      </div>
+
+      <div>
+        <h2 className="text-sm font-bold mb-2">Saved Addresses</h2>
+        {addresses.length === 0 ? (
+          <div className="rounded-2xl border bg-card shadow-sm p-8 text-center text-sm text-muted-foreground">
+            No saved addresses yet. Add one above.
           </div>
-          <p className="text-sm text-muted-foreground">No saved addresses yet.</p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {addresses.map(a => (
-            <div key={a.id} className="rounded-2xl border bg-card shadow-sm p-4">
-              <div className="flex items-start justify-between gap-3">
+        ) : filtered.length === 0 ? (
+          <div className="rounded-2xl border bg-card shadow-sm p-6 text-center text-sm text-muted-foreground">
+            No addresses match your search.
+          </div>
+        ) : (
+          <div className="rounded-2xl border bg-card shadow-sm overflow-hidden">
+            {filtered.map((a, i) => (
+              <div
+                key={a.id}
+                className={`px-4 py-3.5 ${i > 0 ? 'border-t border-dashed border-border' : ''}`}
+              >
                 <div className="flex gap-3 min-w-0">
-                  <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-                    <MapPin className="h-5 w-5 text-primary" />
+                  <div className="h-9 w-9 rounded-lg bg-muted flex items-center justify-center shrink-0 text-foreground">
+                    <AddressLabelIcon label={a.label || 'Other'} className="h-4 w-4" />
                   </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-semibold">{a.label}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                      <span className="text-sm font-bold">{a.label || 'Address'}</span>
                       {a.isDefault && (
-                        <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-primary/10 text-primary">Default</span>
+                        <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                          Default
+                        </span>
                       )}
                     </div>
-                    <p className="text-xs text-muted-foreground mt-0.5">{a.address}</p>
-                    <p className="text-xs text-muted-foreground">{a.city} — {a.pincode}</p>
+                    {a.recipientName?.trim() && (
+                      <p className="text-sm text-foreground mt-1">{a.recipientName.trim()}</p>
+                    )}
+                    {a.recipientPhone?.trim() && (
+                      <p className="text-sm text-muted-foreground">{a.recipientPhone.trim()}</p>
+                    )}
+                    <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                      {a.address}
+                      <br />
+                      {[a.city, a.state].filter(Boolean).join(', ')}
+                      {a.pincode ? ` — ${a.pincode}` : ''}
+                    </p>
+                  </div>
+                  <div className="flex items-start gap-0.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => shareAddress(a)}
+                      className="h-8 w-8 rounded-lg hover:bg-muted/60 flex items-center justify-center transition-colors"
+                      title="Share or copy"
+                    >
+                      <Share2 className="h-4 w-4 text-muted-foreground" />
+                    </button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          className="h-8 w-8 rounded-lg hover:bg-muted/60 flex items-center justify-center transition-colors"
+                          title="More"
+                        >
+                          <MoreVertical className="h-4 w-4 text-muted-foreground" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => openEditDialog(a)}>Edit</DropdownMenuItem>
+                        {!a.isDefault && (
+                          <DropdownMenuItem disabled={busy} onClick={() => void setDefault(a.id)}>
+                            <Star className="h-3.5 w-3.5 mr-2" />
+                            Set as default
+                          </DropdownMenuItem>
+                        )}
+                        <DropdownMenuItem
+                          className="text-destructive focus:text-destructive"
+                          disabled={busy}
+                          onClick={() => void remove(a.id)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5 mr-2" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
                 </div>
-                <div className="flex gap-1 shrink-0">
-                  {!a.isDefault && (
-                    <button onClick={() => void setDefault(a.id)} disabled={busy} className="h-8 w-8 rounded-lg hover:bg-muted/50 flex items-center justify-center transition-colors" title="Set default">
-                      <Star className="h-4 w-4 text-muted-foreground" />
-                    </button>
-                  )}
-                  <button onClick={() => void remove(a.id)} disabled={busy} className="h-8 w-8 rounded-lg hover:bg-destructive/10 flex items-center justify-center transition-colors" title="Delete">
-                    <Trash2 className="h-4 w-4 text-destructive" />
-                  </button>
-                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{editingId ? 'Edit address' : 'Add address'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Label</label>
+              <select
+                value={editLabel}
+                onChange={e => setEditLabel(e.target.value)}
+                className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
+              >
+                <option value="Home">Home</option>
+                <option value="Work">Work</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Recipient name
+              </label>
+              <Input
+                value={editRecipientName}
+                onChange={e => setEditRecipientName(e.target.value)}
+                placeholder="Full name"
+                className="h-10"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Phone number
+              </label>
+              <Input
+                value={editRecipientPhone}
+                onChange={e => setEditRecipientPhone(e.target.value)}
+                placeholder="Phone"
+                type="tel"
+                className="h-10"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Street / area
+              </label>
+              <Input value={editAddress} onChange={e => setEditAddress(e.target.value)} placeholder="Address" className="h-10" />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">City</label>
+                <Input
+                  value={editCity}
+                  onChange={e => {
+                    lastAutoCity.current = null;
+                    setEditCity(e.target.value);
+                  }}
+                  className="h-10"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Pincode</label>
+                <Input
+                  value={editPincode}
+                  onChange={e => setEditPincode(e.target.value.replace(/[^\d]/g, '').slice(0, 6))}
+                  className="h-10"
+                />
               </div>
             </div>
-          ))}
-        </div>
-      )}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">State</label>
+              <Input
+                value={editState}
+                onChange={e => {
+                  lastAutoState.current = null;
+                  setEditState(e.target.value);
+                }}
+                className="h-10"
+              />
+            </div>
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <Checkbox checked={editDefault} onCheckedChange={v => setEditDefault(v === true)} />
+              Set as default address
+            </label>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="button" disabled={!canSaveDialog || editBusy} onClick={() => void saveDialog()}>
+              {editBusy ? 'Saving…' : editingId ? 'Save changes' : 'Save address'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

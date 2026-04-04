@@ -58,6 +58,9 @@ export interface User {
   addresses?: {
     id: string;
     label: string;
+    /** Contact at this address (required when saving). */
+    recipientName?: string;
+    recipientPhone?: string;
     address: string;
     city: string;
     state?: string;

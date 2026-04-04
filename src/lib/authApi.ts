@@ -146,12 +146,20 @@ export async function deleteAddressApi(id: string): Promise<Address[]> {
   return (data.addresses ?? []) as Address[];
 }
 
-export async function setPasswordApi(params: { password: string }): Promise<User | null> {
+export async function setPasswordApi(params: {
+  password: string;
+  /** Required when the account already has a password (e.g. Settings). Omit for first-time set (OTP checkout / mustReset). */
+  currentPassword?: string;
+}): Promise<User | null> {
+  const body: { password: string; currentPassword?: string } = { password: params.password };
+  if (params.currentPassword !== undefined && params.currentPassword !== '') {
+    body.currentPassword = params.currentPassword;
+  }
   const res = await fetch(apiUrl('/api/auth/password/set'), {
     method: 'POST',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password: params.password }),
+    body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
