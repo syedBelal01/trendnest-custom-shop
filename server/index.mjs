@@ -48,6 +48,14 @@ const VariantOptionSchema = new mongoose.Schema({
   images: { type: [String], default: [] },
 });
 
+const ProductSpecificationSchema = new mongoose.Schema(
+  {
+    label: { type: String, default: '' },
+    value: { type: String, default: '' },
+  },
+  { _id: false }
+);
+
 const ProductSchema = new mongoose.Schema(
   {
     _id: { type: String, required: true },
@@ -62,6 +70,8 @@ const ProductSchema = new mongoose.Schema(
     variantOptions: { type: [VariantOptionSchema], default: undefined },
     variants: [String],
     sleeveTypes: [String],
+    /** Key-value product details (Brand, Material, etc.); only complete pairs are stored after normalize. */
+    specifications: { type: [ProductSpecificationSchema], default: [] },
     stock: { type: Number, default: 0 },
     rating: { type: Number, default: 4 },
     reviews: { type: [ProductEmbeddedReviewSchema], default: [] },
@@ -378,6 +388,24 @@ function serialize(doc) {
   const id = o._id;
   delete o._id;
   return { id, ...o };
+}
+
+/** Normalize product.specifications for JSON (Mongo may omit key or use odd shapes). */
+function serializeProductDoc(doc) {
+  const o = serialize(doc);
+  if (!o) return null;
+  const raw = o.specifications;
+  if (!Array.isArray(raw)) {
+    o.specifications = [];
+  } else {
+    o.specifications = raw
+      .map((row) => ({
+        label: String(row?.label ?? '').trim(),
+        value: String(row?.value ?? '').trim(),
+      }))
+      .filter((x) => x.label.length > 0 && x.value.length > 0);
+  }
+  return o;
 }
 
 function serializeOrder(doc) {
@@ -1262,6 +1290,26 @@ app.get('/api/products/:id/reviews', mongoReady, async (req, res) => {
   }
 });
 
+app.get('/api/products/:id', mongoReady, async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim();
+    if (!id) {
+      res.status(400).json({ error: 'Missing product id' });
+      return;
+    }
+    const doc = await Product.findById(id).lean();
+    if (!doc) {
+      res.status(404).json({ error: 'Product not found' });
+      return;
+    }
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.json(serializeProductDoc(doc));
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to load product' });
+  }
+});
+
 app.post('/api/reviews', mongoReady, requireAuth, async (req, res) => {
   try {
     const userId = String(req.session.userId);
@@ -1680,7 +1728,8 @@ app.post('/api/auth/password/reset', async (req, res) => {
 app.get('/api/products', mongoReady, async (_req, res) => {
   try {
     const docs = await Product.find().lean();
-    res.json(docs.map((d) => serialize(d)));
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.json(docs.map((d) => serializeProductDoc(d)));
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Failed to list products' });
@@ -1742,6 +1791,17 @@ function normalizeVariantOptionsFromBody(raw) {
     .filter((v) => v.name.length > 0);
 }
 
+/** Product details rows: both label and value must be non-empty after trim. */
+function normalizeSpecificationsFromBody(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((row) => ({
+      label: (typeof row?.label === 'string' ? row.label : String(row?.label ?? '')).trim(),
+      value: (typeof row?.value === 'string' ? row.value : String(row?.value ?? '')).trim(),
+    }))
+    .filter((row) => row.label.length > 0 && row.value.length > 0);
+}
+
 app.post('/api/products', mongoReady, async (req, res) => {
   try {
     const body = req.body;
@@ -1765,8 +1825,9 @@ app.post('/api/products', mongoReady, async (req, res) => {
       isCustomPrint: !!body.isCustomPrint,
       isTrending: !!body.isTrending,
       tags: body.tags,
+      specifications: normalizeSpecificationsFromBody(body.specifications),
     });
-    res.status(201).json(serialize(doc));
+    res.status(201).json(serializeProductDoc(doc));
   } catch (e) {
     console.error(e);
     if (e.code === 11000) {
@@ -1833,6 +1894,9 @@ function buildProductUpdateSet(src) {
   if (src.tags !== undefined) {
     out.tags = Array.isArray(src.tags) ? src.tags.map((t) => String(t)) : [];
   }
+  if (src.specifications !== undefined) {
+    out.specifications = normalizeSpecificationsFromBody(src.specifications);
+  }
   return Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined));
 }
 
@@ -1850,11 +1914,12 @@ app.put('/api/products/:id', mongoReady, async (req, res) => {
 
     const $set = buildProductUpdateSet(src);
     if (Object.keys($set).length > 0) {
-      await Product.collection.updateOne({ _id: id }, { $set });
+      await Product.findByIdAndUpdate(id, { $set }, { new: false });
     }
 
     const doc = await Product.findById(id).lean();
-    res.json(serialize(doc));
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.json(serializeProductDoc(doc));
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: e.message || 'Failed to update product' });

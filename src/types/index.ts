@@ -4,6 +4,12 @@ export interface ProductVariantOption {
   images: string[];
 }
 
+/** Admin-managed key/value rows shown under Product details on the PDP. */
+export interface ProductSpecification {
+  label: string;
+  value: string;
+}
+
 export interface Product {
   id: string;
   name: string;
@@ -28,6 +34,7 @@ export interface Product {
   isCustomPrint?: boolean;
   isTrending?: boolean;
   tags?: string[];
+  specifications?: ProductSpecification[];
 }
 
 export interface Review {

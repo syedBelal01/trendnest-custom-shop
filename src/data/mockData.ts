@@ -36,6 +36,11 @@ export const initialProducts: Product[] = [
     reviews: [{ id: 'r2', userName: 'Sneha', rating: 4, comment: 'Looks great on the counter.', date: '2026-01-22' }],
     isTrending: true,
     tags: ['home'],
+    specifications: [
+      { label: 'Material', value: 'ABS plastic & glass' },
+      { label: 'Capacity', value: '400 ml' },
+      { label: 'Mount', value: 'Wall-mounted' },
+    ],
   },
   {
     id: 'tee-print-1',

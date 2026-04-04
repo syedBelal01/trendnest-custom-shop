@@ -49,7 +49,7 @@ export class ProductsApiError extends Error {
 export async function fetchProductsApi(): Promise<import('@/types').Product[]> {
   let res: Response;
   try {
-    res = await fetch(apiUrl('/api/products'));
+    res = await fetch(apiUrl(`/api/products?t=${Date.now()}`), productFetchInit);
   } catch {
     throw new ProductsApiError(
       import.meta.env.DEV
@@ -84,6 +84,29 @@ export async function fetchProductsApi(): Promise<import('@/types').Product[]> {
     throw new ProductsApiError(msg, 'HTTP');
   }
   return res.json();
+}
+
+const productFetchInit: RequestInit = {
+  cache: 'no-store',
+  headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
+};
+
+/** Single product by id (includes `specifications` when set in MongoDB). */
+export async function fetchProductByIdApi(id: string): Promise<import('@/types').Product | null> {
+  const trimmed = id.trim();
+  if (!trimmed) return null;
+  try {
+    const res = await fetch(
+      apiUrl(`/api/products/${encodeURIComponent(trimmed)}?t=${Date.now()}`),
+      productFetchInit
+    );
+    if (res.status === 404) return null;
+    if (!res.ok) return null;
+    const data = (await res.json().catch(() => null)) as import('@/types').Product | null;
+    return data?.id ? data : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function createProductApi(product: import('@/types').Product): Promise<import('@/types').Product> {

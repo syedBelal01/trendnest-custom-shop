@@ -9,6 +9,8 @@ import type { Product } from '@/types';
 import { productVariantNames } from '@/lib/productVariants';
 import { galleryImagesForSelection } from '@/lib/productImages';
 import { fetchProductReviewsApi, type Review as ApiReview } from '@/lib/reviewsApi';
+import { fetchProductByIdApi } from '@/lib/api';
+import { parseProductSpecifications } from '@/lib/productSpecifications';
 
 function variantOptionLabel(product: Product): string {
   if (product.subcategory === 'Belts') return 'Leather color';
@@ -26,7 +28,36 @@ const pillOption = (active: boolean) =>
 export default function ProductDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { products, ratingSummary } = useProducts();
-  const product = products.find(p => p.id === id);
+  const fromList = id ? products.find(p => p.id === id) : undefined;
+  const [fetchedProduct, setFetchedProduct] = useState<Product | null>(null);
+
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    const load = () => {
+      void (async () => {
+        const one = await fetchProductByIdApi(id);
+        if (!cancelled && one) setFetchedProduct(one);
+      })();
+    };
+    load();
+    const onVis = () => {
+      if (document.visibilityState === 'visible') load();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    const onProductUpdated = (e: Event) => {
+      const ce = e as CustomEvent<{ id?: string }>;
+      if (ce.detail?.id === id) load();
+    };
+    window.addEventListener('trendnest:product-updated', onProductUpdated);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('trendnest:product-updated', onProductUpdated);
+    };
+  }, [id]);
+
+  const product = fetchedProduct ?? fromList;
   const { addItem } = useCart();
   const [selectedSize, setSelectedSize] = useState('');
   const [selectedVariant, setSelectedVariant] = useState('');
@@ -98,6 +129,11 @@ export default function ProductDetailPage() {
   const avg = summary?.avgRating ?? 0;
   const count = summary?.reviewCount ?? 0;
   const filled = Math.round(avg);
+  const specRows = useMemo(() => {
+    if (!product) return [];
+    if (fetchedProduct) return parseProductSpecifications(fetchedProduct);
+    return parseProductSpecifications(product);
+  }, [product, fetchedProduct]);
 
   return (
     <div className="max-w-7xl mx-auto px-3 sm:px-4 py-6 sm:py-8">
@@ -213,6 +249,24 @@ export default function ProductDetailPage() {
           <p className="text-sm text-muted-foreground">
             {product.stock > 0 ? `✓ In stock (${product.stock} available)` : '✗ Out of stock'}
           </p>
+
+          {specRows.length > 0 && (
+            <div className="rounded-xl border border-border bg-card/50 p-4 sm:p-5">
+              <h2 className="text-base sm:text-lg font-semibold text-foreground mb-3">Product details</h2>
+              <dl className="grid grid-cols-1 sm:grid-cols-[minmax(8rem,11rem)_1fr] gap-x-6 gap-y-2 text-sm">
+                {specRows.map((row, i) => (
+                  <div key={`${row.label}-${i}`} className="contents">
+                    <dt className="text-muted-foreground py-1 sm:py-0.5 border-b border-border/60 sm:border-0 font-medium">
+                      {row.label.trim()}
+                    </dt>
+                    <dd className="text-foreground pb-2 sm:pb-1 sm:pt-0.5 border-b border-border/60 last:border-0 sm:border-0">
+                      {row.value.trim()}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
         </div>
       </div>
 

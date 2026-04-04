@@ -15,8 +15,17 @@ import {
   ensureProductImageUrls,
   ensureVariantOptionsImageUrls,
   DEFAULT_PRODUCT_IMAGE,
+  updateProductApi,
 } from '@/lib/api';
 import { productPrimaryImage } from '@/lib/productImages';
+import { suggestedSpecLabelsForCategory } from '@/data/productSpecPresets';
+
+function normalizeSpecsForPersist(rows: { label: string; value: string }[] | undefined) {
+  if (!rows?.length) return [];
+  return rows
+    .map(r => ({ label: (r.label ?? '').trim(), value: (r.value ?? '').trim() }))
+    .filter(r => r.label.length > 0 && r.value.length > 0);
+}
 
 const emptyProduct = (): Partial<Product> => ({
   name: '',
@@ -32,6 +41,7 @@ const emptyProduct = (): Partial<Product> => ({
   sizes: [],
   sleeveTypes: [],
   tags: [],
+  specifications: [],
   isCustomPrint: false,
   isTrending: false,
   /** Same variant-card layout for every product: at least one row to add name + images. */
@@ -113,9 +123,14 @@ const PRESETS: Record<string, Partial<Product>> = {
 };
 
 function normalizeProductForEditing(p: Product): Partial<Product> {
+  const specifications = [...(p.specifications ?? [])].map(s => ({
+    label: s.label ?? '',
+    value: s.value ?? '',
+  }));
   if (p.variantOptions?.length) {
     return {
       ...p,
+      specifications,
       variantOptions: p.variantOptions.map(v => ({
         name: v.name,
         images: [...(v.images ?? [])],
@@ -125,6 +140,7 @@ function normalizeProductForEditing(p: Product): Partial<Product> {
   if (p.variants?.length) {
     return {
       ...p,
+      specifications,
       variantOptions: p.variants.map((name, i) => ({
         name,
         images: i === 0 ? [...(p.images ?? [])] : [],
@@ -133,6 +149,7 @@ function normalizeProductForEditing(p: Product): Partial<Product> {
   }
   return {
     ...p,
+    specifications,
     variantOptions: [{ name: '', images: [...(p.images ?? [])] }],
   };
 }
@@ -178,6 +195,7 @@ export default function AdminProducts() {
   const [qualityPct, setQualityPct] = useState(85);
   const [imageBusy, setImageBusy] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
+  const [specSaveBusy, setSpecSaveBusy] = useState(false);
   const variantFileRef = useRef<HTMLInputElement>(null);
   const variantUploadIdxRef = useRef<number | null>(null);
   const [variantUrlDraft, setVariantUrlDraft] = useState<Record<number, string>>({});
@@ -309,6 +327,91 @@ export default function AdminProducts() {
     setEditing(prev => ({ ...emptyProduct(), ...prev, ...PRESETS[key] }));
   };
 
+  const updateSpecRow = (idx: number, field: 'label' | 'value', value: string) => {
+    setEditing(p => {
+      if (!p) return p;
+      const rows = [...(p.specifications ?? [])];
+      while (rows.length <= idx) rows.push({ label: '', value: '' });
+      rows[idx] = { ...rows[idx], [field]: value };
+      return { ...p, specifications: rows };
+    });
+  };
+
+  const addSpecRow = () => {
+    setEditing(p =>
+      p ? { ...p, specifications: [...(p.specifications ?? []), { label: '', value: '' }] } : p
+    );
+  };
+
+  const removeSpecRow = (idx: number) => {
+    setEditing(p => {
+      if (!p) return p;
+      const rows = (p.specifications ?? []).filter((_, i) => i !== idx);
+      return { ...p, specifications: rows };
+    });
+  };
+
+  const addSuggestedSpecFields = () => {
+    setEditing(p => {
+      if (!p) return p;
+      const cat = p.category ?? 'fashion';
+      const labels = suggestedSpecLabelsForCategory(cat);
+      const existing = new Set(
+        (p.specifications ?? []).map(s => s.label.trim().toLowerCase()).filter(Boolean)
+      );
+      const toAdd = labels
+        .filter(l => !existing.has(l.toLowerCase()))
+        .map(label => ({ label, value: '' }));
+      if (!toAdd.length) {
+        toast.message('All suggested labels for this category are already in the list.');
+        return p;
+      }
+      return {
+        ...p,
+        specifications: [...(p.specifications ?? []), ...toAdd],
+      };
+    });
+  };
+
+  const saveSpecificationsOnly = async () => {
+    if (!editing?.id) {
+      toast.error('Save the product once with the main Save button at the bottom, then you can save specifications here.');
+      return;
+    }
+    if (!apiAvailable) {
+      toast.error('API is not connected. Start the server and try again.');
+      return;
+    }
+    setSpecSaveBusy(true);
+    try {
+      const specifications = normalizeSpecsForPersist(editing.specifications);
+      const saved = await updateProductApi(editing.id, { specifications });
+      const nextSpecs = [...(saved.specifications ?? [])].map(s => ({
+        label: s.label ?? '',
+        value: s.value ?? '',
+      }));
+      setEditing(p =>
+        p && p.id === saved.id
+          ? {
+              ...p,
+              specifications: nextSpecs.length ? nextSpecs : [],
+            }
+          : p
+      );
+      await refreshProducts();
+      window.dispatchEvent(new CustomEvent('trendnest:product-updated', { detail: { id: editing.id } }));
+      toast.success(
+        specifications.length > 0
+          ? `Saved ${specifications.length} specification row(s). Open or refresh the product page to see them.`
+          : 'Specifications cleared in the database.'
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not save specifications');
+    } finally {
+      setSpecSaveBusy(false);
+    }
+  };
+
   const save = async () => {
     if (!editing?.name || editing.price === undefined || editing.price === null) {
       toast.error('Name and price required');
@@ -383,6 +486,8 @@ export default function AdminProducts() {
 
       const persistVariantOptions = variantOptionsIn.length > 0;
 
+      const specifications = normalizeSpecsForPersist(snap.specifications);
+
       if (editing.id) {
         await updateProduct(editing.id, {
           name: snap.name,
@@ -402,6 +507,7 @@ export default function AdminProducts() {
           isCustomPrint: snap.isCustomPrint,
           isTrending: snap.isTrending,
           tags: snap.tags?.length ? snap.tags : undefined,
+          specifications,
         });
         toast.success('Product saved to MongoDB');
       } else {
@@ -424,6 +530,7 @@ export default function AdminProducts() {
           isCustomPrint: !!snap.isCustomPrint,
           isTrending: !!snap.isTrending,
           tags: snap.tags?.length ? snap.tags : undefined,
+          specifications: specifications.length ? specifications : undefined,
         };
         await addProduct(newP);
         toast.success('Product saved to MongoDB');
@@ -500,6 +607,59 @@ export default function AdminProducts() {
                 <div className="grid grid-cols-2 gap-3">
                   <Input type="number" placeholder="Price (₹)" value={editing.price || ''} onChange={e => setEditing(p => ({ ...p, price: +e.target.value }))} />
                   <Input type="number" placeholder="Original Price" value={editing.originalPrice || ''} onChange={e => setEditing(p => ({ ...p, originalPrice: +e.target.value || undefined }))} />
+                </div>
+
+                <div className="rounded-xl border border-border bg-card p-3 shadow-sm space-y-3">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <p className="text-sm font-medium">Product details (specifications)</p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Fill label and value for each row, then use <strong>Save specifications</strong> to write them to MongoDB. The storefront reads only what is saved there (complete rows only).
+                      </p>
+                    </div>
+                    <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 text-xs" onClick={addSuggestedSpecFields}>
+                      Add suggested fields for category
+                    </Button>
+                  </div>
+                  <div className="space-y-2">
+                    {(editing.specifications?.length ? editing.specifications : [{ label: '', value: '' }]).map((row, sidx) => (
+                      <div key={sidx} className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                        <Input
+                          className="h-9 sm:flex-1"
+                          placeholder="Label (e.g. Brand)"
+                          value={row.label}
+                          onChange={e => updateSpecRow(sidx, 'label', e.target.value)}
+                        />
+                        <Input
+                          className="h-9 sm:flex-[2]"
+                          placeholder="Value"
+                          value={row.value}
+                          onChange={e => updateSpecRow(sidx, 'value', e.target.value)}
+                        />
+                        <Button type="button" variant="ghost" size="sm" className="h-9 text-destructive shrink-0" onClick={() => removeSpecRow(sidx)}>
+                          Remove
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button type="button" variant="outline" size="sm" onClick={addSpecRow}>
+                      <Plus className="h-3.5 w-3.5 mr-1" /> Add row
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={specSaveBusy || !apiAvailable || !editing.id}
+                      onClick={() => void saveSpecificationsOnly()}
+                    >
+                      {specSaveBusy ? 'Saving…' : 'Save specifications'}
+                    </Button>
+                  </div>
+                  {!editing.id && (
+                    <p className="text-xs text-amber-800 dark:text-amber-200/90">
+                      Save the product with the main Save button below first — then you can save specifications to the database.
+                    </p>
+                  )}
                 </div>
 
                 <div className="rounded-xl border border-border bg-card p-3 shadow-sm space-y-3">
