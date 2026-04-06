@@ -10,6 +10,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
 import { Mail, Lock, User, Phone, ArrowRight, ShieldCheck, Sparkles } from 'lucide-react';
 
+const SESSION_NOT_VERIFIED =
+  'Session could not be verified. Try again, or open the site in your regular browser (Safari/Chrome) if you are in an in-app browser.';
+
 export default function LoginPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -45,10 +48,14 @@ export default function LoginPage() {
     }
     setBusy(true);
     try {
-      const loggedIn = await loginApi({ email, password });
-      await refreshAuth();
+      await loginApi({ email, password });
+      const u = await refreshAuth();
+      if (!u) {
+        toast.error(SESSION_NOT_VERIFIED);
+        return;
+      }
       toast.success('Logged in');
-      navigate(postLoginPath(!!loggedIn?.mustResetPassword), { replace: true });
+      // Navigation runs in useEffect once `user` is committed—avoids UserGuard racing on mobile.
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Login failed');
     } finally {
@@ -84,15 +91,18 @@ export default function LoginPage() {
     }
     setBusy(true);
     try {
-      const { user: verified } = await verifyOtpApi({
+      await verifyOtpApi({
         challengeId: otpChallengeId,
         code: otp,
         name: name.trim() || undefined,
         phone: phone.trim() || undefined,
       });
-      await refreshAuth();
+      const u = await refreshAuth();
+      if (!u) {
+        toast.error(SESSION_NOT_VERIFIED);
+        return;
+      }
       toast.success('Logged in');
-      navigate(postLoginPath(!!verified?.mustResetPassword), { replace: true });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'OTP verification failed');
     } finally {
