@@ -4,6 +4,7 @@ import type { ProductCategory } from '@/types';
 export const PRODUCT_SPEC_LABEL_PRESETS: Record<ProductCategory, string[]> = {
   fashion: ['Brand', 'Material', 'Fit', 'Care instructions', 'Country of origin', 'Dimensions'],
   home: ['Material', 'Dimensions', 'Weight', 'Color', 'Warranty', 'Country of origin'],
+  electronics: ['Brand', 'Model', 'Warranty', 'Power', 'Dimensions', 'Country of origin'],
   printed: ['Brand', 'Material', 'Print type', 'Care instructions', 'Capacity', 'Dimensions'],
   trending: ['Brand', 'Material', 'Weight', 'Dimensions', 'Country of origin', 'Warranty'],
 };

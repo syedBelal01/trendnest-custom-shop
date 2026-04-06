@@ -51,7 +51,7 @@ export default function ProductCard({ product }: { product: Product }) {
         <Button size="sm" className="w-full mt-2 sm:mt-3 h-8 sm:h-8 text-xs gap-1" onClick={() => addItem({
           product, quantity: 1,
           selectedSize: product.sizes?.[0],
-          selectedVariant: productVariantNames(product)[0],
+          selectedVariant: product.variantModel?.items?.[0]?.key ?? productVariantNames(product)[0],
           selectedSleeve: product.sleeveTypes?.[0],
         })}>
           <ShoppingCart className="h-3 w-3" /> Add to Cart

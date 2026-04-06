@@ -62,6 +62,9 @@ const ProductSchema = new mongoose.Schema(
     name: { type: String, required: true },
     description: { type: String, default: '' },
     price: { type: Number, required: true },
+    sku: { type: String, default: '' },
+    onlinePrice: { type: Number, default: undefined },
+    codPrice: { type: Number, default: undefined },
     originalPrice: Number,
     images: { type: [String], default: [] },
     category: { type: String, required: true },
@@ -72,6 +75,8 @@ const ProductSchema = new mongoose.Schema(
     sleeveTypes: [String],
     /** Key-value product details (Brand, Material, etc.); only complete pairs are stored after normalize. */
     specifications: { type: [ProductSpecificationSchema], default: [] },
+    /** New variants model (combinations with per-variant pricing/stock/SKU). */
+    variantModel: { type: Object, default: undefined },
     stock: { type: Number, default: 0 },
     rating: { type: Number, default: 4 },
     reviews: { type: [ProductEmbeddedReviewSchema], default: [] },
@@ -83,6 +88,35 @@ const ProductSchema = new mongoose.Schema(
 );
 
 const Product = mongoose.model('Product', ProductSchema);
+
+// --- Admin product drafts (wizard autosave) ---
+const ProductDraftSchema = new mongoose.Schema(
+  {
+    _id: { type: String, required: true }, // draftId
+    status: { type: String, required: true, enum: ['draft', 'published'], default: 'draft', index: true },
+    /** New main category (e.g. Home/Fashion/Electronics). */
+    categoryMain: { type: String, default: '' },
+    subcategory: { type: String, default: '' },
+    /** Step 2 payload (name/description/sku/brand/tags/specifications/etc.) */
+    details: { type: Object, default: {} },
+    /** Step 3 payload */
+    images: {
+      type: {
+        items: { type: [String], default: [] },
+        primaryIndex: { type: Number, default: 0 },
+      },
+      default: () => ({ items: [], primaryIndex: 0 }),
+      _id: false,
+    },
+    /** Step 4 payload */
+    variants: { type: Object, default: {} },
+    /** Product id created when published (optional). */
+    publishedProductId: { type: String, default: '' },
+  },
+  { versionKey: false, timestamps: true }
+);
+
+const ProductDraft = mongoose.model('ProductDraft', ProductDraftSchema);
 
 // --- Auth (customer accounts) ---
 const UserSchema = new mongoose.Schema(
@@ -1918,6 +1952,290 @@ function normalizeSpecificationsFromBody(raw) {
     .filter((row) => row.label.length > 0 && row.value.length > 0);
 }
 
+function serializeProductDraft(doc) {
+  if (!doc) return null;
+  const o = doc.toObject ? doc.toObject({ flattenMaps: true, versionKey: false }) : { ...doc };
+  const id = o._id;
+  delete o._id;
+  const out = { draftId: id, ...o };
+  if (out.createdAt instanceof Date) out.createdAt = out.createdAt.toISOString();
+  if (out.updatedAt instanceof Date) out.updatedAt = out.updatedAt.toISOString();
+  return out;
+}
+
+function clampImagePrimaryIndex(items, idx) {
+  const n = Array.isArray(items) ? items.length : 0;
+  if (!n) return 0;
+  const i = Number(idx);
+  if (!Number.isFinite(i)) return 0;
+  return Math.max(0, Math.min(n - 1, Math.floor(i)));
+}
+
+function normalizeDraftPatch(patch) {
+  const out = {};
+  if (patch == null || typeof patch !== 'object') return out;
+  if (patch.status !== undefined) out.status = patch.status === 'published' ? 'published' : 'draft';
+  if (patch.categoryMain !== undefined) out.categoryMain = String(patch.categoryMain ?? '').trim();
+  if (patch.subcategory !== undefined) out.subcategory = String(patch.subcategory ?? '').trim();
+  if (patch.details !== undefined) out.details = patch.details && typeof patch.details === 'object' ? patch.details : {};
+  if (patch.images !== undefined) {
+    const items = Array.isArray(patch.images?.items) ? patch.images.items.map((u) => String(u)).filter(Boolean).slice(0, 8) : [];
+    const primaryIndex = clampImagePrimaryIndex(items, patch.images?.primaryIndex);
+    out.images = { items, primaryIndex };
+  }
+  if (patch.variants !== undefined) out.variants = patch.variants && typeof patch.variants === 'object' ? patch.variants : {};
+  return out;
+}
+
+function requireUniqueSkus(rows) {
+  const seen = new Set();
+  for (let i = 0; i < rows.length; i++) {
+    const sku = String(rows[i]?.sku ?? '').trim();
+    if (!sku) throw new Error(`Variant SKU is required (row ${i + 1})`);
+    const key = sku.toLowerCase();
+    if (seen.has(key)) throw new Error(`Variant SKU must be unique (duplicate: ${sku})`);
+    seen.add(key);
+  }
+}
+
+function draftToProductPayload(draft) {
+  const d = draft?.details && typeof draft.details === 'object' ? draft.details : {};
+  const images = Array.isArray(draft?.images?.items) ? draft.images.items.map((u) => String(u)).filter(Boolean).slice(0, 8) : [];
+  const primaryIndex = clampImagePrimaryIndex(images, draft?.images?.primaryIndex);
+  const orderedImages = images.length
+    ? [images[primaryIndex], ...images.filter((_, i) => i !== primaryIndex)]
+    : [];
+
+  // Variants payload is stored in draft. For now we map it into Product fields additively.
+  const v = draft?.variants && typeof draft.variants === 'object' ? draft.variants : {};
+  const hasVariants = !!v.hasVariants || (Array.isArray(v.items) && v.items.length > 0);
+
+  const base = {
+    name: String(d.name ?? '').trim(),
+    description: String(d.description ?? '').trim(),
+    category: String(draft.categoryMain ?? '').trim(),
+    subcategory: String(draft.subcategory ?? '').trim(),
+    tags: Array.isArray(d.tags) ? d.tags.map((t) => String(t)).filter(Boolean) : [],
+    specifications: normalizeSpecificationsFromBody(d.specifications),
+    images: orderedImages.length ? orderedImages : undefined,
+    isTrending: !!d.isTrending,
+    isCustomPrint: !!d.isCustomPrint,
+  };
+
+  if (!hasVariants) {
+    const simple = v.simple && typeof v.simple === 'object' ? v.simple : {};
+    return {
+      ...base,
+      price: Number(simple.price ?? d.price ?? 0),
+      stock: Number(simple.stock ?? d.stock ?? 0) || 0,
+      sku: simple.sku != null ? String(simple.sku).trim() : undefined,
+      onlinePrice: simple.onlinePrice != null ? Number(simple.onlinePrice) : undefined,
+      codPrice: simple.codPrice != null ? Number(simple.codPrice) : undefined,
+      variantModel: undefined,
+    };
+  }
+
+  let types = Array.isArray(v.types) ? v.types : [];
+  const items = Array.isArray(v.items) ? v.items : [];
+  requireUniqueSkus(items);
+
+  // If types are missing, derive them from attrs keys (so variant selectors still render).
+  if (!types.length && items.length) {
+    const keys = new Set();
+    for (const it of items) {
+      const attrs = it?.attrs && typeof it.attrs === 'object' ? it.attrs : {};
+      for (const k of Object.keys(attrs)) keys.add(String(k));
+    }
+    types = Array.from(keys).map((k) => ({
+      name: k,
+      values: Array.from(
+        new Set(items.map((it) => String((it?.attrs && it.attrs[k] != null) ? it.attrs[k] : '')).filter(Boolean))
+      ),
+    }));
+  }
+
+  // Default PDP price/stock to the first item (storefront will use variantModel when present).
+  const first = items[0] || {};
+  const stockSum = items.reduce((acc, it) => acc + (Number(it?.stock) || 0), 0);
+  const minPrice = items.reduce((acc, it) => {
+    const n = Number(it?.price);
+    if (!Number.isFinite(n) || n <= 0) return acc;
+    return acc === null ? n : Math.min(acc, n);
+  }, null);
+
+  // Compatibility: also emit legacy `variantOptions` (used by older storefront helpers).
+  // We derive it from the first variant dimension (usually "Color").
+  const firstTypeName = String(types?.[0]?.name ?? '').trim();
+  const legacyVariantOptions =
+    firstTypeName && items.length
+      ? Array.from(
+          new Map(
+            items
+              .map((it) => {
+                const attrs = it?.attrs && typeof it.attrs === 'object' ? it.attrs : {};
+                const name = String(attrs?.[firstTypeName] ?? '').trim();
+                const imgs = Array.isArray(it?.images) ? it.images.map((u) => String(u)).filter(Boolean).slice(0, 8) : [];
+                const legacy = it?.image ? [String(it.image)] : [];
+                const images = [...imgs, ...legacy].map((u) => String(u)).filter(Boolean);
+                return name ? [name, { name, images }] : null;
+              })
+              .filter(Boolean)
+          ).values()
+        )
+      : [];
+
+  return {
+    ...base,
+    price: Number((minPrice ?? first.price) ?? d.price ?? 0),
+    stock: stockSum || Number(first.stock ?? d.stock ?? 0) || 0,
+    onlinePrice: first.onlinePrice != null ? Number(first.onlinePrice) : undefined,
+    codPrice: first.codPrice != null ? Number(first.codPrice) : undefined,
+    variantOptions: legacyVariantOptions.length ? legacyVariantOptions : undefined,
+    variantModel: {
+      types: types.map((t) => ({
+        name: String(t?.name ?? '').trim(),
+        values: Array.isArray(t?.values) ? t.values.map((x) => String(x)).filter(Boolean) : [],
+      })),
+      items: items.map((it) => ({
+        key: String(it?.key ?? '').trim(),
+        attrs: it?.attrs && typeof it.attrs === 'object' ? it.attrs : {},
+        sku: String(it?.sku ?? '').trim(),
+        price: Number(it?.price ?? 0),
+        onlinePrice: it?.onlinePrice != null ? Number(it.onlinePrice) : undefined,
+        codPrice: it?.codPrice != null ? Number(it.codPrice) : undefined,
+        stock: Number(it?.stock ?? 0) || 0,
+        image: it?.image ? String(it.image) : undefined,
+        images: Array.isArray(it?.images) ? it.images.map((u) => String(u)).filter(Boolean).slice(0, 8) : undefined,
+      })),
+    },
+  };
+}
+
+// Admin draft endpoints (wizard autosave)
+app.post('/api/admin/product-drafts', mongoReady, adminKeyRequired, async (_req, res) => {
+  try {
+    const id = `draft-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const doc = await ProductDraft.create({ _id: id, status: 'draft' });
+    res.status(201).json({ draft: serializeProductDraft(doc) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to create draft' });
+  }
+});
+
+app.get('/api/admin/product-drafts', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    const status = String(req.query?.status || 'draft');
+    const q = status === 'published' ? { status: 'published' } : { status: 'draft' };
+    const docs = await ProductDraft.find(q).sort({ updatedAt: -1 }).limit(200).lean();
+    res.json({ drafts: docs.map((d) => serializeProductDraft(d)) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to list drafts' });
+  }
+});
+
+app.get('/api/admin/product-drafts/:draftId', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    const { draftId } = req.params;
+    const doc = await ProductDraft.findById(draftId).lean();
+    if (!doc) {
+      res.status(404).json({ error: 'Draft not found' });
+      return;
+    }
+    res.json({ draft: serializeProductDraft(doc) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to load draft' });
+  }
+});
+
+app.patch('/api/admin/product-drafts/:draftId', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    const { draftId } = req.params;
+    const existing = await ProductDraft.findById(draftId).lean();
+    if (!existing) {
+      res.status(404).json({ error: 'Draft not found' });
+      return;
+    }
+
+    const patch = normalizeDraftPatch(req.body);
+    const $set = { ...patch };
+
+    const isPlainObject = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
+
+    // Merge nested objects instead of replacing (prevents dropping fields like `variants.items[].images`).
+    if (patch.details !== undefined && isPlainObject(existing.details) && isPlainObject(patch.details)) {
+      $set.details = { ...(existing.details ?? {}), ...(patch.details ?? {}) };
+    }
+    if (patch.variants !== undefined && isPlainObject(existing.variants) && isPlainObject(patch.variants)) {
+      $set.variants = { ...(existing.variants ?? {}), ...(patch.variants ?? {}) };
+    }
+
+    await ProductDraft.updateOne({ _id: draftId }, { $set });
+    const doc = await ProductDraft.findById(draftId).lean();
+    res.json({ draft: serializeProductDraft(doc) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to update draft' });
+  }
+});
+
+app.delete('/api/admin/product-drafts/:draftId', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    const { draftId } = req.params;
+    await ProductDraft.deleteOne({ _id: draftId });
+    res.status(204).end();
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to delete draft' });
+  }
+});
+
+app.post('/api/admin/product-drafts/:draftId/publish', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    const { draftId } = req.params;
+    const draft = await ProductDraft.findById(draftId).lean();
+    if (!draft) {
+      res.status(404).json({ error: 'Draft not found' });
+      return;
+    }
+    const payload = draftToProductPayload(draft);
+    if (!payload.name) {
+      res.status(400).json({ error: 'Product name is required' });
+      return;
+    }
+    if (!payload.category) {
+      res.status(400).json({ error: 'Main category is required' });
+      return;
+    }
+    if (!Number.isFinite(Number(payload.price)) || Number(payload.price) <= 0) {
+      res.status(400).json({ error: 'Price must be greater than 0' });
+      return;
+    }
+
+    const publishAs = String(req.body?.publishAs || '').toLowerCase(); // 'draft' | 'published'
+    const status = publishAs === 'draft' ? 'draft' : 'published';
+
+    const productId = draft.publishedProductId ? String(draft.publishedProductId) : `p${Date.now()}`;
+    const docExists = await Product.exists({ _id: productId });
+    if (docExists) {
+      const $set = buildProductUpdateSet(payload);
+      await Product.findByIdAndUpdate(productId, { $set }, { new: false });
+    } else {
+      await Product.create({ _id: productId, ...payload });
+    }
+
+    await ProductDraft.updateOne({ _id: draftId }, { $set: { status, publishedProductId: productId } });
+    const nextDraft = await ProductDraft.findById(draftId).lean();
+    const product = await Product.findById(productId).lean();
+    res.json({ draft: serializeProductDraft(nextDraft), product: serializeProductDoc(product) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e instanceof Error ? e.message : 'Failed to publish draft' });
+  }
+});
+
 app.post('/api/products', mongoReady, async (req, res) => {
   try {
     const body = req.body;
@@ -1926,7 +2244,10 @@ app.post('/api/products', mongoReady, async (req, res) => {
       _id: id,
       name: body.name,
       description: body.description ?? '',
+      sku: body.sku != null ? String(body.sku) : '',
       price: Number(body.price),
+      onlinePrice: body.onlinePrice != null ? Number(body.onlinePrice) : undefined,
+      codPrice: body.codPrice != null ? Number(body.codPrice) : undefined,
       originalPrice: body.originalPrice != null ? Number(body.originalPrice) : undefined,
       images: Array.isArray(body.images) && body.images.length ? body.images : ['https://images.unsplash.com/photo-1553062407-98d43420e9e7?w=600'],
       category: body.category,
@@ -1934,6 +2255,7 @@ app.post('/api/products', mongoReady, async (req, res) => {
       sizes: body.sizes,
       variantOptions: normalizeVariantOptionsFromBody(body.variantOptions),
       variants: body.variants,
+      variantModel: body.variantModel && typeof body.variantModel === 'object' ? body.variantModel : undefined,
       sleeveTypes: body.sleeveTypes,
       stock: Number(body.stock) || 0,
       rating: Number(body.rating) || 4,
@@ -1962,10 +2284,25 @@ function buildProductUpdateSet(src) {
   const out = {};
   if (src.name !== undefined) out.name = String(src.name);
   if (src.description !== undefined) out.description = String(src.description ?? '');
+  if (src.sku !== undefined) out.sku = String(src.sku ?? '');
   if (src.price !== undefined) {
     const n = Number(src.price);
     if (!Number.isFinite(n)) throw new Error('Invalid price');
     out.price = n;
+  }
+  if (src.onlinePrice !== undefined) {
+    if (src.onlinePrice === null || src.onlinePrice === '') out.onlinePrice = undefined;
+    else {
+      const n = Number(src.onlinePrice);
+      out.onlinePrice = Number.isFinite(n) ? n : undefined;
+    }
+  }
+  if (src.codPrice !== undefined) {
+    if (src.codPrice === null || src.codPrice === '') out.codPrice = undefined;
+    else {
+      const n = Number(src.codPrice);
+      out.codPrice = Number.isFinite(n) ? n : undefined;
+    }
   }
   if (src.originalPrice !== undefined) {
     if (src.originalPrice === null || src.originalPrice === '') {
@@ -1990,6 +2327,9 @@ function buildProductUpdateSet(src) {
   if (src.variantOptions !== undefined) {
     if (!Array.isArray(src.variantOptions)) throw new Error('variantOptions must be an array');
     out.variantOptions = normalizeVariantOptionsFromBody(src.variantOptions) ?? [];
+  }
+  if (src.variantModel !== undefined) {
+    out.variantModel = src.variantModel && typeof src.variantModel === 'object' ? src.variantModel : undefined;
   }
   if (src.sleeveTypes !== undefined) {
     out.sleeveTypes = Array.isArray(src.sleeveTypes) ? src.sleeveTypes.map((s) => String(s)) : [];

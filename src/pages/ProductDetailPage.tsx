@@ -12,6 +12,45 @@ import { fetchProductReviewsApi, type Review as ApiReview } from '@/lib/reviewsA
 import { fetchProductByIdApi } from '@/lib/api';
 import { parseProductSpecifications } from '@/lib/productSpecifications';
 
+/** Normalize for case/whitespace-insensitive variant matching */
+function normKey(s: string) {
+  return String(s ?? '').trim().toLowerCase();
+}
+function normVal(s: string) {
+  return String(s ?? '').trim().toLowerCase();
+}
+
+function getAttrValueCaseInsensitive(attrs: Record<string, string> | undefined, typeName: string): string {
+  if (!attrs) return '';
+  const nk = normKey(typeName);
+  if (Object.prototype.hasOwnProperty.call(attrs, typeName) && attrs[typeName] != null) {
+    return String(attrs[typeName]);
+  }
+  const key = Object.keys(attrs).find(k => normKey(k) === nk);
+  return key ? String(attrs[key] ?? '') : '';
+}
+
+function dedupeImageUrls(urls: string[]): string[] {
+  const seen = new Set<string>();
+  return urls.filter(u => {
+    const s = String(u).trim();
+    if (!s || seen.has(s)) return false;
+    seen.add(s);
+    return true;
+  });
+}
+
+/** Dev: logs in Vite dev; prod: set `localStorage.setItem('pdpVariantDebug','1')`. Remove when verified. */
+function isPdpVariantDebugEnabled() {
+  if (typeof window === 'undefined') return false;
+  if (import.meta.env.DEV) return true;
+  try {
+    return window.localStorage.getItem('pdpVariantDebug') === '1';
+  } catch {
+    return false;
+  }
+}
+
 function variantOptionLabel(product: Product): string {
   if (product.subcategory === 'Belts') return 'Leather color';
   if (product.category === 'home') return 'Finish';
@@ -60,17 +99,51 @@ export default function ProductDetailPage() {
   const product = fetchedProduct ?? fromList;
   const { addItem } = useCart();
   const [selectedSize, setSelectedSize] = useState('');
-  const [selectedVariant, setSelectedVariant] = useState('');
+  const [selectedVariant, setSelectedVariant] = useState(''); // legacy single variant
+  const [selectedVariantKey, setSelectedVariantKey] = useState(''); // variantModel key
+  const [variantAttrs, setVariantAttrs] = useState<Record<string, string>>({});
   const [selectedSleeve, setSelectedSleeve] = useState('');
   const [qty, setQty] = useState(1);
   const [reviews, setReviews] = useState<ApiReview[]>([]);
   const [reviewsCursor, setReviewsCursor] = useState<string | null>(null);
   const [reviewsLoading, setReviewsLoading] = useState(false);
 
+  const hasVariantModel = !!(product?.variantModel?.types?.length && product?.variantModel?.items?.length);
+
+  /** Single source of truth: derive from `selectedVariantKey` only (see plan: robustness B). */
+  const selectedVariantItem = useMemo(() => {
+    if (!product?.variantModel?.items?.length) return null;
+    const items = product.variantModel.items;
+    if (selectedVariantKey) {
+      const hit = items.find(x => x.key === selectedVariantKey);
+      if (hit) return hit;
+    }
+    return items[0] ?? null;
+  }, [product, selectedVariantKey]);
+
+  useEffect(() => {
+    if (!isPdpVariantDebugEnabled() || !hasVariantModel) return;
+    // eslint-disable-next-line no-console -- intentional debug when flag / dev enabled
+    console.log('[PDP variant]', {
+      selectedVariantKey,
+      selectedVariantItem,
+      variantImages: selectedVariantItem?.images,
+    });
+  }, [hasVariantModel, selectedVariantKey, selectedVariantItem]);
+
   useEffect(() => {
     if (!product) return;
     setSelectedSize(product.sizes?.[0] || '');
-    setSelectedVariant(productVariantNames(product)[0] || '');
+    if (product.variantModel?.items?.length) {
+      const first = product.variantModel.items[0];
+      setSelectedVariantKey(first.key);
+      setVariantAttrs({ ...(first.attrs ?? {}) });
+      setSelectedVariant(''); // legacy cleared
+    } else {
+      setSelectedVariant(productVariantNames(product)[0] || '');
+      setSelectedVariantKey('');
+      setVariantAttrs({});
+    }
     setSelectedSleeve(product.sleeveTypes?.[0] || '');
     setQty(1);
   }, [product]);
@@ -108,9 +181,35 @@ export default function ProductDetailPage() {
 
   const variantNames = product ? productVariantNames(product) : [];
   const galleryImages = useMemo(
-    () => (product ? galleryImagesForSelection(product, selectedVariant) : []),
-    [product, selectedVariant]
+    () => {
+      if (!product) return [];
+      if (hasVariantModel && selectedVariantItem) {
+        const variantImages = (Array.isArray(selectedVariantItem.images) ? selectedVariantItem.images : [])
+          .map((u: unknown) => String(u).trim())
+          .filter(Boolean);
+        const legacyImg = selectedVariantItem.image ? String(selectedVariantItem.image).trim() : '';
+
+        // If variant has no images at all, fall back completely to product images (do not mix).
+        if (variantImages.length === 0 && !legacyImg) {
+          return dedupeImageUrls((product.images ?? []).map(u => String(u).trim()).filter(Boolean));
+        }
+
+        // Prefer variant images (primary = images[0]), then append product.images; dedupe.
+        const primaryList = variantImages.length > 0 ? variantImages : legacyImg ? [legacyImg] : [];
+        const productRest = (product.images ?? []).map(u => String(u).trim()).filter(Boolean);
+        return dedupeImageUrls([...primaryList, ...productRest]);
+      }
+      return galleryImagesForSelection(product, selectedVariant);
+    },
+    [product, selectedVariant, hasVariantModel, selectedVariantItem]
   );
+
+  // Must be declared before any conditional returns (Rules of Hooks).
+  const specRows = useMemo(() => {
+    if (!product) return [];
+    if (fetchedProduct) return parseProductSpecifications(fetchedProduct);
+    return parseProductSpecifications(product);
+  }, [product, fetchedProduct]);
 
   if (!product) {
     return (
@@ -121,19 +220,22 @@ export default function ProductDetailPage() {
     );
   }
 
+  const displayPrice = hasVariantModel && selectedVariantItem ? Number(selectedVariantItem.price) : product.price;
+  const displayOnlinePrice =
+    hasVariantModel && selectedVariantItem && selectedVariantItem.onlinePrice != null
+      ? Number(selectedVariantItem.onlinePrice)
+      : product.onlinePrice != null
+        ? Number(product.onlinePrice)
+        : null;
+
   const discount = product.originalPrice
-    ? Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100)
+    ? Math.round(((product.originalPrice - displayPrice) / product.originalPrice) * 100)
     : 0;
 
   const summary = ratingSummary[product.id];
   const avg = summary?.avgRating ?? 0;
   const count = summary?.reviewCount ?? 0;
   const filled = Math.round(avg);
-  const specRows = useMemo(() => {
-    if (!product) return [];
-    if (fetchedProduct) return parseProductSpecifications(fetchedProduct);
-    return parseProductSpecifications(product);
-  }, [product, fetchedProduct]);
 
   return (
     <div className="max-w-7xl mx-auto px-3 sm:px-4 py-6 sm:py-8">
@@ -148,7 +250,7 @@ export default function ProductDetailPage() {
           productId={product.id}
           images={galleryImages}
           productName={product.name}
-          resetKey={selectedVariant}
+          resetKey={hasVariantModel ? selectedVariantKey : selectedVariant}
         />
         <div className="space-y-4 sm:space-y-6">
           {product.isTrending && (
@@ -157,7 +259,7 @@ export default function ProductDetailPage() {
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">{product.name}</h1>
 
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <span className="text-3xl sm:text-4xl font-bold text-primary tabular-nums">₹{product.price}</span>
+            <span className="text-3xl sm:text-4xl font-bold text-primary tabular-nums">₹{displayPrice}</span>
             {product.originalPrice != null && product.originalPrice > 0 && (
               <span className="text-sm sm:text-base text-muted-foreground line-through tabular-nums">₹{product.originalPrice}</span>
             )}
@@ -165,6 +267,11 @@ export default function ProductDetailPage() {
               <span className="bg-primary/15 text-primary text-xs font-semibold px-2.5 py-1 rounded-md">{discount}% OFF</span>
             )}
           </div>
+          {displayOnlinePrice != null && Number.isFinite(displayOnlinePrice) && displayOnlinePrice > 0 && (
+            <p className="text-xs text-muted-foreground -mt-2">
+              Online payment price: <span className="font-semibold tabular-nums text-foreground">₹{displayOnlinePrice}</span>
+            </p>
+          )}
 
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -206,7 +313,53 @@ export default function ProductDetailPage() {
             </div>
           )}
 
-          {variantNames.length > 0 && (
+          {hasVariantModel && product.variantModel ? (
+            <div className="space-y-3">
+              {product.variantModel.types.map(t => (
+                <div key={t.name} className="space-y-2">
+                  <p className="text-sm sm:text-base font-semibold text-foreground">{t.name}</p>
+                  <div className="flex gap-2 flex-wrap">
+                    {t.values.map(v => {
+                      const active = normVal(String(variantAttrs[t.name] ?? '')) === normVal(String(v));
+                      return (
+                        <button
+                          key={v}
+                          type="button"
+                          onClick={() => {
+                            const next = { ...variantAttrs, [t.name]: v };
+                            setVariantAttrs(next);
+                            const types = product.variantModel!.types;
+                            const items = product.variantModel!.items;
+                            const hit =
+                              items.find(x => {
+                                const attrs = (x as { attrs?: Record<string, string> }).attrs;
+                                return types.every(ty => {
+                                  const sel = String(next[ty.name] ?? '').trim();
+                                  const itemVal = getAttrValueCaseInsensitive(attrs, ty.name);
+                                  return normVal(itemVal) === normVal(sel);
+                                });
+                              }) ?? null;
+                            if (hit) {
+                              setSelectedVariantKey(hit.key);
+                            } else {
+                              const first = items[0];
+                              if (first) {
+                                setSelectedVariantKey(first.key);
+                                setVariantAttrs({ ...(first.attrs ?? {}) });
+                              }
+                            }
+                          }}
+                          className={pillOption(active)}
+                        >
+                          {v}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : variantNames.length > 0 && (
             <div className="space-y-2 sm:space-y-3">
               <p className="text-sm sm:text-base font-semibold text-foreground">{variantOptionLabel(product)}</p>
               <div className="flex gap-2 flex-wrap">
@@ -237,7 +390,11 @@ export default function ProductDetailPage() {
                   product,
                   quantity: qty,
                   selectedSize: product.sizes?.length ? selectedSize : undefined,
-                  selectedVariant: variantNames.length ? selectedVariant : undefined,
+                  selectedVariant: hasVariantModel
+                    ? (selectedVariantItem?.key ?? undefined)
+                    : variantNames.length
+                      ? selectedVariant
+                      : undefined,
                   selectedSleeve: product.sleeveTypes?.length ? selectedSleeve : undefined,
                 })
               }
@@ -247,7 +404,9 @@ export default function ProductDetailPage() {
           </div>
 
           <p className="text-sm text-muted-foreground">
-            {product.stock > 0 ? `✓ In stock (${product.stock} available)` : '✗ Out of stock'}
+            {((hasVariantModel && selectedVariantItem) ? selectedVariantItem.stock : product.stock) > 0
+              ? `✓ In stock (${(hasVariantModel && selectedVariantItem) ? selectedVariantItem.stock : product.stock} available)`
+              : '✗ Out of stock'}
           </p>
 
           {specRows.length > 0 && (

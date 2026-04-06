@@ -4,6 +4,8 @@ export interface ProductVariantOption {
   images: string[];
 }
 
+export type ProductCategory = 'fashion' | 'home' | 'electronics' | 'printed' | 'trending';
+
 /** Admin-managed key/value rows shown under Product details on the PDP. */
 export interface ProductSpecification {
   label: string;
@@ -17,7 +19,7 @@ export interface Product {
   price: number;
   originalPrice?: number;
   images: string[];
-  category: 'fashion' | 'home' | 'printed' | 'trending';
+  category: ProductCategory;
   subcategory?: string;
   sizes?: string[];
   /**
@@ -35,6 +37,29 @@ export interface Product {
   isTrending?: boolean;
   tags?: string[];
   specifications?: ProductSpecification[];
+  /** Optional per-product SKU (simple products). */
+  sku?: string;
+  /** Optional price used for online payment offers (simple products or default for variantModel). */
+  onlinePrice?: number;
+  /** Optional price used for Cash on Delivery offers. */
+  codPrice?: number;
+  /** Variant combinations model (new). Storefront prefers this when present. */
+  variantModel?: {
+    types: Array<{ name: string; values: string[] }>;
+    items: Array<{
+      key: string;
+      attrs: Record<string, string>;
+      sku: string;
+      price: number;
+      onlinePrice?: number;
+      codPrice?: number;
+      stock: number;
+      /** Legacy single image. Prefer `images`. */
+      image?: string;
+      /** Variant-specific gallery images; first image is treated as primary. */
+      images?: string[];
+    }>;
+  };
 }
 
 export interface Review {

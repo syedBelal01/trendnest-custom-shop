@@ -17,6 +17,8 @@ import SearchPage from "@/pages/SearchPage";
 import AdminLayout from "@/pages/admin/AdminLayout";
 import AdminDashboard from "@/pages/admin/AdminDashboard";
 import AdminProducts from "@/pages/admin/AdminProducts";
+import AdminProductDraftsPage from "@/pages/admin/AdminProductDraftsPage";
+import AdminProductWizardPage from "@/pages/admin/AdminProductWizardPage";
 import AdminOrders from "@/pages/admin/AdminOrders";
 import AdminCoupons from "@/pages/admin/AdminCoupons";
 import AdminCustomPrints from "@/pages/admin/AdminCustomPrints";
@@ -100,6 +102,8 @@ const App = () => (
                 <Route path="/admin" element={<AdminLayout />}>
                   <Route index element={<AdminDashboard />} />
                   <Route path="products" element={<AdminProducts />} />
+                  <Route path="products/drafts" element={<AdminProductDraftsPage />} />
+                  <Route path="products/draft/:draftId/step/:step" element={<AdminProductWizardPage />} />
                   <Route path="orders" element={<AdminOrders />} />
                   <Route path="coupons" element={<AdminCoupons />} />
                   <Route path="custom-prints" element={<AdminCustomPrints />} />

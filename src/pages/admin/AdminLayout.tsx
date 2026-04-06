@@ -24,6 +24,7 @@ function AdminLogoutBar() {
 const links = [
   { to: '/admin', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/admin/products', label: 'Products', icon: Package },
+  { to: '/admin/products/drafts', label: 'Drafts', icon: Package },
   { to: '/admin/orders', label: 'Orders', icon: ShoppingBag },
   { to: '/admin/coupons', label: 'Coupons', icon: Tag },
   { to: '/admin/custom-prints', label: 'Custom Prints', icon: Palette },

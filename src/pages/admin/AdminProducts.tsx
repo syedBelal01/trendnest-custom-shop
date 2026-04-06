@@ -10,6 +10,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Trash2, Edit, Plus, Upload, ImageIcon } from 'lucide-react';
 import { toast } from 'sonner';
 import { processProductImageFile } from '@/lib/processProductImage';
+import { ProductSpecificationsCard } from '@/components/admin/ProductSpecificationsCard';
+import { VariantOptionsCard } from '@/components/admin/VariantOptionsCard';
+import { createProductDraftApi } from '@/lib/adminDraftsApi';
+import { useNavigate } from 'react-router-dom';
 import {
   uploadProductImage,
   ensureProductImageUrls,
@@ -164,30 +168,10 @@ function optionsSummary(p: Product): string {
   return bits.join(', ') || '—';
 }
 
-function VariantThumbImg({ src, onRemove }: { src: string; onRemove: () => void }) {
-  const [broken, setBroken] = useState(false);
-  return (
-    <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg border border-border bg-muted/50">
-      {broken ? (
-        <div className="flex h-full w-full items-center justify-center">
-          <ImageIcon className="h-7 w-7 text-muted-foreground" />
-        </div>
-      ) : (
-        <img src={src} alt="" className="h-full w-full object-cover" onError={() => setBroken(true)} />
-      )}
-      <button
-        type="button"
-        aria-label="Remove image"
-        className="absolute right-1 top-1 rounded-md bg-background/95 p-1 shadow-sm ring-1 ring-border hover:bg-destructive hover:text-destructive-foreground"
-        onClick={onRemove}
-      >
-        <Trash2 className="h-3.5 w-3.5" />
-      </button>
-    </div>
-  );
-}
+// VariantThumbImg moved into VariantOptionsCard (keeps UI consistent across admin flows).
 
 export default function AdminProducts() {
+  const navigate = useNavigate();
   const { products, addProduct, updateProduct, deleteProduct, apiAvailable, apiIssue, loading, refreshProducts } = useProducts();
   const [editing, setEditing] = useState<Partial<Product> | null>(null);
   const [open, setOpen] = useState(false);
@@ -583,7 +567,25 @@ export default function AdminProducts() {
       )}
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold">Products</h1>
-        <Dialog open={open} onOpenChange={setOpen}>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              void (async () => {
+                try {
+                  const d = await createProductDraftApi();
+                  navigate(`/admin/products/draft/${encodeURIComponent(d.draftId)}/step/1`);
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : 'Could not start wizard');
+                }
+              })();
+            }}
+          >
+            Add Product (Wizard)
+          </Button>
+          <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button size="sm" className="gap-1" onClick={() => { setEditing(emptyProduct()); setVariantUrlDraft({}); }}>
               <Plus className="h-4 w-4" /> Add Product
@@ -609,179 +611,43 @@ export default function AdminProducts() {
                   <Input type="number" placeholder="Original Price" value={editing.originalPrice || ''} onChange={e => setEditing(p => ({ ...p, originalPrice: +e.target.value || undefined }))} />
                 </div>
 
-                <div className="rounded-xl border border-border bg-card p-3 shadow-sm space-y-3">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <p className="text-sm font-medium">Product details (specifications)</p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Fill label and value for each row, then use <strong>Save specifications</strong> to write them to MongoDB. The storefront reads only what is saved there (complete rows only).
-                      </p>
-                    </div>
-                    <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 text-xs" onClick={addSuggestedSpecFields}>
-                      Add suggested fields for category
-                    </Button>
-                  </div>
-                  <div className="space-y-2">
-                    {(editing.specifications?.length ? editing.specifications : [{ label: '', value: '' }]).map((row, sidx) => (
-                      <div key={sidx} className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                        <Input
-                          className="h-9 sm:flex-1"
-                          placeholder="Label (e.g. Brand)"
-                          value={row.label}
-                          onChange={e => updateSpecRow(sidx, 'label', e.target.value)}
-                        />
-                        <Input
-                          className="h-9 sm:flex-[2]"
-                          placeholder="Value"
-                          value={row.value}
-                          onChange={e => updateSpecRow(sidx, 'value', e.target.value)}
-                        />
-                        <Button type="button" variant="ghost" size="sm" className="h-9 text-destructive shrink-0" onClick={() => removeSpecRow(sidx)}>
-                          Remove
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button type="button" variant="outline" size="sm" onClick={addSpecRow}>
-                      <Plus className="h-3.5 w-3.5 mr-1" /> Add row
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      disabled={specSaveBusy || !apiAvailable || !editing.id}
-                      onClick={() => void saveSpecificationsOnly()}
-                    >
-                      {specSaveBusy ? 'Saving…' : 'Save specifications'}
-                    </Button>
-                  </div>
-                  {!editing.id && (
-                    <p className="text-xs text-amber-800 dark:text-amber-200/90">
-                      Save the product with the main Save button below first — then you can save specifications to the database.
-                    </p>
-                  )}
-                </div>
+                <ProductSpecificationsCard
+                  specs={editing.specifications}
+                  canSaveToDb={!!editing.id}
+                  apiAvailable={apiAvailable}
+                  specSaveBusy={specSaveBusy}
+                  onAddSuggested={addSuggestedSpecFields}
+                  onUpdateRow={updateSpecRow}
+                  onAddRow={addSpecRow}
+                  onRemoveRow={removeSpecRow}
+                  onSaveToDb={() => void saveSpecificationsOnly()}
+                />
 
-                <div className="rounded-xl border border-border bg-card p-3 shadow-sm space-y-3">
-                  <div>
-                    <p className="text-sm font-medium">Colors / finishes</p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      One card per option. The storefront switches photos when the customer picks a finish.
-                    </p>
-                  </div>
-                  <input
-                    ref={variantFileRef}
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    className="hidden"
-                    onChange={handleVariantImageFiles}
-                  />
-                  <div className="space-y-2">
-                    <div className="flex justify-between gap-2 text-xs">
-                      <Label htmlFor="img-max-edge">Max edge (px)</Label>
-                      <span className="text-muted-foreground tabular-nums">{maxEdge}px</span>
-                    </div>
-                    <Slider
-                      id="img-max-edge"
-                      min={400}
-                      max={1920}
-                      step={20}
-                      value={[maxEdge]}
-                      onValueChange={v => setMaxEdge(v[0])}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-between gap-2 text-xs">
-                      <Label htmlFor="img-quality">JPEG quality</Label>
-                      <span className="text-muted-foreground tabular-nums">{qualityPct}%</span>
-                    </div>
-                    <Slider
-                      id="img-quality"
-                      min={50}
-                      max={100}
-                      step={5}
-                      value={[qualityPct]}
-                      onValueChange={v => setQualityPct(v[0])}
-                    />
-                  </div>
-
-                  <div className="space-y-4 pt-1">
-                    {(editing.variantOptions ?? [{ name: '', images: [] as string[] }]).map((opt, vidx) => (
-                      <div key={vidx} className="rounded-xl border border-border bg-background p-4 shadow-sm space-y-3">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Input
-                            className="h-9 max-w-[220px]"
-                            placeholder="e.g. White Marble"
-                            value={opt.name}
-                            onChange={e => updateVariantName(vidx, e.target.value)}
-                          />
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-9"
-                            onClick={() => openVariantUpload(vidx)}
-                            disabled={imageBusy}
-                          >
-                            <Upload className="h-3.5 w-3.5 mr-1" /> Upload
-                          </Button>
-                          <button
-                            type="button"
-                            className="text-sm font-medium text-destructive hover:underline"
-                            onClick={() => removeVariantRow(vidx)}
-                          >
-                            Remove variant
-                          </button>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {!(opt.images ?? []).filter(Boolean).length ? (
-                            <div className="flex h-20 w-20 items-center justify-center rounded-lg border border-dashed border-muted-foreground/30 bg-muted/30">
-                              <ImageIcon className="h-7 w-7 text-muted-foreground" />
-                            </div>
-                          ) : (
-                            (opt.images ?? [])
-                              .map((src, idx) => ({ src, idx }))
-                              .filter(x => x.src.trim())
-                              .map(({ src, idx }) => (
-                                <VariantThumbImg
-                                  key={`${vidx}-${idx}`}
-                                  src={src}
-                                  onRemove={() => removeVariantImageAt(vidx, idx)}
-                                />
-                              ))
-                          )}
-                        </div>
-                        <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
-                          <Input
-                            className="h-9 text-sm flex-1 min-w-0"
-                            placeholder="https://…"
-                            value={variantUrlDraft[vidx] ?? ''}
-                            onChange={e => setVariantUrlDraft(d => ({ ...d, [vidx]: e.target.value }))}
-                            onKeyDown={e => {
-                              if (e.key === 'Enter') {
-                                e.preventDefault();
-                                addVariantImageUrl(vidx);
-                              }
-                            }}
-                          />
-                          <Button type="button" variant="secondary" size="sm" className="h-9 shrink-0" onClick={() => addVariantImageUrl(vidx)}>
-                            Add URL
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
-                    <Button type="button" variant="outline" size="sm" onClick={addVariantRow}>
-                      <Plus className="h-3.5 w-3.5 mr-1" /> Add variant
-                    </Button>
-                  </div>
-                </div>
+                <VariantOptionsCard
+                  variantOptions={editing.variantOptions as Array<{ name: string; images: string[] }> | undefined}
+                  variantUrlDraft={variantUrlDraft}
+                  setVariantUrlDraft={setVariantUrlDraft}
+                  maxEdge={maxEdge}
+                  setMaxEdge={setMaxEdge}
+                  qualityPct={qualityPct}
+                  setQualityPct={setQualityPct}
+                  imageBusy={imageBusy}
+                  variantFileRef={variantFileRef}
+                  onVariantFilesChange={handleVariantImageFiles}
+                  onOpenVariantUpload={openVariantUpload}
+                  onUpdateVariantName={updateVariantName}
+                  onRemoveVariantRow={removeVariantRow}
+                  onRemoveVariantImageAt={removeVariantImageAt}
+                  onAddVariantImageUrl={addVariantImageUrl}
+                  onAddVariantRow={addVariantRow}
+                />
                 <div className="grid grid-cols-2 gap-3">
                   <Select value={editing.category || 'fashion'} onValueChange={v => setEditing(p => ({ ...p, category: v as Product['category'] }))}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="fashion">Fashion</SelectItem>
                       <SelectItem value="home">Home</SelectItem>
+                    <SelectItem value="electronics">Electronics</SelectItem>
                       <SelectItem value="printed">Printed</SelectItem>
                       <SelectItem value="trending">Trending</SelectItem>
                     </SelectContent>
@@ -806,6 +672,7 @@ export default function AdminProducts() {
             )}
           </DialogContent>
         </Dialog>
+        </div>
       </div>
       <div className="border rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
