@@ -1,11 +1,42 @@
 import { apiUrl } from '@/lib/api';
 import type { Order, User } from '@/types';
 
+const CLIENT_AUTH_STORAGE_KEY = 'tn_client_auth';
+
+export function getStoredClientAuthToken(): string | null {
+  if (typeof sessionStorage === 'undefined') return null;
+  try {
+    return sessionStorage.getItem(CLIENT_AUTH_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredClientAuthToken(token: string | null): void {
+  if (typeof sessionStorage === 'undefined') return;
+  try {
+    if (token) sessionStorage.setItem(CLIENT_AUTH_STORAGE_KEY, token);
+    else sessionStorage.removeItem(CLIENT_AUTH_STORAGE_KEY);
+  } catch {
+    /* private mode */
+  }
+}
+
+/** Merge optional headers with `Authorization: Bearer` when a client token is stored (mobile / WebView cookie fallback). */
+export function withAuthHeaders(init?: HeadersInit): HeadersInit {
+  const token = getStoredClientAuthToken();
+  if (!token) return init ?? {};
+  const base = new Headers(init ?? undefined);
+  if (!base.has('Authorization')) base.set('Authorization', `Bearer ${token}`);
+  return base;
+}
+
 export async function emailExistsApi(email: string): Promise<boolean> {
   const u = email.trim();
   const res = await fetch(`${apiUrl('/api/auth/email-exists')}?email=${encodeURIComponent(u)}`, {
     method: 'GET',
     credentials: 'include',
+    headers: withAuthHeaders(),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -18,7 +49,7 @@ export async function requestCheckoutOtpApi(params: { email: string; name?: stri
   const res = await fetch(apiUrl('/api/auth/otp/request'), {
     method: 'POST',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ email: params.email, purpose: 'checkout', name: params.name, phone: params.phone }),
   });
   const data = await res.json().catch(() => ({}));
@@ -32,7 +63,7 @@ export async function requestAuthOtpApi(params: { email: string; name?: string; 
   const res = await fetch(apiUrl('/api/auth/otp/request'), {
     method: 'POST',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ email: params.email, purpose: 'auth', name: params.name, phone: params.phone }),
   });
   const data = await res.json().catch(() => ({}));
@@ -51,7 +82,7 @@ export async function verifyOtpApi(params: {
   const res = await fetch(apiUrl('/api/auth/otp/verify'), {
     method: 'POST',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({
       challengeId: params.challengeId,
       code: params.code,
@@ -63,6 +94,9 @@ export async function verifyOtpApi(params: {
   if (!res.ok) {
     throw new Error(typeof data.error === 'string' ? data.error : 'OTP verification failed');
   }
+  if (typeof data.authToken === 'string' && data.authToken) {
+    setStoredClientAuthToken(data.authToken);
+  }
   return { user: (data.user ?? null) as User | null };
 }
 
@@ -70,6 +104,7 @@ export async function fetchMeApi(): Promise<User | null> {
   const res = await fetch(apiUrl('/api/auth/me'), {
     method: 'GET',
     credentials: 'include',
+    headers: withAuthHeaders(),
   });
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 || res.status === 403) {
@@ -85,16 +120,19 @@ export async function logoutApi(): Promise<void> {
   const res = await fetch(apiUrl('/api/auth/logout'), {
     method: 'POST',
     credentials: 'include',
+    headers: withAuthHeaders(),
   });
   if (!res.ok) {
     throw new Error('Logout failed');
   }
+  setStoredClientAuthToken(null);
 }
 
 export async function fetchMyOrdersApi(): Promise<Order[]> {
   const res = await fetch(apiUrl('/api/me/orders'), {
     method: 'GET',
     credentials: 'include',
+    headers: withAuthHeaders(),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -106,7 +144,7 @@ export async function fetchMyOrdersApi(): Promise<Order[]> {
 export type Address = NonNullable<import('@/types').User['addresses']>[number];
 
 export async function fetchMyAddressesApi(): Promise<Address[]> {
-  const res = await fetch(apiUrl('/api/me/addresses'), { credentials: 'include' });
+  const res = await fetch(apiUrl('/api/me/addresses'), { credentials: 'include', headers: withAuthHeaders() });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Failed to load addresses');
   return (data.addresses ?? []) as Address[];
@@ -116,7 +154,7 @@ export async function addAddressApi(payload: Omit<Address, 'id'>): Promise<Addre
   const res = await fetch(apiUrl('/api/me/addresses'), {
     method: 'POST',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(payload),
   });
   const data = await res.json().catch(() => ({}));
@@ -128,7 +166,7 @@ export async function updateAddressApi(id: string, payload: Partial<Omit<Address
   const res = await fetch(apiUrl(`/api/me/addresses/${encodeURIComponent(id)}`), {
     method: 'PATCH',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(payload),
   });
   const data = await res.json().catch(() => ({}));
@@ -140,6 +178,7 @@ export async function deleteAddressApi(id: string): Promise<Address[]> {
   const res = await fetch(apiUrl(`/api/me/addresses/${encodeURIComponent(id)}`), {
     method: 'DELETE',
     credentials: 'include',
+    headers: withAuthHeaders(),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Failed to delete address');
@@ -158,7 +197,7 @@ export async function setPasswordApi(params: {
   const res = await fetch(apiUrl('/api/auth/password/set'), {
     method: 'POST',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
@@ -172,12 +211,15 @@ export async function loginApi(params: { email: string; password: string }): Pro
   const res = await fetch(apiUrl('/api/auth/login'), {
     method: 'POST',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(params),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(typeof data.error === 'string' ? data.error : 'Login failed');
+  }
+  if (typeof data.authToken === 'string' && data.authToken) {
+    setStoredClientAuthToken(data.authToken);
   }
   return (data.user ?? null) as User | null;
 }
@@ -186,7 +228,7 @@ export async function forgotPasswordOtpApi(params: { email: string }): Promise<{
   const res = await fetch(apiUrl('/api/auth/password/forgot'), {
     method: 'POST',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ email: params.email }),
   });
   const data = await res.json().catch(() => ({}));
@@ -200,13 +242,15 @@ export async function resetPasswordApi(params: { challengeId: string; code: stri
   const res = await fetch(apiUrl('/api/auth/password/reset'), {
     method: 'POST',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ challengeId: params.challengeId, code: params.code, password: params.password }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(typeof data.error === 'string' ? data.error : 'Password reset failed');
   }
+  if (typeof data.authToken === 'string' && data.authToken) {
+    setStoredClientAuthToken(data.authToken);
+  }
   return (data.user ?? null) as User | null;
 }
-

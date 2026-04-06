@@ -1,4 +1,5 @@
 import { apiUrl } from '@/lib/api';
+import { withAuthHeaders } from '@/lib/authApi';
 
 export type ReviewImage = { url: string; publicId?: string };
 
@@ -28,7 +29,7 @@ export async function fetchProductReviewsApi(params: {
 }
 
 export async function fetchReviewPromptsApi(): Promise<Array<{ productId: string; orderId: string; deliveredAt?: string | null }>> {
-  const res = await fetch(apiUrl('/api/me/review-prompts'), { credentials: 'include' });
+  const res = await fetch(apiUrl('/api/me/review-prompts'), { credentials: 'include', headers: withAuthHeaders() });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Failed to load review prompts');
   return (data.prompts ?? []) as Array<{ productId: string; orderId: string; deliveredAt?: string | null }>;
@@ -38,7 +39,7 @@ export async function dismissReviewPromptApi(productId: string): Promise<void> {
   const res = await fetch(apiUrl('/api/me/review-prompts/dismiss'), {
     method: 'POST',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ productId }),
   });
   const data = await res.json().catch(() => ({}));
@@ -58,6 +59,7 @@ export async function uploadReviewImageApi(
   const res = await fetch(apiUrl('/api/upload/review-image'), {
     method: 'POST',
     credentials: 'include',
+    headers: withAuthHeaders(),
     body: fd,
   });
   const data = await res.json().catch(() => ({}));
@@ -74,7 +76,7 @@ export async function createReviewApi(payload: {
   const res = await fetch(apiUrl('/api/reviews'), {
     method: 'POST',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(payload),
   });
   const data = await res.json().catch(() => ({}));

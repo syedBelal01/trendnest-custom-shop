@@ -1,4 +1,5 @@
 import { apiUrl } from '@/lib/api';
+import { withAuthHeaders } from '@/lib/authApi';
 import type { CartItem, CustomerInfo, Order, OrderStatus } from '@/types';
 
 const ADMIN_KEY_STORAGE = 'trendnest-admin-api-key';
@@ -53,7 +54,7 @@ export async function createOrderApi(payload: CreateOrderPayload): Promise<Order
   const res = await fetch(apiUrl('/api/orders'), {
     method: 'POST',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(payload),
   });
   const data = await res.json().catch(() => ({}));

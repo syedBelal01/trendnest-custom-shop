@@ -130,8 +130,19 @@ const OtpChallengeSchema = new mongoose.Schema(
   { versionKey: false, timestamps: false }
 );
 
+/** Opaque bearer tokens when cross-origin session cookies are blocked (e.g. mobile WebViews). Raw token sent once; hash stored. */
+const ClientAuthTokenSchema = new mongoose.Schema(
+  {
+    tokenHash: { type: String, required: true, unique: true },
+    userId: { type: String, required: true, index: true },
+    expiresAt: { type: Date, required: true, index: true },
+  },
+  { versionKey: false, timestamps: false }
+);
+
 const User = mongoose.model('User', UserSchema);
 const OtpChallenge = mongoose.model('OtpChallenge', OtpChallengeSchema);
+const ClientAuthToken = mongoose.model('ClientAuthToken', ClientAuthTokenSchema);
 
 const CouponSchema = new mongoose.Schema(
   {
@@ -726,6 +737,21 @@ function parseFrontendOrigins() {
 }
 
 const allowedFrontendOrigins = parseFrontendOrigins();
+const ALLOW_VERCEL_PREVIEW_ORIGINS = (process.env.ALLOW_VERCEL_PREVIEW_ORIGINS || '').trim().toLowerCase() === 'true';
+
+function isAllowedCorsOrigin(requestOrigin) {
+  if (!requestOrigin) return false;
+  if (allowedFrontendOrigins.includes(requestOrigin)) return true;
+  if (ALLOW_VERCEL_PREVIEW_ORIGINS) {
+    try {
+      const u = new URL(requestOrigin);
+      if (u.protocol === 'https:' && u.hostname.endsWith('.vercel.app')) return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
 
 app.use(
   cors({
@@ -738,13 +764,14 @@ app.use(
         callback(null, true);
         return;
       }
-      if (allowedFrontendOrigins.includes(requestOrigin)) {
+      if (isAllowedCorsOrigin(requestOrigin)) {
         callback(null, requestOrigin);
         return;
       }
       callback(new Error(`Not allowed by CORS: ${requestOrigin}`));
     },
     credentials: true,
+    allowedHeaders: ['Content-Type', 'Authorization'],
   })
 );
 app.use(express.json({ limit: '16mb' }));
@@ -784,6 +811,8 @@ app.use(
     },
   })
 );
+
+app.use(attachClientBearerAuth);
 
 function saveSession(req) {
   return new Promise((resolve, reject) => {
@@ -841,6 +870,53 @@ function sha256Hex(s) {
   return crypto.createHash('sha256').update(s).digest('hex');
 }
 
+function hashClientAuthTokenRaw(raw) {
+  return sha256Hex(`tn_client_auth_v1:${raw}`);
+}
+
+async function issueClientAuthToken(userId) {
+  const ttlMs = Number(process.env.SESSION_TTL_MS || 1000 * 60 * 60 * 24 * 7);
+  const raw = crypto.randomBytes(32).toString('hex');
+  const tokenHash = hashClientAuthTokenRaw(raw);
+  const expiresAt = new Date(Date.now() + ttlMs);
+  await ClientAuthToken.create({ tokenHash, userId: String(userId), expiresAt });
+  return raw;
+}
+
+async function revokeClientAuthTokensForUser(userId) {
+  await ClientAuthToken.deleteMany({ userId: String(userId) });
+}
+
+async function attachClientBearerAuth(req, res, next) {
+  try {
+    if (req.session?.userId) {
+      next();
+      return;
+    }
+    const auth = req.headers.authorization;
+    if (!auth || typeof auth !== 'string' || !auth.startsWith('Bearer ')) {
+      next();
+      return;
+    }
+    const raw = auth.slice(7).trim();
+    if (!raw || raw.length < 32) {
+      next();
+      return;
+    }
+    const tokenHash = hashClientAuthTokenRaw(raw);
+    const doc = await ClientAuthToken.findOne({
+      tokenHash,
+      expiresAt: { $gt: new Date() },
+    }).lean();
+    if (doc?.userId) {
+      req.session.userId = doc.userId;
+    }
+  } catch (e) {
+    console.error(e);
+  }
+  next();
+}
+
 function genNumericCode(length) {
   const max = 10 ** length;
   const n = crypto.randomInt(0, max);
@@ -879,12 +955,19 @@ app.get('/api/auth/me', async (req, res) => {
   }
 });
 
-app.post('/api/auth/logout', (req, res) => {
+app.post('/api/auth/logout', async (req, res) => {
+  const uid = req.session?.userId ? String(req.session.userId) : null;
+  try {
+    if (uid) await revokeClientAuthTokensForUser(uid);
+  } catch (e) {
+    console.error(e);
+  }
   if (!req.session) {
     res.json({ ok: true });
     return;
   }
-  req.session.destroy(() => {
+  req.session.destroy((err) => {
+    if (err) console.error(err);
     res.clearCookie('tn_session');
     res.json({ ok: true });
   });
@@ -1204,7 +1287,16 @@ app.post('/api/auth/otp/verify', async (req, res) => {
     if (userId) {
       await saveSession(req);
     }
-    res.json({ user: user ? serializeUser(user) : null });
+    const serialized = user ? serializeUser(user) : null;
+    let authToken;
+    if (userId) {
+      try {
+        authToken = await issueClientAuthToken(userId);
+      } catch (err) {
+        console.error(err);
+      }
+    }
+    res.json(authToken ? { user: serialized, authToken } : { user: serialized });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Failed to verify OTP' });
@@ -1617,7 +1709,14 @@ app.post('/api/auth/login', async (req, res) => {
     }
     req.session.userId = user._id;
     await saveSession(req);
-    res.json({ user: serializeUser(await User.findById(user._id).lean()) });
+    const serialized = serializeUser(await User.findById(user._id).lean());
+    let authToken;
+    try {
+      authToken = await issueClientAuthToken(user._id);
+    } catch (err) {
+      console.error(err);
+    }
+    res.json(authToken ? { user: serialized, authToken } : { user: serialized });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Login failed' });
@@ -1718,7 +1817,14 @@ app.post('/api/auth/password/reset', async (req, res) => {
     req.session.userId = challenge.userId;
     await saveSession(req);
     const u = await User.findById(challenge.userId).lean();
-    res.json({ user: u ? serializeUser(u) : null });
+    const serialized = u ? serializeUser(u) : null;
+    let authToken;
+    try {
+      authToken = await issueClientAuthToken(challenge.userId);
+    } catch (err) {
+      console.error(err);
+    }
+    res.json(authToken ? { user: serialized, authToken } : { user: serialized });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Failed to reset password' });

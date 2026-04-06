@@ -1,4 +1,5 @@
 import { apiUrl } from '@/lib/api';
+import { withAuthHeaders } from '@/lib/authApi';
 import type { Coupon } from '@/types';
 
 function adminHeaders(): HeadersInit {
@@ -56,7 +57,7 @@ export async function validateCouponApi(params: {
   const res = await fetch(apiUrl('/api/coupons/validate'), {
     method: 'POST',
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(params),
   });
   const data = await res.json().catch(() => ({}));
