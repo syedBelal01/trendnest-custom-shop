@@ -88,7 +88,6 @@ export async function fetchProductsApi(): Promise<import('@/types').Product[]> {
 
 const productFetchInit: RequestInit = {
   cache: 'no-store',
-  headers: { 'Cache-Control': 'no-cache', Pragma: 'no-cache' },
 };
 
 /** Single product by id (includes `specifications` when set in MongoDB). */

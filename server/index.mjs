@@ -753,27 +753,37 @@ function isAllowedCorsOrigin(requestOrigin) {
   return false;
 }
 
-app.use(
-  cors({
-    origin: (requestOrigin, callback) => {
-      if (allowedFrontendOrigins.length === 0) {
-        callback(null, requestOrigin || true);
-        return;
-      }
-      if (!requestOrigin) {
-        callback(null, true);
-        return;
-      }
-      if (isAllowedCorsOrigin(requestOrigin)) {
-        callback(null, requestOrigin);
-        return;
-      }
-      callback(new Error(`Not allowed by CORS: ${requestOrigin}`));
-    },
-    credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization'],
-  })
-);
+const corsOptions = {
+  origin: (requestOrigin, callback) => {
+    if (allowedFrontendOrigins.length === 0) {
+      callback(null, requestOrigin || true);
+      return;
+    }
+    if (!requestOrigin) {
+      callback(null, true);
+      return;
+    }
+    if (isAllowedCorsOrigin(requestOrigin)) {
+      callback(null, requestOrigin);
+      return;
+    }
+    callback(new Error(`Not allowed by CORS: ${requestOrigin}`));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'Cache-Control',
+    'Pragma',
+    'X-Requested-With',
+    'X-Admin-Key',
+  ],
+};
+
+// Explicit OPTIONS handling for preflight requests (avoids net::ERR_FAILED on missing headers).
+app.options('*', cors(corsOptions));
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '16mb' }));
 
 // Cookie-session auth for logged-in customers.
