@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { CartProvider } from "@/contexts/CartContext";
 import { ProductsProvider } from "@/contexts/ProductsContext";
 import { OrdersProvider } from "@/contexts/OrdersContext";
+import { PaymentMethodProvider } from "@/contexts/PaymentMethodContext";
 import Layout from "@/components/Layout";
 import HomePage from "@/pages/HomePage";
 import CategoryPage from "@/pages/CategoryPage";
@@ -50,6 +51,7 @@ const App = () => (
             <Sonner />
             <BrowserRouter>
               <AuthProvider>
+              <PaymentMethodProvider>
               <ScrollToTop />
               <Routes>
                 <Route element={<Layout />}>
@@ -111,6 +113,7 @@ const App = () => (
                 </Route>
                 <Route path="*" element={<NotFound />} />
               </Routes>
+              </PaymentMethodProvider>
               </AuthProvider>
             </BrowserRouter>
           </CartProvider>

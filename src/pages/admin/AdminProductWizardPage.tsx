@@ -85,9 +85,8 @@ function mergeVariantItems(
 function StepShell(props: { step: number; children: React.ReactNode }) {
   const steps = [
     { n: 1, label: 'Category & Details' },
-    { n: 2, label: 'Images' },
-    { n: 3, label: 'Variants' },
-    { n: 4, label: 'Review & Publish' },
+    { n: 2, label: 'Variants' },
+    { n: 3, label: 'Review & Publish' },
   ];
   return (
     <div className="space-y-4">
@@ -114,6 +113,7 @@ function WizardInner({ step }: { step: number }) {
   const specs = Array.isArray(details.specifications) ? (details.specifications as Array<{ label: string; value: string }>) : [];
   const sku = String(details.sku ?? '');
   const price = details.price != null ? String(details.price) : '';
+  const originalPrice = details.originalPrice != null ? String(details.originalPrice) : '';
   const onlinePrice = details.onlinePrice != null ? String(details.onlinePrice) : '';
   const codPrice = details.codPrice != null ? String(details.codPrice) : '';
   const stock = details.stock != null ? String(details.stock) : '';
@@ -133,8 +133,8 @@ function WizardInner({ step }: { step: number }) {
 
   if (loading) return <div className="text-sm text-muted-foreground">Loading draft…</div>;
   if (error || !draft) return <div className="text-sm text-destructive">{error || 'Draft not found'}</div>;
-  if (step === 2) {
-    // Step 2 was removed (details are now in Step 1). Keep old links/drafts working.
+  if (step === 4) {
+    // Step 2 (Images) removed; keep old links working by redirecting to final step.
     return <Navigate to={`/admin/products/draft/${encodeURIComponent(draft.draftId)}/step/3`} replace />;
   }
 
@@ -192,7 +192,7 @@ function WizardInner({ step }: { step: number }) {
                   variant="secondary"
                   onClick={() => {
                     updateDraftLocal({ variants: { ...(draft.variants as any), hasVariants: true } });
-                    void go(3);
+                    void go(2);
                   }}
                 >
                   Add Variant →
@@ -216,6 +216,17 @@ function WizardInner({ step }: { step: number }) {
                   placeholder="Enter regular selling price"
                   value={price}
                   onChange={e => updateDraftLocal({ details: { ...details, price: e.target.value === '' ? '' : Number(e.target.value) } })}
+                />
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  placeholder="MRP / original price (optional)"
+                  value={originalPrice}
+                  onChange={e =>
+                    updateDraftLocal({
+                      details: { ...details, originalPrice: e.target.value === '' ? '' : Number(e.target.value) },
+                    })
+                  }
                 />
                 <Input
                   type="number"
@@ -274,7 +285,7 @@ function WizardInner({ step }: { step: number }) {
                     const items = mergeVariantItems(combos, [], [attrName]);
                     updateDraftLocal({ variants: { ...(draft.variants as any), hasVariants: true, types, items } });
                     toast.success(`Created ${items.length} variant(s)`);
-                    void go(3);
+                    void go(2);
                   }}
                 >
                   Create variants →
@@ -336,14 +347,10 @@ function WizardInner({ step }: { step: number }) {
         )}
 
         {step === 2 && (
-          <ImagesStep />
-        )}
-
-        {step === 3 && (
           <VariantsStep />
         )}
 
-        {step === 4 && (
+        {step === 3 && (
           <ReviewPublishStep />
         )}
       </div>
@@ -360,9 +367,9 @@ function WizardInner({ step }: { step: number }) {
             </Link>
           )}
           <div className="text-xs text-muted-foreground">
-            Step {step} of 4
+            Step {step} of 3
           </div>
-          {step < 4 ? (
+          {step < 3 ? (
             <Button type="button" onClick={() => void go(step + 1)} disabled={saving}>
               Next
             </Button>
@@ -540,7 +547,7 @@ function ImagesStep() {
   };
 
   return (
-    <StepShell step={2}>
+    <StepShell step={1}>
       <div className="space-y-3">
         <div className="flex items-center justify-between gap-2">
           <div className="text-sm font-medium">Images (up to 8)</div>
@@ -599,7 +606,7 @@ function VariantsStep() {
   };
 
   return (
-    <StepShell step={3}>
+    <StepShell step={2}>
       <div className="space-y-3">
         <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-2">
           <div className="flex items-center gap-3 flex-wrap">
@@ -978,7 +985,7 @@ function ReviewPublishStep() {
   };
 
   return (
-    <StepShell step={4}>
+    <StepShell step={3}>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <div className="rounded-xl border bg-card p-4 space-y-2">
           <div className="flex items-center justify-between">
@@ -1013,7 +1020,7 @@ function ReviewPublishStep() {
         <div className="rounded-xl border bg-card p-4 space-y-2">
           <div className="flex items-center justify-between">
             <div className="text-sm font-medium">Images</div>
-            <Link to={`/admin/products/draft/${encodeURIComponent(draft.draftId)}/step/3`} className="text-primary text-xs hover:underline">
+            <Link to={`/admin/products/draft/${encodeURIComponent(draft.draftId)}/step/1`} className="text-primary text-xs hover:underline">
               Edit
             </Link>
           </div>
@@ -1025,7 +1032,7 @@ function ReviewPublishStep() {
         <div className="rounded-xl border bg-card p-4 space-y-2">
           <div className="flex items-center justify-between">
             <div className="text-sm font-medium">Variants</div>
-            <Link to={`/admin/products/draft/${encodeURIComponent(draft.draftId)}/step/4`} className="text-primary text-xs hover:underline">
+            <Link to={`/admin/products/draft/${encodeURIComponent(draft.draftId)}/step/2`} className="text-primary text-xs hover:underline">
               Edit
             </Link>
           </div>

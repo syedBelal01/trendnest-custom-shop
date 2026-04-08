@@ -100,6 +100,10 @@ interface CartContextType {
   items: CartItem[];
   couponCode: string | null;
   discount: number;
+  /** Per-line computed unit price (defaults to product.price). */
+  unitPriceForItem: (item: CartItem, method?: 'cod' | 'razorpay') => number;
+  /** Compute totals for a payment method without changing cart state. */
+  totalsForPaymentMethod: (method: 'cod' | 'razorpay') => { subtotal: number; total: number };
   addItem: (item: CartItemInput) => void;
   removeItem: (cartLineId: string) => void;
   updateQuantity: (cartLineId: string, quantity: number) => void;
@@ -130,6 +134,31 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const total = Math.max(0, subtotal - state.discount);
   const itemCount = state.items.reduce((sum, i) => sum + i.quantity, 0);
 
+  const unitPriceForItem = (item: CartItem, method: 'cod' | 'razorpay' = 'cod'): number => {
+    const p = item.product as any;
+    // If selectedVariant is a variantModel key, use that row's online/cod price.
+    if (p?.variantModel?.items?.length && item.selectedVariant) {
+      const hit = p.variantModel.items.find((x: any) => String(x?.key) === String(item.selectedVariant));
+      if (hit) {
+        const n =
+          method === 'razorpay'
+            ? (hit.onlinePrice != null ? Number(hit.onlinePrice) : Number(hit.price))
+            : (hit.codPrice != null ? Number(hit.codPrice) : Number(hit.price));
+        return Number.isFinite(n) && n >= 0 ? n : 0;
+      }
+    }
+    const n =
+      method === 'razorpay'
+        ? (p.onlinePrice != null ? Number(p.onlinePrice) : Number(p.price))
+        : (p.codPrice != null ? Number(p.codPrice) : Number(p.price));
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  };
+
+  const totalsForPaymentMethod = (method: 'cod' | 'razorpay') => {
+    const sub = state.items.reduce((sum, i) => sum + unitPriceForItem(i, method) * i.quantity, 0);
+    return { subtotal: sub, total: Math.max(0, sub - state.discount) };
+  };
+
   const addItem = (item: CartItemInput) => {
     const payload: CartItem = normalizeCartItem(item as CartItem);
     dispatch({ type: 'ADD_ITEM', payload });
@@ -142,6 +171,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         items: state.items,
         couponCode: state.couponCode,
         discount: state.discount,
+        unitPriceForItem,
+        totalsForPaymentMethod,
         addItem,
         removeItem: id => dispatch({ type: 'REMOVE_ITEM', payload: id }),
         updateQuantity: (cartLineId, qty) =>

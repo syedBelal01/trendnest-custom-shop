@@ -124,6 +124,14 @@ export interface Order {
   customer: CustomerInfo;
   userId?: string;
   status: 'pending' | 'packed' | 'shipped' | 'delivered';
+  paymentMethod?: 'cod' | 'razorpay';
+  paymentStatus?: 'unpaid' | 'paid' | 'failed';
+  amountDue?: number;
+  amountPaid?: number;
+  paidAt?: string;
+  paymentFailureReason?: string;
+  razorpayOrderId?: string;
+  razorpayPaymentId?: string;
   subtotal: number;
   total: number;
   discount: number;

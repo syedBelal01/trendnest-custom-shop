@@ -130,6 +130,18 @@ export default function AccountOrdersPage() {
                   <span className="text-xs text-muted-foreground">Total</span>
                   <span className="font-bold text-sm">₹{o.total}</span>
                 </div>
+
+                {(o.paymentMethod || o.paymentStatus) && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                    <span>
+                      Payment: {o.paymentMethod === 'razorpay' ? 'Online' : o.paymentMethod === 'cod' ? 'COD' : '—'}
+                    </span>
+                    <span className="capitalize">
+                      {o.paymentStatus ? `Status: ${o.paymentStatus}` : ''}
+                      {o.paymentStatus === 'paid' && o.paidAt ? ` (${new Date(o.paidAt).toLocaleDateString('en-IN')})` : ''}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           ))}

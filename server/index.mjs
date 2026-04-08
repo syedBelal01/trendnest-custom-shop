@@ -10,6 +10,7 @@ import { dirname, join } from 'path';
 import nodemailer from 'nodemailer';
 import PDFDocument from 'pdfkit';
 import crypto from 'crypto';
+import Razorpay from 'razorpay';
 import session from 'express-session';
 import MongoStore from 'connect-mongo';
 
@@ -19,6 +20,8 @@ dotenv.config({ path: join(__dirname, '..', '.env') });
 
 const PORT = process.env.PORT || 5000;
 const MONGODB_URI = process.env.MONGODB_URI;
+const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID;
+const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET;
 
 const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
 const cloudKey = process.env.CLOUDINARY_API_KEY;
@@ -409,6 +412,16 @@ const OrderSchema = new mongoose.Schema(
     discount: { type: Number, default: 0 },
     couponCode: String,
     total: { type: Number, required: true },
+    // Payment is separate from fulfillment `status` (keeps COD flow unchanged).
+    paymentMethod: { type: String, enum: ['cod', 'razorpay'], default: 'cod' },
+    paymentStatus: { type: String, enum: ['unpaid', 'paid', 'failed'], default: 'unpaid' },
+    amountDue: { type: Number, default: 0 },
+    amountPaid: { type: Number, default: 0 },
+    paidAt: Date,
+    paymentFailureReason: String,
+    razorpayOrderId: String,
+    razorpayPaymentId: String,
+    razorpaySignature: String,
     hasCustomPrint: { type: Boolean, default: false },
     status: {
       type: String,
@@ -2013,6 +2026,7 @@ function draftToProductPayload(draft) {
   const base = {
     name: String(d.name ?? '').trim(),
     description: String(d.description ?? '').trim(),
+    originalPrice: d.originalPrice != null && d.originalPrice !== '' ? Number(d.originalPrice) : undefined,
     category: String(draft.categoryMain ?? '').trim(),
     subcategory: String(draft.subcategory ?? '').trim(),
     tags: Array.isArray(d.tags) ? d.tags.map((t) => String(t)).filter(Boolean) : [],
@@ -2437,20 +2451,43 @@ app.post('/api/orders', mongoReady, async (req, res) => {
       res.status(400).json({ error: e.message || 'Invalid items' });
       return;
     }
-    const subtotal = Number(body.subtotal);
-    if (!Number.isFinite(subtotal)) {
-      res.status(400).json({ error: 'Invalid totals' });
-      return;
-    }
+    const paymentMethod = String(body.paymentMethod || '').toLowerCase() === 'razorpay' ? 'razorpay' : 'cod';
+
+    // Server-side pricing enforcement: recompute item prices + subtotal based on selected payment method.
+    const ids = Array.from(new Set(items.map((x) => String(x.productId)).filter(Boolean)));
+    const docs = ids.length ? await Product.find({ _id: { $in: ids } }).lean() : [];
+    const byId = new Map(docs.map((d) => [String(d._id), d]));
+
+    const pricedItems = items.map((line) => {
+      const p = byId.get(String(line.productId));
+      if (!p) throw new Error(`Product not found: ${String(line.productId)}`);
+
+      // If cart selectedVariant is a variantModel key, match it.
+      let unit = Number(p.price) || 0;
+      const selectedVariantKey = line.selectedVariant ? String(line.selectedVariant) : '';
+      const vm = p.variantModel && typeof p.variantModel === 'object' ? p.variantModel : null;
+      if (vm && Array.isArray(vm.items) && selectedVariantKey) {
+        const hit = vm.items.find((it) => String(it?.key) === selectedVariantKey);
+        if (hit) {
+          if (paymentMethod === 'razorpay' && hit.onlinePrice != null) unit = Number(hit.onlinePrice);
+          else if (paymentMethod === 'cod' && hit.codPrice != null) unit = Number(hit.codPrice);
+          else unit = Number(hit.price);
+        }
+      } else {
+        if (paymentMethod === 'razorpay' && p.onlinePrice != null) unit = Number(p.onlinePrice);
+        else if (paymentMethod === 'cod' && p.codPrice != null) unit = Number(p.codPrice);
+        else unit = Number(p.price);
+      }
+      if (!Number.isFinite(unit) || unit < 0) unit = 0;
+      return { ...line, price: unit };
+    });
+
+    const subtotal = pricedItems.reduce((acc, l) => acc + (Number(l.price) || 0) * (Number(l.quantity) || 0), 0);
 
     // Coupon enforcement (server-side): compute discount and total again to prevent tampering.
     let discount = Number(body.discount) || 0;
     let couponCode = body.couponCode ? normalizeCouponCode(body.couponCode) : undefined;
-    let total = Number(body.total);
-    if (!Number.isFinite(total)) {
-      res.status(400).json({ error: 'Invalid totals' });
-      return;
-    }
+    let total = Math.max(0, subtotal - discount);
 
     if (couponCode) {
       const itemsForValidate = items.map(l => ({ productId: l.productId, quantity: l.quantity }));
@@ -2511,11 +2548,15 @@ app.post('/api/orders', mongoReady, async (req, res) => {
       _id: orderId,
       customer: { name, email, phone, address, city, state: state || undefined, pincode },
       userId: req.session?.userId,
-      items,
+      items: pricedItems,
       subtotal,
       discount,
       couponCode,
       total,
+      paymentMethod,
+      paymentStatus: 'unpaid',
+      amountDue: total,
+      amountPaid: 0,
       hasCustomPrint: !!body.hasCustomPrint,
       status: 'pending',
     });
@@ -2538,6 +2579,135 @@ app.post('/api/orders', mongoReady, async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Failed to create order' });
+  }
+});
+
+function requireRazorpayConfigured(res) {
+  if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
+    res.status(503).json({ error: 'Razorpay is not configured on the server (set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET).' });
+    return false;
+  }
+  return true;
+}
+
+function verifyRazorpaySignature({ razorpayOrderId, razorpayPaymentId, razorpaySignature }) {
+  const body = `${razorpayOrderId}|${razorpayPaymentId}`;
+  const expected = crypto.createHmac('sha256', String(RAZORPAY_KEY_SECRET)).update(body).digest('hex');
+  const a = Buffer.from(String(expected));
+  const b = Buffer.from(String(razorpaySignature || ''));
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
+app.post('/api/payments/razorpay/order', mongoReady, async (req, res) => {
+  try {
+    if (!requireRazorpayConfigured(res)) return;
+    const orderId = String(req.body?.orderId || '').trim();
+    if (!orderId) {
+      res.status(400).json({ error: 'Missing orderId' });
+      return;
+    }
+    const order = await Order.findById(orderId).lean();
+    if (!order) {
+      res.status(404).json({ error: 'Order not found' });
+      return;
+    }
+    if (String(order.paymentMethod || 'cod') !== 'razorpay') {
+      res.status(400).json({ error: 'Order is not set for online payment' });
+      return;
+    }
+    if (String(order.paymentStatus || 'unpaid') === 'paid') {
+      res.status(400).json({ error: 'Order is already paid' });
+      return;
+    }
+    const amountDue = Number(order.amountDue ?? order.total ?? 0);
+    if (!Number.isFinite(amountDue) || amountDue <= 0) {
+      res.status(400).json({ error: 'Invalid order amount' });
+      return;
+    }
+
+    const razorpay = new Razorpay({ key_id: String(RAZORPAY_KEY_ID), key_secret: String(RAZORPAY_KEY_SECRET) });
+    const rpOrder = await razorpay.orders.create({
+      amount: Math.round(amountDue * 100),
+      currency: 'INR',
+      receipt: String(orderId),
+      notes: { orderId: String(orderId) },
+    });
+
+    await Order.updateOne(
+      { _id: orderId },
+      { $set: { razorpayOrderId: String(rpOrder.id), paymentFailureReason: null } }
+    );
+
+    res.json({
+      keyId: String(RAZORPAY_KEY_ID),
+      razorpayOrderId: String(rpOrder.id),
+      amount: Number(rpOrder.amount),
+      currency: String(rpOrder.currency || 'INR'),
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to create Razorpay order' });
+  }
+});
+
+app.post('/api/payments/razorpay/verify', mongoReady, async (req, res) => {
+  try {
+    if (!requireRazorpayConfigured(res)) return;
+    const orderId = String(req.body?.orderId || '').trim();
+    const razorpayOrderId = String(req.body?.razorpayOrderId || '').trim();
+    const razorpayPaymentId = String(req.body?.razorpayPaymentId || '').trim();
+    const razorpaySignature = String(req.body?.razorpaySignature || '').trim();
+    if (!orderId || !razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+      res.status(400).json({ error: 'Missing payment verification fields' });
+      return;
+    }
+    const order = await Order.findById(orderId).lean();
+    if (!order) {
+      res.status(404).json({ error: 'Order not found' });
+      return;
+    }
+    if (String(order.paymentMethod || 'cod') !== 'razorpay') {
+      res.status(400).json({ error: 'Order is not set for online payment' });
+      return;
+    }
+
+    if (String(order.paymentStatus || 'unpaid') === 'paid') {
+      res.json({ ok: true, order: serializeOrder(order) });
+      return;
+    }
+
+    const ok = verifyRazorpaySignature({ razorpayOrderId, razorpayPaymentId, razorpaySignature });
+    if (!ok) {
+      await Order.updateOne(
+        { _id: orderId },
+        { $set: { paymentStatus: 'failed', paymentFailureReason: 'Invalid Razorpay signature' } }
+      );
+      res.status(400).json({ error: 'Payment verification failed' });
+      return;
+    }
+
+    const amountDue = Number(order.amountDue ?? order.total ?? 0);
+    await Order.updateOne(
+      { _id: orderId },
+      {
+        $set: {
+          paymentStatus: 'paid',
+          amountPaid: amountDue,
+          paidAt: new Date(),
+          paymentFailureReason: null,
+          razorpayOrderId,
+          razorpayPaymentId,
+          razorpaySignature,
+        },
+      }
+    );
+
+    const fresh = await Order.findById(orderId).lean();
+    res.json({ ok: true, order: serializeOrder(fresh) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to verify payment' });
   }
 });
 

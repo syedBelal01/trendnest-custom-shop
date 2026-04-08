@@ -20,6 +20,7 @@ import {
   Star,
 } from 'lucide-react';
 import { cartItemsToOrderLines, createOrderApi } from '@/lib/ordersApi';
+import { createRazorpayOrderApi, loadRazorpayCheckoutJs, verifyRazorpayPaymentApi } from '@/lib/razorpayApi';
 import {
   addAddressApi,
   emailExistsApi,
@@ -50,6 +51,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { usePaymentMethod } from '@/contexts/PaymentMethodContext';
 
 function itemSummary(i: CartItem): string {
   const parts: string[] = [];
@@ -87,9 +89,10 @@ function matchesAddressSearch(a: Address, q: string): boolean {
 }
 
 export default function CheckoutPage() {
-  const { items, subtotal, total, discount, couponCode, clearCart } = useCart();
+  const { items, subtotal, total, discount, couponCode, clearCart, totalsForPaymentMethod, unitPriceForItem } = useCart();
   const navigate = useNavigate();
   const { user, loading: authLoading, refreshAuth } = useAuth();
+  const { method: paymentMethod, setMethod: setPaymentMethod } = usePaymentMethod();
   const [form, setForm] = useState<CustomerInfo>({
     name: '',
     email: '',
@@ -558,18 +561,69 @@ export default function CheckoutPage() {
     }
     setSubmitting(true);
     try {
+      const computed = totalsForPaymentMethod(paymentMethod);
       const created = await createOrderApi({
         customer: { ...form, email: form.email.trim() },
-        items: cartItemsToOrderLines(items),
-        subtotal,
+        items: cartItemsToOrderLines(items).map((l, idx) => ({ ...l, price: unitPriceForItem(items[idx], paymentMethod) })),
+        subtotal: computed.subtotal,
         discount,
-        total,
+        total: computed.total,
         couponCode: couponCode || undefined,
         hasCustomPrint: items.some(i => !!(i.customDesignFile || i.customDesignName)),
+        paymentMethod,
       });
-      clearCart();
-      setOrderPlaced(created.id);
-      toast.success('Your order has been placed successfully.');
+      if (paymentMethod === 'cod') {
+        clearCart();
+        setOrderPlaced(created.id);
+        toast.success('Your order has been placed successfully.');
+        return;
+      }
+
+      // Online payment flow
+      await loadRazorpayCheckoutJs();
+      const rp = await createRazorpayOrderApi(created.id);
+      const options = {
+        key: rp.keyId,
+        amount: rp.amount,
+        currency: rp.currency,
+        name: 'TrendNest',
+        description: `Order ${created.id}`,
+        order_id: rp.razorpayOrderId,
+        prefill: {
+          name: form.name,
+          email: form.email.trim(),
+          contact: form.phone,
+        },
+        notes: { orderId: created.id },
+        handler: async (resp: any) => {
+          try {
+            await verifyRazorpayPaymentApi({
+              orderId: created.id,
+              razorpayOrderId: resp.razorpay_order_id,
+              razorpayPaymentId: resp.razorpay_payment_id,
+              razorpaySignature: resp.razorpay_signature,
+            });
+            clearCart();
+            setOrderPlaced(created.id);
+            toast.success('Payment successful. Order confirmed.');
+          } catch (e) {
+            toast.error(e instanceof Error ? e.message : 'Payment verification failed');
+          }
+        },
+        modal: {
+          ondismiss: () => {
+            toast.message('Payment cancelled. Your order is still pending payment.');
+          },
+        },
+      };
+
+      const RazorpayCtor = (window as any).Razorpay;
+      if (!RazorpayCtor) throw new Error('Razorpay is not available');
+      const rzp = new RazorpayCtor(options);
+      rzp.on?.('payment.failed', () => {
+        toast.error('Payment failed. Your order is still pending payment.');
+      });
+      rzp.open();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not place order');
     } finally {
@@ -1036,7 +1090,28 @@ export default function CheckoutPage() {
 
           <div className="border rounded-lg p-3 sm:p-4 bg-muted/50">
             <p className="text-sm font-medium mb-1">Payment Method</p>
-            <p className="text-sm text-muted-foreground">💵 Cash on Delivery (COD)</p>
+            <div className="flex flex-col gap-2">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="paymentMethod"
+                  value="cod"
+                  checked={paymentMethod === 'cod'}
+                  onChange={() => setPaymentMethod('cod')}
+                />
+                <span className="text-muted-foreground">💵 Cash on Delivery (COD)</span>
+              </label>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="paymentMethod"
+                  value="razorpay"
+                  checked={paymentMethod === 'razorpay'}
+                  onChange={() => setPaymentMethod('razorpay')}
+                />
+                <span className="text-muted-foreground">💳 Online payment (Razorpay)</span>
+              </label>
+            </div>
           </div>
           <Button
             type="button"
@@ -1045,7 +1120,7 @@ export default function CheckoutPage() {
             disabled={submitting || !deliveryValid || (otpRequired && !otpVerified)}
             onClick={() => void handlePlaceOrder()}
           >
-            {submitting ? 'Placing order…' : `Place Order — ₹${total}`}
+            {submitting ? 'Placing order…' : `Place Order — ₹${totalsForPaymentMethod(paymentMethod).total}`}
           </Button>
         </form>
 
@@ -1060,13 +1135,13 @@ export default function CheckoutPage() {
                     <span className="text-muted-foreground block text-xs truncate">{itemSummary(i)}</span>
                   )}
                 </span>
-                <span className="shrink-0">₹{i.product.price * i.quantity}</span>
+                <span className="shrink-0">₹{unitPriceForItem(i, paymentMethod) * i.quantity}</span>
               </div>
             ))}
             <div className="border-t pt-2 space-y-1">
               <div className="flex justify-between text-muted-foreground">
                 <span>Subtotal</span>
-                <span>₹{subtotal}</span>
+                <span>₹{totalsForPaymentMethod(paymentMethod).subtotal}</span>
               </div>
               {discount > 0 && (
                 <div className="flex justify-between text-primary">
@@ -1076,7 +1151,7 @@ export default function CheckoutPage() {
               )}
               <div className="flex justify-between font-bold">
                 <span>Total</span>
-                <span>₹{total}</span>
+                <span>₹{totalsForPaymentMethod(paymentMethod).total}</span>
               </div>
             </div>
           </div>

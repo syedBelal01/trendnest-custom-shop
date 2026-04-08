@@ -148,6 +148,14 @@ export default function AdminOrders() {
                   {o.discount > 0 && ` · Discount -₹${o.discount}${o.couponCode ? ` (${o.couponCode})` : ''}`}
                 </p>
                 <p className="font-semibold">Total: ₹{o.total}</p>
+                {(o.paymentMethod || o.paymentStatus) && (
+                  <p className="text-xs text-muted-foreground">
+                    Payment: {o.paymentMethod === 'razorpay' ? 'Online' : o.paymentMethod === 'cod' ? 'COD' : '—'}
+                    {o.paymentStatus ? ` · ${o.paymentStatus}` : ''}
+                    {o.amountDue != null ? ` · Due ₹${o.amountDue}` : ''}
+                    {o.amountPaid != null && o.amountPaid > 0 ? ` · Paid ₹${o.amountPaid}` : ''}
+                  </p>
+                )}
                 {o.createdAt && (
                   <p className="text-xs text-muted-foreground">Placed: {new Date(o.createdAt).toLocaleString()}</p>
                 )}

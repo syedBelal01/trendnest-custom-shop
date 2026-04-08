@@ -477,6 +477,8 @@ export default function AdminProducts() {
           name: snap.name,
           description: snap.description ?? '',
           price: Number(snap.price),
+          onlinePrice: (snap as any).onlinePrice != null ? Number((snap as any).onlinePrice) : undefined,
+          codPrice: (snap as any).codPrice != null ? Number((snap as any).codPrice) : undefined,
           originalPrice: snap.originalPrice,
           images,
           category: snap.category || 'fashion',
@@ -500,6 +502,8 @@ export default function AdminProducts() {
           name: snap.name!,
           description: snap.description || '',
           price: Number(snap.price),
+          onlinePrice: (snap as any).onlinePrice != null ? Number((snap as any).onlinePrice) : undefined,
+          codPrice: (snap as any).codPrice != null ? Number((snap as any).codPrice) : undefined,
           originalPrice: snap.originalPrice,
           images,
           category: snap.category || 'fashion',
@@ -609,6 +613,20 @@ export default function AdminProducts() {
                 <div className="grid grid-cols-2 gap-3">
                   <Input type="number" placeholder="Price (₹)" value={editing.price || ''} onChange={e => setEditing(p => ({ ...p, price: +e.target.value }))} />
                   <Input type="number" placeholder="Original Price" value={editing.originalPrice || ''} onChange={e => setEditing(p => ({ ...p, originalPrice: +e.target.value || undefined }))} />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <Input
+                    type="number"
+                    placeholder="Online payment price (optional)"
+                    value={(editing as any).onlinePrice || ''}
+                    onChange={e => setEditing(p => ({ ...p, onlinePrice: e.target.value ? Number(e.target.value) : undefined }))}
+                  />
+                  <Input
+                    type="number"
+                    placeholder="COD price (optional)"
+                    value={(editing as any).codPrice || ''}
+                    onChange={e => setEditing(p => ({ ...p, codPrice: e.target.value ? Number(e.target.value) : undefined }))}
+                  />
                 </div>
 
                 <ProductSpecificationsCard

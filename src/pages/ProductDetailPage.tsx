@@ -11,6 +11,7 @@ import { galleryImagesForSelection } from '@/lib/productImages';
 import { fetchProductReviewsApi, type Review as ApiReview } from '@/lib/reviewsApi';
 import { fetchProductByIdApi } from '@/lib/api';
 import { parseProductSpecifications } from '@/lib/productSpecifications';
+import { usePaymentMethod } from '@/contexts/PaymentMethodContext';
 
 /** Normalize for case/whitespace-insensitive variant matching */
 function normKey(s: string) {
@@ -67,6 +68,7 @@ const pillOption = (active: boolean) =>
 export default function ProductDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { products, ratingSummary } = useProducts();
+  const { method: paymentMethod, setMethod: setPaymentMethod } = usePaymentMethod();
   const fromList = id ? products.find(p => p.id === id) : undefined;
   const [fetchedProduct, setFetchedProduct] = useState<Product | null>(null);
 
@@ -220,16 +222,22 @@ export default function ProductDetailPage() {
     );
   }
 
-  const displayPrice = hasVariantModel && selectedVariantItem ? Number(selectedVariantItem.price) : product.price;
-  const displayOnlinePrice =
-    hasVariantModel && selectedVariantItem && selectedVariantItem.onlinePrice != null
-      ? Number(selectedVariantItem.onlinePrice)
-      : product.onlinePrice != null
-        ? Number(product.onlinePrice)
-        : null;
+  const basePrice = hasVariantModel && selectedVariantItem ? Number(selectedVariantItem.price) : Number(product.price);
+  const codPrice = hasVariantModel && selectedVariantItem && selectedVariantItem.codPrice != null
+    ? Number(selectedVariantItem.codPrice)
+    : product.codPrice != null
+      ? Number(product.codPrice)
+      : basePrice;
+  const onlinePrice = hasVariantModel && selectedVariantItem && selectedVariantItem.onlinePrice != null
+    ? Number(selectedVariantItem.onlinePrice)
+    : product.onlinePrice != null
+      ? Number(product.onlinePrice)
+      : codPrice;
 
-  const discount = product.originalPrice
-    ? Math.round(((product.originalPrice - displayPrice) / product.originalPrice) * 100)
+  const selectedPrice = paymentMethod === 'razorpay' ? onlinePrice : codPrice;
+  const mrp = product.originalPrice != null ? Number(product.originalPrice) : null;
+  const discount = mrp && Number.isFinite(mrp) && mrp > 0 && Number.isFinite(selectedPrice) && selectedPrice > 0
+    ? Math.round(((mrp - selectedPrice) / mrp) * 100)
     : 0;
 
   const summary = ratingSummary[product.id];
@@ -259,19 +267,37 @@ export default function ProductDetailPage() {
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">{product.name}</h1>
 
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <span className="text-3xl sm:text-4xl font-bold text-primary tabular-nums">₹{displayPrice}</span>
-            {product.originalPrice != null && product.originalPrice > 0 && (
-              <span className="text-sm sm:text-base text-muted-foreground line-through tabular-nums">₹{product.originalPrice}</span>
+            <span className="text-3xl sm:text-4xl font-bold text-primary tabular-nums">₹{selectedPrice}</span>
+            {mrp != null && mrp > 0 && (
+              <span className="text-sm sm:text-base text-muted-foreground line-through tabular-nums">₹{mrp}</span>
             )}
             {discount > 0 && (
               <span className="bg-primary/15 text-primary text-xs font-semibold px-2.5 py-1 rounded-md">{discount}% OFF</span>
             )}
           </div>
-          {displayOnlinePrice != null && Number.isFinite(displayOnlinePrice) && displayOnlinePrice > 0 && (
-            <p className="text-xs text-muted-foreground -mt-2">
-              Online payment price: <span className="font-semibold tabular-nums text-foreground">₹{displayOnlinePrice}</span>
-            </p>
-          )}
+
+          <div className="rounded-lg border border-border bg-card/40 p-3 space-y-2">
+            <div className="text-sm font-semibold">Payment method price</div>
+            <div className="flex flex-col gap-2 text-sm">
+              <label className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">COD</span>
+                <span className="flex items-center gap-2">
+                  <span className={`text-foreground tabular-nums ${paymentMethod === 'cod' ? 'font-bold' : ''}`}>₹{codPrice}</span>
+                  <input type="radio" name="pdpPayMethod" checked={paymentMethod === 'cod'} onChange={() => setPaymentMethod('cod')} />
+                </span>
+              </label>
+              <label className="flex items-center justify-between gap-3">
+                <span className="text-muted-foreground">Online</span>
+                <span className="flex items-center gap-2">
+                  <span className={`text-foreground tabular-nums ${paymentMethod === 'razorpay' ? 'font-bold' : ''}`}>₹{onlinePrice}</span>
+                  <input type="radio" name="pdpPayMethod" checked={paymentMethod === 'razorpay'} onChange={() => setPaymentMethod('razorpay')} />
+                </span>
+              </label>
+            </div>
+            <div className="text-[11px] text-muted-foreground">
+              Discount is shown based on the selected payment method price.
+            </div>
+          </div>
 
           <div className="flex flex-wrap items-center gap-2">
             <button
