@@ -4,7 +4,7 @@ import { useCart } from '@/contexts/CartContext';
 import { Button } from '@/components/ui/button';
 import ProductImageGallery from '@/components/ProductImageGallery';
 import { useEffect, useMemo, useState } from 'react';
-import { ShoppingCart, ArrowLeft } from 'lucide-react';
+import { ShoppingCart, ArrowLeft, Minus, Plus, Check, ChevronDown, ChevronUp } from 'lucide-react';
 import type { Product } from '@/types';
 import { productVariantNames } from '@/lib/productVariants';
 import { galleryImagesForSelection } from '@/lib/productImages';
@@ -13,43 +13,20 @@ import { fetchProductByIdApi } from '@/lib/api';
 import { parseProductSpecifications } from '@/lib/productSpecifications';
 import { usePaymentMethod } from '@/contexts/PaymentMethodContext';
 
-/** Normalize for case/whitespace-insensitive variant matching */
-function normKey(s: string) {
-  return String(s ?? '').trim().toLowerCase();
-}
-function normVal(s: string) {
-  return String(s ?? '').trim().toLowerCase();
-}
+function normKey(s: string) { return String(s ?? '').trim().toLowerCase(); }
+function normVal(s: string) { return String(s ?? '').trim().toLowerCase(); }
 
 function getAttrValueCaseInsensitive(attrs: Record<string, string> | undefined, typeName: string): string {
   if (!attrs) return '';
   const nk = normKey(typeName);
-  if (Object.prototype.hasOwnProperty.call(attrs, typeName) && attrs[typeName] != null) {
-    return String(attrs[typeName]);
-  }
+  if (Object.prototype.hasOwnProperty.call(attrs, typeName) && attrs[typeName] != null) return String(attrs[typeName]);
   const key = Object.keys(attrs).find(k => normKey(k) === nk);
   return key ? String(attrs[key] ?? '') : '';
 }
 
 function dedupeImageUrls(urls: string[]): string[] {
   const seen = new Set<string>();
-  return urls.filter(u => {
-    const s = String(u).trim();
-    if (!s || seen.has(s)) return false;
-    seen.add(s);
-    return true;
-  });
-}
-
-/** Dev: logs in Vite dev; prod: set `localStorage.setItem('pdpVariantDebug','1')`. Remove when verified. */
-function isPdpVariantDebugEnabled() {
-  if (typeof window === 'undefined') return false;
-  if (import.meta.env.DEV) return true;
-  try {
-    return window.localStorage.getItem('pdpVariantDebug') === '1';
-  } catch {
-    return false;
-  }
+  return urls.filter(u => { const s = String(u).trim(); if (!s || seen.has(s)) return false; seen.add(s); return true; });
 }
 
 function variantOptionLabel(product: Product): string {
@@ -58,11 +35,11 @@ function variantOptionLabel(product: Product): string {
   return 'Color';
 }
 
-const pillOption = (active: boolean) =>
-  `rounded-full px-3 sm:px-4 py-1.5 sm:py-2 text-sm font-medium border transition-colors ${
+const pillBtn = (active: boolean) =>
+  `rounded-xl px-4 py-2 text-sm font-medium border-2 transition-all duration-200 ${
     active
-      ? 'bg-primary text-primary-foreground border-primary shadow-sm'
-      : 'bg-background text-foreground border-border hover:border-muted-foreground/40'
+      ? 'bg-primary/10 text-primary border-primary shadow-sm'
+      : 'bg-background text-foreground/70 border-border hover:border-foreground/30 hover:text-foreground'
   }`;
 
 export default function ProductDetailPage() {
@@ -75,63 +52,36 @@ export default function ProductDetailPage() {
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
-    const load = () => {
-      void (async () => {
-        const one = await fetchProductByIdApi(id);
-        if (!cancelled && one) setFetchedProduct(one);
-      })();
-    };
+    const load = () => { void (async () => { const one = await fetchProductByIdApi(id); if (!cancelled && one) setFetchedProduct(one); })(); };
     load();
-    const onVis = () => {
-      if (document.visibilityState === 'visible') load();
-    };
+    const onVis = () => { if (document.visibilityState === 'visible') load(); };
     document.addEventListener('visibilitychange', onVis);
-    const onProductUpdated = (e: Event) => {
-      const ce = e as CustomEvent<{ id?: string }>;
-      if (ce.detail?.id === id) load();
-    };
+    const onProductUpdated = (e: Event) => { const ce = e as CustomEvent<{ id?: string }>; if (ce.detail?.id === id) load(); };
     window.addEventListener('trendnest:product-updated', onProductUpdated);
-    return () => {
-      cancelled = true;
-      document.removeEventListener('visibilitychange', onVis);
-      window.removeEventListener('trendnest:product-updated', onProductUpdated);
-    };
+    return () => { cancelled = true; document.removeEventListener('visibilitychange', onVis); window.removeEventListener('trendnest:product-updated', onProductUpdated); };
   }, [id]);
 
   const product = fetchedProduct ?? fromList;
   const { addItem } = useCart();
   const [selectedSize, setSelectedSize] = useState('');
-  const [selectedVariant, setSelectedVariant] = useState(''); // legacy single variant
-  const [selectedVariantKey, setSelectedVariantKey] = useState(''); // variantModel key
+  const [selectedVariant, setSelectedVariant] = useState('');
+  const [selectedVariantKey, setSelectedVariantKey] = useState('');
   const [variantAttrs, setVariantAttrs] = useState<Record<string, string>>({});
   const [selectedSleeve, setSelectedSleeve] = useState('');
   const [qty, setQty] = useState(1);
   const [reviews, setReviews] = useState<ApiReview[]>([]);
   const [reviewsCursor, setReviewsCursor] = useState<string | null>(null);
   const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [specsOpen, setSpecsOpen] = useState(false);
 
   const hasVariantModel = !!(product?.variantModel?.types?.length && product?.variantModel?.items?.length);
 
-  /** Single source of truth: derive from `selectedVariantKey` only (see plan: robustness B). */
   const selectedVariantItem = useMemo(() => {
     if (!product?.variantModel?.items?.length) return null;
     const items = product.variantModel.items;
-    if (selectedVariantKey) {
-      const hit = items.find(x => x.key === selectedVariantKey);
-      if (hit) return hit;
-    }
+    if (selectedVariantKey) { const hit = items.find(x => x.key === selectedVariantKey); if (hit) return hit; }
     return items[0] ?? null;
   }, [product, selectedVariantKey]);
-
-  useEffect(() => {
-    if (!isPdpVariantDebugEnabled() || !hasVariantModel) return;
-    // eslint-disable-next-line no-console -- intentional debug when flag / dev enabled
-    console.log('[PDP variant]', {
-      selectedVariantKey,
-      selectedVariantItem,
-      variantImages: selectedVariantItem?.images,
-    });
-  }, [hasVariantModel, selectedVariantKey, selectedVariantItem]);
 
   useEffect(() => {
     if (!product) return;
@@ -140,7 +90,7 @@ export default function ProductDetailPage() {
       const first = product.variantModel.items[0];
       setSelectedVariantKey(first.key);
       setVariantAttrs({ ...(first.attrs ?? {}) });
-      setSelectedVariant(''); // legacy cleared
+      setSelectedVariant('');
     } else {
       setSelectedVariant(productVariantNames(product)[0] || '');
       setSelectedVariantKey('');
@@ -155,67 +105,41 @@ export default function ProductDetailPage() {
     let mounted = true;
     setReviewsLoading(true);
     void (async () => {
-      try {
-        const r = await fetchProductReviewsApi({ productId: product.id, limit: 5 });
-        if (!mounted) return;
-        setReviews(r.reviews);
-        setReviewsCursor(r.nextCursor);
-      } finally {
-        if (mounted) setReviewsLoading(false);
-      }
+      try { const r = await fetchProductReviewsApi({ productId: product.id, limit: 5 }); if (!mounted) return; setReviews(r.reviews); setReviewsCursor(r.nextCursor); }
+      finally { if (mounted) setReviewsLoading(false); }
     })();
-    return () => {
-      mounted = false;
-    };
+    return () => { mounted = false; };
   }, [product?.id]);
 
   const loadMoreReviews = async () => {
     if (!product?.id || !reviewsCursor || reviewsLoading) return;
     setReviewsLoading(true);
-    try {
-      const r = await fetchProductReviewsApi({ productId: product.id, limit: 10, cursor: reviewsCursor });
-      setReviews(prev => [...prev, ...r.reviews]);
-      setReviewsCursor(r.nextCursor);
-    } finally {
-      setReviewsLoading(false);
-    }
+    try { const r = await fetchProductReviewsApi({ productId: product.id, limit: 10, cursor: reviewsCursor }); setReviews(prev => [...prev, ...r.reviews]); setReviewsCursor(r.nextCursor); }
+    finally { setReviewsLoading(false); }
   };
 
   const variantNames = product ? productVariantNames(product) : [];
-  const galleryImages = useMemo(
-    () => {
-      if (!product) return [];
-      if (hasVariantModel && selectedVariantItem) {
-        const variantImages = (Array.isArray(selectedVariantItem.images) ? selectedVariantItem.images : [])
-          .map((u: unknown) => String(u).trim())
-          .filter(Boolean);
-        const legacyImg = selectedVariantItem.image ? String(selectedVariantItem.image).trim() : '';
+  const galleryImages = useMemo(() => {
+    if (!product) return [];
+    if (hasVariantModel && selectedVariantItem) {
+      const variantImages = (Array.isArray(selectedVariantItem.images) ? selectedVariantItem.images : []).map((u: unknown) => String(u).trim()).filter(Boolean);
+      const legacyImg = selectedVariantItem.image ? String(selectedVariantItem.image).trim() : '';
+      if (variantImages.length === 0 && !legacyImg) return dedupeImageUrls((product.images ?? []).map(u => String(u).trim()).filter(Boolean));
+      const primaryList = variantImages.length > 0 ? variantImages : legacyImg ? [legacyImg] : [];
+      const productRest = (product.images ?? []).map(u => String(u).trim()).filter(Boolean);
+      return dedupeImageUrls([...primaryList, ...productRest]);
+    }
+    return galleryImagesForSelection(product, selectedVariant);
+  }, [product, selectedVariant, hasVariantModel, selectedVariantItem]);
 
-        // If variant has no images at all, fall back completely to product images (do not mix).
-        if (variantImages.length === 0 && !legacyImg) {
-          return dedupeImageUrls((product.images ?? []).map(u => String(u).trim()).filter(Boolean));
-        }
-
-        // Prefer variant images (primary = images[0]), then append product.images; dedupe.
-        const primaryList = variantImages.length > 0 ? variantImages : legacyImg ? [legacyImg] : [];
-        const productRest = (product.images ?? []).map(u => String(u).trim()).filter(Boolean);
-        return dedupeImageUrls([...primaryList, ...productRest]);
-      }
-      return galleryImagesForSelection(product, selectedVariant);
-    },
-    [product, selectedVariant, hasVariantModel, selectedVariantItem]
-  );
-
-  // Must be declared before any conditional returns (Rules of Hooks).
   const specRows = useMemo(() => {
     if (!product) return [];
-    if (fetchedProduct) return parseProductSpecifications(fetchedProduct);
-    return parseProductSpecifications(product);
+    return parseProductSpecifications(fetchedProduct ?? product);
   }, [product, fetchedProduct]);
 
   if (!product) {
     return (
-      <div className="max-w-7xl mx-auto px-3 sm:px-4 py-20 text-center">
+      <div className="max-w-7xl mx-auto px-4 py-20 text-center animate-fade-in">
         <p className="text-muted-foreground">Product not found.</p>
         <Link to="/" className="text-primary hover:underline mt-4 inline-block">Go Home</Link>
       </div>
@@ -225,274 +149,338 @@ export default function ProductDetailPage() {
   const basePrice = hasVariantModel && selectedVariantItem ? Number(selectedVariantItem.price) : Number(product.price);
   const codPrice = hasVariantModel && selectedVariantItem && selectedVariantItem.codPrice != null
     ? Number(selectedVariantItem.codPrice)
-    : product.codPrice != null
-      ? Number(product.codPrice)
-      : basePrice;
+    : product.codPrice != null ? Number(product.codPrice) : basePrice;
   const onlinePrice = hasVariantModel && selectedVariantItem && selectedVariantItem.onlinePrice != null
     ? Number(selectedVariantItem.onlinePrice)
-    : product.onlinePrice != null
-      ? Number(product.onlinePrice)
-      : codPrice;
-
+    : product.onlinePrice != null ? Number(product.onlinePrice) : codPrice;
   const selectedPrice = paymentMethod === 'razorpay' ? onlinePrice : codPrice;
   const mrp = product.originalPrice != null ? Number(product.originalPrice) : null;
   const discount = mrp && Number.isFinite(mrp) && mrp > 0 && Number.isFinite(selectedPrice) && selectedPrice > 0
-    ? Math.round(((mrp - selectedPrice) / mrp) * 100)
-    : 0;
+    ? Math.round(((mrp - selectedPrice) / mrp) * 100) : 0;
+  const stock = (hasVariantModel && selectedVariantItem) ? selectedVariantItem.stock : product.stock;
+  const inStock = stock > 0;
 
   const summary = ratingSummary[product.id];
   const avg = summary?.avgRating ?? 0;
   const count = summary?.reviewCount ?? 0;
   const filled = Math.round(avg);
 
+  const handleAddToCart = () => addItem({
+    product, quantity: qty,
+    selectedSize: product.sizes?.length ? selectedSize : undefined,
+    selectedVariant: hasVariantModel ? (selectedVariantItem?.key ?? undefined) : variantNames.length ? selectedVariant : undefined,
+    selectedSleeve: product.sleeveTypes?.length ? selectedSleeve : undefined,
+  });
+
   return (
-    <div className="max-w-7xl mx-auto px-3 sm:px-4 py-6 sm:py-8">
-      <Link
-        to={product.category === 'fashion' ? '/#fashion-picks' : `/category/${product.category}`}
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-4 sm:mb-6"
-      >
-        <ArrowLeft className="h-4 w-4" /> Back
-      </Link>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 sm:gap-8 md:items-start">
-        <ProductImageGallery
-          productId={product.id}
-          images={galleryImages}
-          productName={product.name}
-          resetKey={hasVariantModel ? selectedVariantKey : selectedVariant}
-        />
-        <div className="space-y-4 sm:space-y-6">
-          {product.isTrending && (
-            <span className="inline-block bg-foreground text-background text-xs font-semibold px-3 py-1 rounded-md">🔥 Trending</span>
-          )}
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">{product.name}</h1>
+    <>
+      <div className="max-w-6xl mx-auto px-3 sm:px-4 lg:px-6 pb-28 md:pb-8 pt-4 sm:pt-6 animate-fade-in">
+        {/* Back link */}
+        <Link
+          to={product.category === 'fashion' ? '/#fashion-picks' : `/category/${product.category}`}
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-4 transition-colors"
+        >
+          <ArrowLeft className="h-4 w-4" /> Back
+        </Link>
 
-          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <span className="text-3xl sm:text-4xl font-bold text-primary tabular-nums">₹{selectedPrice}</span>
-            {mrp != null && mrp > 0 && (
-              <span className="text-sm sm:text-base text-muted-foreground line-through tabular-nums">₹{mrp}</span>
-            )}
-            {discount > 0 && (
-              <span className="bg-primary/15 text-primary text-xs font-semibold px-2.5 py-1 rounded-md">{discount}% OFF</span>
-            )}
-          </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-10 md:items-start">
+          {/* Image gallery */}
+          <ProductImageGallery
+            productId={product.id}
+            images={galleryImages}
+            productName={product.name}
+            resetKey={hasVariantModel ? selectedVariantKey : selectedVariant}
+          />
 
-          <div className="rounded-lg border border-border bg-card/40 p-3 space-y-2">
-            <div className="text-sm font-semibold">Payment method price</div>
-            <div className="flex flex-col gap-2 text-sm">
-              <label className="flex items-center justify-between gap-3">
-                <span className="text-muted-foreground">COD</span>
-                <span className="flex items-center gap-2">
-                  <span className={`text-foreground tabular-nums ${paymentMethod === 'cod' ? 'font-bold' : ''}`}>₹{codPrice}</span>
-                  <input type="radio" name="pdpPayMethod" checked={paymentMethod === 'cod'} onChange={() => setPaymentMethod('cod')} />
+          {/* Product info */}
+          <div className="space-y-5">
+            {/* Badges row */}
+            <div className="flex flex-wrap items-center gap-2">
+              {product.isTrending && (
+                <span className="inline-flex items-center gap-1 bg-primary/10 text-primary text-xs font-semibold px-2.5 py-1 rounded-full">
+                  🔥 Trending
                 </span>
-              </label>
-              <label className="flex items-center justify-between gap-3">
-                <span className="text-muted-foreground">Online</span>
-                <span className="flex items-center gap-2">
-                  <span className={`text-foreground tabular-nums ${paymentMethod === 'razorpay' ? 'font-bold' : ''}`}>₹{onlinePrice}</span>
-                  <input type="radio" name="pdpPayMethod" checked={paymentMethod === 'razorpay'} onChange={() => setPaymentMethod('razorpay')} />
+              )}
+              {inStock ? (
+                <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full">
+                  <Check className="h-3 w-3" /> In Stock
                 </span>
-              </label>
+              ) : (
+                <span className="text-xs font-medium text-destructive bg-destructive/10 px-2.5 py-1 rounded-full">Out of Stock</span>
+              )}
             </div>
-            <div className="text-[11px] text-muted-foreground">
-              Discount is shown based on the selected payment method price.
-            </div>
-          </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              className="inline-flex gap-0.5 text-lg leading-none"
-              onClick={() => document.getElementById('customer-reviews')?.scrollIntoView({ behavior: 'smooth' })}
-              aria-label="Scroll to reviews"
-            >
-              {Array.from({ length: 5 }, (_, i) => (
-                <span key={i} className={i < filled ? 'text-yellow-500' : 'text-muted-foreground/35'} aria-hidden>
-                  ★
+            {/* Title */}
+            <h1 className="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight leading-tight text-foreground">
+              {product.name}
+            </h1>
+
+            {/* Rating */}
+            {count > 0 && (
+              <button
+                type="button"
+                onClick={() => document.getElementById('customer-reviews')?.scrollIntoView({ behavior: 'smooth' })}
+                className="flex items-center gap-2 group"
+              >
+                <div className="flex gap-0.5">
+                  {Array.from({ length: 5 }, (_, i) => (
+                    <span key={i} className={`text-base ${i < filled ? 'text-yellow-500' : 'text-muted-foreground/25'}`}>★</span>
+                  ))}
+                </div>
+                <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
+                  {avg.toFixed(1)} ({count})
                 </span>
-              ))}
-            </button>
-            <span className="text-sm text-muted-foreground">({count} {count === 1 ? 'review' : 'reviews'})</span>
-          </div>
+              </button>
+            )}
 
-          <p className="text-muted-foreground text-sm sm:text-[15px] leading-relaxed">{product.description}</p>
+            {/* Price block */}
+            <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
+              <div className="flex flex-wrap items-end gap-x-3 gap-y-1">
+                <span className="text-3xl sm:text-4xl font-bold text-foreground tabular-nums">₹{selectedPrice}</span>
+                {mrp != null && mrp > 0 && mrp !== selectedPrice && (
+                  <span className="text-base text-muted-foreground line-through tabular-nums mb-0.5">MRP ₹{mrp}</span>
+                )}
+                {discount > 0 && (
+                  <span className="bg-primary/15 text-primary text-xs font-bold px-2.5 py-1 rounded-lg mb-0.5">
+                    {discount}% OFF
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">Inclusive of all taxes</p>
 
-          {product.sizes && product.sizes.length > 0 && (
-            <div className="space-y-2 sm:space-y-3">
-              <p className="text-sm sm:text-base font-semibold text-foreground">Size</p>
-              <div className="flex gap-2 flex-wrap">
-                {product.sizes.map(s => (
-                  <button key={s} type="button" onClick={() => setSelectedSize(s)} className={pillOption(selectedSize === s)}>{s}</button>
-                ))}
+              {/* Payment method toggle */}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod('cod')}
+                  className={`flex-1 text-center text-sm py-2.5 rounded-xl border-2 font-medium transition-all duration-200 ${
+                    paymentMethod === 'cod'
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-border text-muted-foreground hover:border-foreground/20'
+                  }`}
+                >
+                  COD · ₹{codPrice}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPaymentMethod('razorpay')}
+                  className={`flex-1 text-center text-sm py-2.5 rounded-xl border-2 font-medium transition-all duration-200 ${
+                    paymentMethod === 'razorpay'
+                      ? 'border-primary bg-primary/10 text-primary'
+                      : 'border-border text-muted-foreground hover:border-foreground/20'
+                  }`}
+                >
+                  Online · ₹{onlinePrice}
+                </button>
               </div>
             </div>
-          )}
 
-          {product.sleeveTypes && product.sleeveTypes.length > 0 && (
-            <div className="space-y-2 sm:space-y-3">
-              <p className="text-sm sm:text-base font-semibold text-foreground">Sleeve</p>
-              <div className="flex gap-2 flex-wrap">
-                {product.sleeveTypes.map(s => (
-                  <button key={s} type="button" onClick={() => setSelectedSleeve(s)} className={pillOption(selectedSleeve === s)}>{s}</button>
-                ))}
+            {/* Description */}
+            <p className="text-muted-foreground text-sm leading-relaxed">{product.description}</p>
+
+            {/* Size selector */}
+            {product.sizes && product.sizes.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm font-semibold text-foreground">Size</p>
+                <div className="flex gap-2 flex-wrap">
+                  {product.sizes.map(s => (
+                    <button key={s} type="button" onClick={() => setSelectedSize(s)} className={pillBtn(selectedSize === s)}>{s}</button>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {hasVariantModel && product.variantModel ? (
-            <div className="space-y-3">
-              {product.variantModel.types.map(t => (
-                <div key={t.name} className="space-y-2">
-                  <p className="text-sm sm:text-base font-semibold text-foreground">{t.name}</p>
-                  <div className="flex gap-2 flex-wrap">
-                    {t.values.map(v => {
-                      const active = normVal(String(variantAttrs[t.name] ?? '')) === normVal(String(v));
-                      return (
-                        <button
-                          key={v}
-                          type="button"
-                          onClick={() => {
-                            const next = { ...variantAttrs, [t.name]: v };
-                            setVariantAttrs(next);
-                            const types = product.variantModel!.types;
-                            const items = product.variantModel!.items;
-                            const hit =
-                              items.find(x => {
+            {/* Sleeve selector */}
+            {product.sleeveTypes && product.sleeveTypes.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm font-semibold text-foreground">Sleeve</p>
+                <div className="flex gap-2 flex-wrap">
+                  {product.sleeveTypes.map(s => (
+                    <button key={s} type="button" onClick={() => setSelectedSleeve(s)} className={pillBtn(selectedSleeve === s)}>{s}</button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Variant model selectors */}
+            {hasVariantModel && product.variantModel ? (
+              <div className="space-y-3">
+                {product.variantModel.types.map(t => (
+                  <div key={t.name} className="space-y-2">
+                    <p className="text-sm font-semibold text-foreground">{t.name}</p>
+                    <div className="flex gap-2 flex-wrap">
+                      {t.values.map(v => {
+                        const active = normVal(String(variantAttrs[t.name] ?? '')) === normVal(String(v));
+                        return (
+                          <button
+                            key={v}
+                            type="button"
+                            onClick={() => {
+                              const next = { ...variantAttrs, [t.name]: v };
+                              setVariantAttrs(next);
+                              const types = product.variantModel!.types;
+                              const items = product.variantModel!.items;
+                              const hit = items.find(x => {
                                 const attrs = (x as { attrs?: Record<string, string> }).attrs;
-                                return types.every(ty => {
-                                  const sel = String(next[ty.name] ?? '').trim();
-                                  const itemVal = getAttrValueCaseInsensitive(attrs, ty.name);
-                                  return normVal(itemVal) === normVal(sel);
-                                });
+                                return types.every(ty => normVal(getAttrValueCaseInsensitive(attrs, ty.name)) === normVal(String(next[ty.name] ?? '').trim()));
                               }) ?? null;
-                            if (hit) {
-                              setSelectedVariantKey(hit.key);
-                            } else {
-                              const first = items[0];
-                              if (first) {
-                                setSelectedVariantKey(first.key);
-                                setVariantAttrs({ ...(first.attrs ?? {}) });
-                              }
-                            }
-                          }}
-                          className={pillOption(active)}
-                        >
-                          {v}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : variantNames.length > 0 && (
-            <div className="space-y-2 sm:space-y-3">
-              <p className="text-sm sm:text-base font-semibold text-foreground">{variantOptionLabel(product)}</p>
-              <div className="flex gap-2 flex-wrap">
-                {variantNames.map(v => (
-                  <button key={v} type="button" onClick={() => setSelectedVariant(v)} className={pillOption(selectedVariant === v)}>{v}</button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {product.isCustomPrint && (
-            <Link to="/custom-print" className="block">
-              <Button variant="outline" className="w-full rounded-full h-11">🎨 Upload Custom Design →</Button>
-            </Link>
-          )}
-
-          <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-stretch">
-            <div className="inline-flex shrink-0 items-stretch overflow-hidden rounded-lg border border-border bg-background text-sm font-medium self-start">
-              <button type="button" className="px-4 py-3 hover:bg-muted/80 active:bg-muted min-w-[2.75rem]" onClick={() => setQty(Math.max(1, qty - 1))}>−</button>
-              <span className="flex min-w-[3rem] items-center justify-center border-x border-border px-2 tabular-nums">{qty}</span>
-              <button type="button" className="px-4 py-3 hover:bg-muted/80 active:bg-muted min-w-[2.75rem]" onClick={() => setQty(qty + 1)}>+</button>
-            </div>
-            <Button
-              size="lg"
-              className="h-12 sm:h-auto sm:min-h-[3rem] flex-1 gap-2 rounded-lg py-3 text-base font-semibold sm:min-w-0"
-              onClick={() =>
-                addItem({
-                  product,
-                  quantity: qty,
-                  selectedSize: product.sizes?.length ? selectedSize : undefined,
-                  selectedVariant: hasVariantModel
-                    ? (selectedVariantItem?.key ?? undefined)
-                    : variantNames.length
-                      ? selectedVariant
-                      : undefined,
-                  selectedSleeve: product.sleeveTypes?.length ? selectedSleeve : undefined,
-                })
-              }
-            >
-              <ShoppingCart className="h-5 w-5" /> Add to Cart
-            </Button>
-          </div>
-
-          <p className="text-sm text-muted-foreground">
-            {((hasVariantModel && selectedVariantItem) ? selectedVariantItem.stock : product.stock) > 0
-              ? `✓ In stock (${(hasVariantModel && selectedVariantItem) ? selectedVariantItem.stock : product.stock} available)`
-              : '✗ Out of stock'}
-          </p>
-
-          {specRows.length > 0 && (
-            <div className="rounded-xl border border-border bg-card/50 p-4 sm:p-5">
-              <h2 className="text-base sm:text-lg font-semibold text-foreground mb-3">Product details</h2>
-              <dl className="grid grid-cols-1 sm:grid-cols-[minmax(8rem,11rem)_1fr] gap-x-6 gap-y-2 text-sm">
-                {specRows.map((row, i) => (
-                  <div key={`${row.label}-${i}`} className="contents">
-                    <dt className="text-muted-foreground py-1 sm:py-0.5 border-b border-border/60 sm:border-0 font-medium">
-                      {row.label.trim()}
-                    </dt>
-                    <dd className="text-foreground pb-2 sm:pb-1 sm:pt-0.5 border-b border-border/60 last:border-0 sm:border-0">
-                      {row.value.trim()}
-                    </dd>
+                              if (hit) { setSelectedVariantKey(hit.key); }
+                              else { const first = items[0]; if (first) { setSelectedVariantKey(first.key); setVariantAttrs({ ...(first.attrs ?? {}) }); } }
+                            }}
+                            className={pillBtn(active)}
+                          >
+                            {v}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 ))}
-              </dl>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {(reviewsLoading || reviews.length > 0) && (
-        <div id="customer-reviews" className="mt-8 sm:mt-12 scroll-mt-24">
-          <h2 className="text-lg sm:text-xl font-bold mb-4">Customer Reviews</h2>
-          <div className="space-y-3 sm:space-y-4">
-            {reviews.map(r => (
-              <div key={r.id} className="border rounded-lg p-3 sm:p-4">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="font-medium text-sm">{r.userName}</span>
-                  <span className="text-yellow-500 text-sm">{'★'.repeat(r.rating)}</span>
-                </div>
-                <p className="text-sm text-muted-foreground">{r.comment}</p>
-                {r.images?.length ? (
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {r.images.slice(0, 4).map((img, idx) => (
-                      <a key={idx} href={img.url} target="_blank" rel="noreferrer">
-                        <img src={img.url} alt="Review" className="h-16 w-16 rounded-md object-cover border" />
-                      </a>
-                    ))}
-                  </div>
-                ) : null}
-                <p className="text-xs text-muted-foreground mt-1">
-                  {r.createdAt ? new Date(r.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
-                </p>
               </div>
-            ))}
-            {reviewsLoading && (
-              <div className="text-sm text-muted-foreground">Loading reviews…</div>
+            ) : variantNames.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-sm font-semibold text-foreground">{variantOptionLabel(product)}</p>
+                <div className="flex gap-2 flex-wrap">
+                  {variantNames.map(v => (
+                    <button key={v} type="button" onClick={() => setSelectedVariant(v)} className={pillBtn(selectedVariant === v)}>{v}</button>
+                  ))}
+                </div>
+              </div>
             )}
-          </div>
-          {reviewsCursor && (
-            <div className="mt-4">
-              <Button variant="outline" onClick={() => void loadMoreReviews()} disabled={reviewsLoading} className="w-full sm:w-auto">
-                {reviewsLoading ? 'Loading…' : 'See More'}
+
+            {/* Custom print CTA */}
+            {product.isCustomPrint && (
+              <Link to="/custom-print" className="block">
+                <Button variant="outline" className="w-full rounded-xl h-11">🎨 Upload Custom Design →</Button>
+              </Link>
+            )}
+
+            {/* Quantity + Add to Cart – desktop only (mobile uses sticky bar) */}
+            <div className="hidden md:flex items-stretch gap-3">
+              <div className="inline-flex items-stretch overflow-hidden rounded-xl border border-border bg-background text-sm font-medium">
+                <button type="button" className="px-3.5 py-3 hover:bg-muted/80 active:bg-muted" onClick={() => setQty(Math.max(1, qty - 1))}>
+                  <Minus className="h-4 w-4" />
+                </button>
+                <span className="flex min-w-[2.5rem] items-center justify-center border-x border-border tabular-nums">{qty}</span>
+                <button type="button" className="px-3.5 py-3 hover:bg-muted/80 active:bg-muted" onClick={() => setQty(qty + 1)}>
+                  <Plus className="h-4 w-4" />
+                </button>
+              </div>
+              <Button
+                size="lg"
+                className="flex-1 gap-2 rounded-xl text-base font-semibold h-12"
+                onClick={handleAddToCart}
+                disabled={!inStock}
+              >
+                <ShoppingCart className="h-5 w-5" /> Add to Cart
               </Button>
             </div>
-          )}
+
+            {/* Stock info */}
+            <p className="text-xs text-muted-foreground hidden md:block">
+              {inStock ? `${stock} available` : 'Currently unavailable'}
+            </p>
+
+            {/* Product specifications – collapsible */}
+            {specRows.length > 0 && (
+              <div className="rounded-2xl border border-border bg-card/50 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setSpecsOpen(!specsOpen)}
+                  className="flex items-center justify-between w-full p-4 text-left"
+                >
+                  <h2 className="text-base font-semibold text-foreground">Product Details</h2>
+                  {specsOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+                </button>
+                {specsOpen && (
+                  <div className="px-4 pb-4 animate-fade-in">
+                    <dl className="space-y-2 text-sm">
+                      {specRows.map((row, i) => (
+                        <div key={`${row.label}-${i}`} className="flex justify-between py-1.5 border-b border-border/40 last:border-0">
+                          <dt className="text-muted-foreground font-medium">{row.label.trim()}</dt>
+                          <dd className="text-foreground text-right max-w-[55%]">{row.value.trim()}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
-      )}
-    </div>
+
+        {/* Reviews section */}
+        {(reviewsLoading || reviews.length > 0) && (
+          <div id="customer-reviews" className="mt-10 scroll-mt-24">
+            <h2 className="text-lg sm:text-xl font-bold mb-4">Customer Reviews</h2>
+            <div className="space-y-3">
+              {reviews.map(r => (
+                <div key={r.id} className="rounded-2xl border border-border bg-card p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-medium text-sm">{r.userName}</span>
+                    <span className="text-yellow-500 text-sm">{'★'.repeat(r.rating)}{'☆'.repeat(5 - r.rating)}</span>
+                  </div>
+                  <p className="text-sm text-muted-foreground leading-relaxed">{r.comment}</p>
+                  {r.images?.length ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {r.images.slice(0, 4).map((img, idx) => (
+                        <a key={idx} href={img.url} target="_blank" rel="noreferrer">
+                          <img src={img.url} alt="Review" className="h-16 w-16 rounded-xl object-cover border border-border" />
+                        </a>
+                      ))}
+                    </div>
+                  ) : null}
+                  <p className="text-[11px] text-muted-foreground mt-2">
+                    {r.createdAt ? new Date(r.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
+                  </p>
+                </div>
+              ))}
+              {reviewsLoading && <div className="text-sm text-muted-foreground py-2">Loading reviews…</div>}
+            </div>
+            {reviewsCursor && (
+              <div className="mt-4">
+                <Button variant="outline" onClick={() => void loadMoreReviews()} disabled={reviewsLoading} className="w-full sm:w-auto rounded-xl">
+                  {reviewsLoading ? 'Loading…' : 'See More Reviews'}
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Sticky bottom bar – mobile only */}
+      <div className="fixed bottom-0 left-0 right-0 z-40 md:hidden bg-background/95 backdrop-blur-md border-t border-border shadow-[0_-4px_20px_-4px_rgba(0,0,0,0.1)]">
+        <div className="flex items-center gap-3 px-4 py-3 max-w-6xl mx-auto">
+          {/* Qty controls */}
+          <div className="inline-flex items-stretch overflow-hidden rounded-xl border border-border bg-background text-sm font-medium shrink-0">
+            <button type="button" className="px-3 py-2.5 active:bg-muted" onClick={() => setQty(Math.max(1, qty - 1))}>
+              <Minus className="h-3.5 w-3.5" />
+            </button>
+            <span className="flex min-w-[2rem] items-center justify-center border-x border-border tabular-nums text-sm">{qty}</span>
+            <button type="button" className="px-3 py-2.5 active:bg-muted" onClick={() => setQty(qty + 1)}>
+              <Plus className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
+          {/* Price */}
+          <div className="flex flex-col min-w-0 shrink-0">
+            <span className="text-lg font-bold text-foreground tabular-nums leading-tight">₹{selectedPrice * qty}</span>
+            {mrp != null && mrp > 0 && discount > 0 && (
+              <span className="text-[10px] text-muted-foreground line-through tabular-nums">₹{mrp * qty}</span>
+            )}
+          </div>
+
+          {/* Add to Cart */}
+          <Button
+            className="flex-1 gap-2 rounded-xl h-11 text-sm font-semibold"
+            onClick={handleAddToCart}
+            disabled={!inStock}
+          >
+            <ShoppingCart className="h-4 w-4" />
+            {inStock ? 'Add to Cart' : 'Out of Stock'}
+          </Button>
+        </div>
+      </div>
+    </>
   );
 }
