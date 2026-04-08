@@ -173,4 +173,4 @@ export interface Coupon {
 }
 
 export type OrderStatus = Order['status'];
-export type ProductCategory = Product['category'];
+// ProductCategory already defined above as a type alias

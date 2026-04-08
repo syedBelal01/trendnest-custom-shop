@@ -52,7 +52,7 @@ export default function CartPage() {
         <div className="text-sm font-medium">Price mode</div>
         <div className="flex flex-wrap gap-3 text-sm">
           <label className="flex items-center gap-2">
-            <input type="radio" name="cartPriceMode" checked={paymentMethod === 'cod'} onChange={() => setMethod('cod')} />
+            <input type="radio" name="cartPriceMode" checked={paymentMethod === 'cod'} onChange={() => setPaymentMethod('cod')} />
             <span className="text-muted-foreground">COD</span>
           </label>
           <label className="flex items-center gap-2">
