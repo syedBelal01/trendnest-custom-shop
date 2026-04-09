@@ -473,12 +473,13 @@ export default function AdminProducts() {
       const specifications = normalizeSpecsForPersist(snap.specifications);
 
       if (editing.id) {
+        const forcedCod = Number(snap.price);
         await updateProduct(editing.id, {
           name: snap.name,
           description: snap.description ?? '',
           price: Number(snap.price),
           onlinePrice: (snap as any).onlinePrice != null ? Number((snap as any).onlinePrice) : undefined,
-          codPrice: (snap as any).codPrice != null ? Number((snap as any).codPrice) : undefined,
+          codPrice: forcedCod,
           originalPrice: snap.originalPrice,
           images,
           category: snap.category || 'fashion',
@@ -497,13 +498,14 @@ export default function AdminProducts() {
         });
         toast.success('Product saved to MongoDB');
       } else {
+        const forcedCod = Number(snap.price);
         const newP: Product = {
           id: `p${Date.now()}`,
           name: snap.name!,
           description: snap.description || '',
           price: Number(snap.price),
           onlinePrice: (snap as any).onlinePrice != null ? Number((snap as any).onlinePrice) : undefined,
-          codPrice: (snap as any).codPrice != null ? Number((snap as any).codPrice) : undefined,
+          codPrice: forcedCod,
           originalPrice: snap.originalPrice,
           images,
           category: snap.category || 'fashion',
@@ -621,12 +623,7 @@ export default function AdminProducts() {
                     value={(editing as any).onlinePrice || ''}
                     onChange={e => setEditing(p => ({ ...p, onlinePrice: e.target.value ? Number(e.target.value) : undefined }))}
                   />
-                  <Input
-                    type="number"
-                    placeholder="COD price (optional)"
-                    value={(editing as any).codPrice || ''}
-                    onChange={e => setEditing(p => ({ ...p, codPrice: e.target.value ? Number(e.target.value) : undefined }))}
-                  />
+                  {/* COD price removed: regular price is used for COD */}
                 </div>
 
                 <ProductSpecificationsCard

@@ -16,8 +16,10 @@ type DraftVariantType = { name: string; values: string[] };
 type DraftVariantItem = {
   key: string;
   attrs: Record<string, string>;
+  isDefault?: boolean;
   sku: string;
   price: number;
+  originalPrice?: number;
   onlinePrice?: number;
   codPrice?: number;
   stock: number;
@@ -35,6 +37,25 @@ function normalizeVariantTypes(raw: unknown): DraftVariantType[] {
     .filter((t) => t.name && t.values.length);
 }
 
+function normalizeVariantItems(raw: unknown): DraftVariantItem[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((it) => ({
+      key: String((it as any)?.key ?? '').trim(),
+      attrs: (it as any)?.attrs && typeof (it as any).attrs === 'object' ? (it as any).attrs : {},
+      isDefault: Boolean((it as any)?.isDefault),
+      sku: String((it as any)?.sku ?? ''),
+      price: Number((it as any)?.price ?? 0) || 0,
+      originalPrice: (it as any)?.originalPrice != null ? Number((it as any).originalPrice) : undefined,
+      onlinePrice: (it as any)?.onlinePrice != null ? Number((it as any).onlinePrice) : undefined,
+      codPrice: (it as any)?.codPrice != null ? Number((it as any).codPrice) : undefined,
+      stock: Number((it as any)?.stock ?? 0) || 0,
+      images: Array.isArray((it as any)?.images) ? (it as any).images.map((u: unknown) => String(u)).filter(Boolean).slice(0, 8) : undefined,
+      image: (it as any)?.image ? String((it as any).image) : undefined,
+    }))
+    .filter((it) => it.key);
+}
+
 function buildVariantCombos(types: DraftVariantType[]): Array<{ key: string; attrs: Record<string, string> }> {
   const combos: Array<{ key: string; attrs: Record<string, string> }> = [];
   const walk = (i: number, cur: Record<string, string>) => {
@@ -48,6 +69,35 @@ function buildVariantCombos(types: DraftVariantType[]): Array<{ key: string; att
   };
   walk(0, {});
   return combos;
+}
+
+function upsertDefaultVariantItem(
+  items: DraftVariantItem[],
+  patch: Partial<Pick<DraftVariantItem, 'sku' | 'price' | 'originalPrice' | 'onlinePrice' | 'codPrice' | 'stock'>>
+): DraftVariantItem[] {
+  const key = '__default__';
+  const idx = items.findIndex((x) => String((x as any)?.key) === key);
+  const existing: DraftVariantItem | undefined = idx >= 0 ? items[idx] : undefined;
+  const base: DraftVariantItem = existing ?? {
+    key,
+    attrs: {},
+    isDefault: true,
+    sku: '',
+    price: 0,
+    stock: 0,
+    images: [],
+  };
+  const nextItem: DraftVariantItem = {
+    ...base,
+    ...patch,
+    isDefault: true,
+  };
+  if (idx >= 0) {
+    const next = [...items];
+    next[idx] = nextItem;
+    return next;
+  }
+  return [nextItem, ...items];
 }
 
 function mergeVariantItems(
@@ -72,8 +122,10 @@ function mergeVariantItems(
       : {
           key: c.key,
           attrs: c.attrs,
+          isDefault: false,
           sku: '',
           price: 0,
+          originalPrice: undefined,
           onlinePrice: undefined,
           codPrice: undefined,
           stock: 0,
@@ -115,7 +167,7 @@ function WizardInner({ step }: { step: number }) {
   const price = details.price != null ? String(details.price) : '';
   const originalPrice = details.originalPrice != null ? String(details.originalPrice) : '';
   const onlinePrice = details.onlinePrice != null ? String(details.onlinePrice) : '';
-  const codPrice = details.codPrice != null ? String(details.codPrice) : '';
+  const codPrice = price; // Regular price == COD price (admin invariant)
   const stock = details.stock != null ? String(details.stock) : '';
   const [initialAttrPreset, setInitialAttrPreset] = useState<'Color' | 'Size' | 'Custom'>('Color');
   const [initialAttrCustom, setInitialAttrCustom] = useState('');
@@ -208,14 +260,27 @@ function WizardInner({ step }: { step: number }) {
                 <Input
                   placeholder="Enter unique product SKU (e.g., SHIRT-BLACK-M)"
                   value={sku}
-                  onChange={e => updateDraftLocal({ details: { ...details, sku: e.target.value } })}
+                  onChange={e => {
+                    const nextSku = e.target.value;
+                    updateDraftLocal({ details: { ...details, sku: nextSku } });
+                    const items = upsertDefaultVariantItem(normalizeVariantItems((draft.variants as any)?.items), { sku: nextSku });
+                    updateDraftLocal({ variants: { ...(draft.variants as any), hasVariants: true, items } });
+                  }}
                 />
                 <Input
                   type="number"
                   inputMode="decimal"
                   placeholder="Enter regular selling price"
                   value={price}
-                  onChange={e => updateDraftLocal({ details: { ...details, price: e.target.value === '' ? '' : Number(e.target.value) } })}
+                  onChange={e => {
+                    const n = e.target.value === '' ? '' : Number(e.target.value);
+                    updateDraftLocal({ details: { ...details, price: n, codPrice: n } });
+                    const items = upsertDefaultVariantItem(normalizeVariantItems((draft.variants as any)?.items), {
+                      price: n === '' ? 0 : Number(n),
+                      codPrice: n === '' ? undefined : Number(n),
+                    });
+                    updateDraftLocal({ variants: { ...(draft.variants as any), hasVariants: true, items } });
+                  }}
                 />
                 <Input
                   type="number"
@@ -233,22 +298,26 @@ function WizardInner({ step }: { step: number }) {
                   inputMode="numeric"
                   placeholder="Enter available quantity"
                   value={stock}
-                  onChange={e => updateDraftLocal({ details: { ...details, stock: e.target.value === '' ? '' : Number(e.target.value) } })}
+                  onChange={e => {
+                    const n = e.target.value === '' ? '' : Number(e.target.value);
+                    updateDraftLocal({ details: { ...details, stock: n } });
+                    const items = upsertDefaultVariantItem(normalizeVariantItems((draft.variants as any)?.items), { stock: n === '' ? 0 : Number(n) });
+                    updateDraftLocal({ variants: { ...(draft.variants as any), hasVariants: true, items } });
+                  }}
                 />
                 <Input
                   type="number"
                   inputMode="decimal"
                   placeholder="Price for online payment (optional)"
                   value={onlinePrice}
-                  onChange={e => updateDraftLocal({ details: { ...details, onlinePrice: e.target.value === '' ? '' : Number(e.target.value) } })}
+                  onChange={e => {
+                    const n = e.target.value === '' ? '' : Number(e.target.value);
+                    updateDraftLocal({ details: { ...details, onlinePrice: n } });
+                    const items = upsertDefaultVariantItem(normalizeVariantItems((draft.variants as any)?.items), { onlinePrice: n === '' ? undefined : Number(n) });
+                    updateDraftLocal({ variants: { ...(draft.variants as any), hasVariants: true, items } });
+                  }}
                 />
-                <Input
-                  type="number"
-                  inputMode="decimal"
-                  placeholder="Price for cash on delivery (optional)"
-                  value={codPrice}
-                  onChange={e => updateDraftLocal({ details: { ...details, codPrice: e.target.value === '' ? '' : Number(e.target.value) } })}
-                />
+                {/* COD price removed: regular price is used for COD */}
               </div>
 
               <Input
@@ -282,7 +351,31 @@ function WizardInner({ step }: { step: number }) {
                     }
                     const types: DraftVariantType[] = [{ name: attrName, values }];
                     const combos = buildVariantCombos(types);
-                    const items = mergeVariantItems(combos, [], [attrName]);
+                    const seeded = upsertDefaultVariantItem([], {
+                      sku,
+                      price: price === '' ? 0 : Number(price),
+                      onlinePrice: onlinePrice === '' ? undefined : Number(onlinePrice),
+                      codPrice: price === '' ? undefined : Number(price),
+                      stock: stock === '' ? 0 : Number(stock),
+                      originalPrice: originalPrice === '' ? undefined : Number(originalPrice),
+                    });
+                    const items0 = mergeVariantItems(combos, seeded, [attrName]);
+                    // Make the first generated variant the default and carry Step 1 values.
+                    const firstKey = combos[0]?.key;
+                    const items = items0.map((it) =>
+                      firstKey && it.key === firstKey
+                        ? {
+                            ...it,
+                            isDefault: true,
+                            sku: sku || it.sku,
+                            price: price === '' ? it.price : Number(price),
+                            onlinePrice: onlinePrice === '' ? it.onlinePrice : Number(onlinePrice),
+                            codPrice: price === '' ? it.codPrice : Number(price),
+                            stock: stock === '' ? it.stock : Number(stock),
+                            originalPrice: originalPrice === '' ? it.originalPrice : Number(originalPrice),
+                          }
+                        : { ...it, isDefault: false }
+                    );
                     updateDraftLocal({ variants: { ...(draft.variants as any), hasVariants: true, types, items } });
                     toast.success(`Created ${items.length} variant(s)`);
                     void go(2);
@@ -654,7 +747,7 @@ function VariantsStep() {
               onChange={e =>
                 updateDraftLocal({
                   variants: {
-                    simple: { ...(variants.simple ?? {}), price: Number(e.target.value) },
+                    simple: { ...(variants.simple ?? {}), price: Number(e.target.value), codPrice: Number(e.target.value) },
                   },
                 })
               }
@@ -675,22 +768,7 @@ function VariantsStep() {
                 })
               }
             />
-            <Input
-              type="number"
-              inputMode="decimal"
-              placeholder="Price for cash on delivery (optional)"
-              value={String(variants.simple?.codPrice ?? '')}
-              onChange={e =>
-                updateDraftLocal({
-                  variants: {
-                    simple: {
-                      ...(variants.simple ?? {}),
-                      codPrice: e.target.value ? Number(e.target.value) : undefined,
-                    },
-                  },
-                })
-              }
-            />
+            {/* COD price removed: regular price is used for COD */}
             <Input
               type="number"
               inputMode="numeric"
@@ -910,7 +988,20 @@ function VariantRow(props: {
           value={String(props.item.price ?? '')}
           onChange={e => {
             const next = [...props.items];
-            next[props.idx] = { ...props.item, price: Number(e.target.value) };
+            const n = Number(e.target.value);
+            next[props.idx] = { ...props.item, price: n, codPrice: n };
+            props.onChangeItems(next);
+          }}
+        />
+        <Input
+          className="sm:col-span-1"
+          type="number"
+          inputMode="decimal"
+          placeholder="MRP / original price (optional)"
+          value={String((props.item as any).originalPrice ?? '')}
+          onChange={e => {
+            const next = [...props.items];
+            next[props.idx] = { ...props.item, originalPrice: e.target.value ? Number(e.target.value) : undefined };
             props.onChangeItems(next);
           }}
         />
@@ -926,18 +1017,7 @@ function VariantRow(props: {
             props.onChangeItems(next);
           }}
         />
-        <Input
-          className="sm:col-span-1"
-          type="number"
-          inputMode="decimal"
-          placeholder="Price for cash on delivery (optional)"
-          value={String(props.item.codPrice ?? '')}
-          onChange={e => {
-            const next = [...props.items];
-            next[props.idx] = { ...props.item, codPrice: e.target.value ? Number(e.target.value) : undefined };
-            props.onChangeItems(next);
-          }}
-        />
+        {/* COD price removed: regular price is used for COD */}
         <Input
           className="sm:col-span-1"
           type="number"
@@ -1013,7 +1093,7 @@ function ReviewPublishStep() {
             <div><strong>Price:</strong> {details.price != null ? `₹${details.price}` : '—'}</div>
             <div><strong>Stock:</strong> {details.stock != null ? String(details.stock) : '—'}</div>
             <div><strong>Online price:</strong> {details.onlinePrice != null ? `₹${details.onlinePrice}` : '—'}</div>
-            <div><strong>COD price:</strong> {details.codPrice != null ? `₹${details.codPrice}` : '—'}</div>
+            <div><strong>COD price:</strong> {details.price != null ? `₹${details.price}` : '—'}</div>
           </div>
         </div>
 

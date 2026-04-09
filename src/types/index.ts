@@ -49,8 +49,12 @@ export interface Product {
     items: Array<{
       key: string;
       attrs: Record<string, string>;
+      /** True when this variant should be selected by default. */
+      isDefault?: boolean;
       sku: string;
       price: number;
+      /** Optional MRP / cut price for this variant (overrides product originalPrice). */
+      originalPrice?: number;
       onlinePrice?: number;
       codPrice?: number;
       stock: number;

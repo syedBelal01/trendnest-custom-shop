@@ -1,10 +1,10 @@
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useProducts } from '@/contexts/ProductsContext';
 import { useCart } from '@/contexts/CartContext';
 import { Button } from '@/components/ui/button';
 import ProductImageGallery from '@/components/ProductImageGallery';
 import { useEffect, useMemo, useState } from 'react';
-import { ShoppingCart, ArrowLeft, Minus, Plus, Check, ChevronDown, ChevronUp } from 'lucide-react';
+import { ShoppingCart, ArrowLeft, Minus, Plus, Check, ChevronDown, ChevronUp, Truck, ShieldCheck, BadgeCheck, Package } from 'lucide-react';
 import type { Product } from '@/types';
 import { productVariantNames } from '@/lib/productVariants';
 import { galleryImagesForSelection } from '@/lib/productImages';
@@ -12,6 +12,7 @@ import { fetchProductReviewsApi, type Review as ApiReview } from '@/lib/reviewsA
 import { fetchProductByIdApi } from '@/lib/api';
 import { parseProductSpecifications } from '@/lib/productSpecifications';
 import { usePaymentMethod } from '@/contexts/PaymentMethodContext';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 function normKey(s: string) { return String(s ?? '').trim().toLowerCase(); }
 function normVal(s: string) { return String(s ?? '').trim().toLowerCase(); }
@@ -44,6 +45,7 @@ const pillBtn = (active: boolean) =>
 
 export default function ProductDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const { products, ratingSummary } = useProducts();
   const { method: paymentMethod, setMethod: setPaymentMethod } = usePaymentMethod();
   const fromList = id ? products.find(p => p.id === id) : undefined;
@@ -74,7 +76,7 @@ export default function ProductDetailPage() {
   const [reviewsLoading, setReviewsLoading] = useState(false);
   const [specsOpen, setSpecsOpen] = useState(false);
 
-  const hasVariantModel = !!(product?.variantModel?.types?.length && product?.variantModel?.items?.length);
+  const hasVariantModel = !!(product?.variantModel?.items?.length);
 
   const selectedVariantItem = useMemo(() => {
     if (!product?.variantModel?.items?.length) return null;
@@ -87,7 +89,8 @@ export default function ProductDetailPage() {
     if (!product) return;
     setSelectedSize(product.sizes?.[0] || '');
     if (product.variantModel?.items?.length) {
-      const first = product.variantModel.items[0];
+      const items = product.variantModel.items;
+      const first = (items as any).find((x: any) => x && x.isDefault) ?? items[0];
       setSelectedVariantKey(first.key);
       setVariantAttrs({ ...(first.attrs ?? {}) });
       setSelectedVariant('');
@@ -154,7 +157,9 @@ export default function ProductDetailPage() {
     ? Number(selectedVariantItem.onlinePrice)
     : product.onlinePrice != null ? Number(product.onlinePrice) : codPrice;
   const selectedPrice = paymentMethod === 'razorpay' ? onlinePrice : codPrice;
-  const mrp = product.originalPrice != null ? Number(product.originalPrice) : null;
+  const mrp = hasVariantModel && selectedVariantItem && (selectedVariantItem as any).originalPrice != null
+    ? Number((selectedVariantItem as any).originalPrice)
+    : product.originalPrice != null ? Number(product.originalPrice) : null;
   const discount = mrp && Number.isFinite(mrp) && mrp > 0 && Number.isFinite(selectedPrice) && selectedPrice > 0
     ? Math.round(((mrp - selectedPrice) / mrp) * 100) : 0;
   const stock = (hasVariantModel && selectedVariantItem) ? selectedVariantItem.stock : product.stock;
@@ -165,12 +170,26 @@ export default function ProductDetailPage() {
   const count = summary?.reviewCount ?? 0;
   const filled = Math.round(avg);
 
+  const related = useMemo(() => {
+    if (!product?.id) return [];
+    return (products ?? [])
+      .filter(p => p.id !== product.id)
+      .filter(p => (p.category || '') === (product.category || ''))
+      .slice(0, 5);
+  }, [products, product?.id, product?.category]);
+
   const handleAddToCart = () => addItem({
     product, quantity: qty,
     selectedSize: product.sizes?.length ? selectedSize : undefined,
     selectedVariant: hasVariantModel ? (selectedVariantItem?.key ?? undefined) : variantNames.length ? selectedVariant : undefined,
     selectedSleeve: product.sleeveTypes?.length ? selectedSleeve : undefined,
   });
+
+  const handleBuyNow = () => {
+    if (!inStock) return;
+    handleAddToCart();
+    navigate('/checkout');
+  };
 
   return (
     <>
@@ -368,6 +387,15 @@ export default function ProductDetailPage() {
               </div>
               <Button
                 size="lg"
+                variant="secondary"
+                className="flex-1 gap-2 rounded-xl text-base font-semibold h-12"
+                onClick={handleBuyNow}
+                disabled={!inStock}
+              >
+                Buy Now
+              </Button>
+              <Button
+                size="lg"
                 className="flex-1 gap-2 rounded-xl text-base font-semibold h-12"
                 onClick={handleAddToCart}
                 disabled={!inStock}
@@ -381,9 +409,9 @@ export default function ProductDetailPage() {
               {inStock ? `${stock} available` : 'Currently unavailable'}
             </p>
 
-            {/* Product specifications – collapsible */}
+            {/* Product specifications – collapsible (mobile only; desktop uses tabs below) */}
             {specRows.length > 0 && (
-              <div className="rounded-2xl border border-border bg-card/50 overflow-hidden">
+              <div className="rounded-2xl border border-border bg-card/50 overflow-hidden md:hidden">
                 <button
                   type="button"
                   onClick={() => setSpecsOpen(!specsOpen)}
@@ -406,6 +434,93 @@ export default function ProductDetailPage() {
                 )}
               </div>
             )}
+          </div>
+        </div>
+
+        {/* Desktop-only rich layout: tabs + highlights + related */}
+        <div className="hidden md:block mt-10 space-y-8">
+          {/* Tabs row */}
+          <div className="rounded-2xl border border-border bg-card p-5">
+            <Tabs defaultValue="description">
+              <TabsList className="w-full justify-start">
+                <TabsTrigger value="description">Description</TabsTrigger>
+                <TabsTrigger value="specs">Specifications</TabsTrigger>
+                <TabsTrigger value="shipping">Shipping &amp; Returns</TabsTrigger>
+              </TabsList>
+              <TabsContent value="description" className="mt-4">
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  {product.description || 'No description provided.'}
+                </p>
+              </TabsContent>
+              <TabsContent value="specs" className="mt-4">
+                {specRows.length > 0 ? (
+                  <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3 text-sm">
+                    {specRows.map((row, i) => (
+                      <div key={`${row.label}-${i}`} className="flex items-start justify-between gap-4 border-b border-border/40 pb-2">
+                        <dt className="text-muted-foreground font-medium">{row.label.trim()}</dt>
+                        <dd className="text-foreground text-right">{row.value.trim()}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No specifications.</p>
+                )}
+              </TabsContent>
+              <TabsContent value="shipping" className="mt-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+                  <div className="rounded-xl border border-border bg-background p-4">
+                    <div className="flex items-center gap-2 font-semibold">
+                      <Truck className="h-4 w-4 text-primary" /> Fast delivery
+                    </div>
+                    <p className="mt-1 text-muted-foreground">Usually delivered within 2–5 business days (location dependent).</p>
+                  </div>
+                  <div className="rounded-xl border border-border bg-background p-4">
+                    <div className="flex items-center gap-2 font-semibold">
+                      <ShieldCheck className="h-4 w-4 text-primary" /> Secure packaging
+                    </div>
+                    <p className="mt-1 text-muted-foreground">Packed safely to avoid damage during transit.</p>
+                  </div>
+                  <div className="rounded-xl border border-border bg-background p-4">
+                    <div className="flex items-center gap-2 font-semibold">
+                      <Package className="h-4 w-4 text-primary" /> Easy returns
+                    </div>
+                    <p className="mt-1 text-muted-foreground">If eligible, return within 7 days of delivery.</p>
+                  </div>
+                </div>
+              </TabsContent>
+            </Tabs>
+          </div>
+
+          {/* Highlights row (keeps your theme colors) */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="rounded-2xl border border-border bg-card p-4 flex items-center gap-3">
+              <BadgeCheck className="h-5 w-5 text-primary" />
+              <div>
+                <div className="text-sm font-semibold">Quality checked</div>
+                <div className="text-xs text-muted-foreground">Verified before dispatch</div>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-border bg-card p-4 flex items-center gap-3">
+              <ShieldCheck className="h-5 w-5 text-primary" />
+              <div>
+                <div className="text-sm font-semibold">Secure payments</div>
+                <div className="text-xs text-muted-foreground">Trusted checkout</div>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-border bg-card p-4 flex items-center gap-3">
+              <Truck className="h-5 w-5 text-primary" />
+              <div>
+                <div className="text-sm font-semibold">Fast delivery</div>
+                <div className="text-xs text-muted-foreground">Quick processing</div>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-border bg-card p-4 flex items-center gap-3">
+              <Package className="h-5 w-5 text-primary" />
+              <div>
+                <div className="text-sm font-semibold">Easy support</div>
+                <div className="text-xs text-muted-foreground">We’re here to help</div>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -446,6 +561,33 @@ export default function ProductDetailPage() {
             )}
           </div>
         )}
+
+        {/* Related products (desktop only) */}
+        {related.length > 0 && (
+          <div className="hidden md:block mt-12">
+            <div className="flex items-end justify-between mb-4">
+              <h2 className="text-lg font-bold">You May Also Like</h2>
+              <Link to={`/category/${product.category}`} className="text-sm text-primary hover:underline">View more</Link>
+            </div>
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+              {related.map(p => (
+                <Link
+                  key={p.id}
+                  to={`/product/${encodeURIComponent(p.id)}`}
+                  className="rounded-2xl border border-border bg-card overflow-hidden hover:shadow-sm transition-shadow"
+                >
+                  <div className="aspect-square bg-muted">
+                    <img src={(p.images?.[0] ?? '') as any} alt={p.name} className="h-full w-full object-cover" loading="lazy" />
+                  </div>
+                  <div className="p-3">
+                    <div className="text-sm font-semibold line-clamp-2">{p.name}</div>
+                    <div className="mt-1 text-sm font-bold tabular-nums">₹{p.price}</div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Sticky bottom bar – mobile only */}
@@ -470,15 +612,24 @@ export default function ProductDetailPage() {
             )}
           </div>
 
-          {/* Add to Cart */}
-          <Button
-            className="flex-1 gap-2 rounded-xl h-11 text-sm font-semibold"
-            onClick={handleAddToCart}
-            disabled={!inStock}
-          >
-            <ShoppingCart className="h-4 w-4" />
-            {inStock ? 'Add to Cart' : 'Out of Stock'}
-          </Button>
+          <div className="flex flex-1 gap-2">
+            <Button
+              variant="secondary"
+              className="flex-1 rounded-xl h-11 text-sm font-semibold"
+              onClick={handleBuyNow}
+              disabled={!inStock}
+            >
+              Buy Now
+            </Button>
+            <Button
+              className="flex-1 gap-2 rounded-xl h-11 text-sm font-semibold"
+              onClick={handleAddToCart}
+              disabled={!inStock}
+            >
+              <ShoppingCart className="h-4 w-4" />
+              {inStock ? 'Add to Cart' : 'Out of Stock'}
+            </Button>
+          </div>
         </div>
       </div>
     </>

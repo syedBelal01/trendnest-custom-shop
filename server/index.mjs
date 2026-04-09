@@ -23,6 +23,15 @@ const MONGODB_URI = process.env.MONGODB_URI;
 const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID;
 const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET;
 
+// Keep the dev API server alive even if Mongo drops/reconnects.
+// Routes guarded by `mongoReady` will return 503 while disconnected.
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled promise rejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception:', err);
+});
+
 const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
 const cloudKey = process.env.CLOUDINARY_API_KEY;
 const cloudSecret = process.env.CLOUDINARY_API_SECRET;
@@ -839,6 +848,7 @@ const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS || 1000 * 60 * 60 * 24 
 const COOKIE_SAMESITE = (process.env.COOKIE_SAMESITE || '').trim().toLowerCase();
 const COOKIE_SECURE = (process.env.COOKIE_SECURE || '').trim().toLowerCase();
 const isProd = process.env.NODE_ENV === 'production';
+const useMongoSessionStore = isProd && !!MONGODB_URI;
 const cookieSameSite =
   COOKIE_SAMESITE === 'none' || COOKIE_SAMESITE === 'lax' || COOKIE_SAMESITE === 'strict'
     ? COOKIE_SAMESITE
@@ -852,7 +862,9 @@ app.use(
     secret: SESSION_SECRET || 'dev-insecure-session-secret',
     resave: false,
     saveUninitialized: false,
-    store: MONGODB_URI
+    // In dev, avoid Mongo-backed sessions: flaky/blocked Mongo networking can turn all requests into 500s.
+    // In production, use MongoStore when MONGODB_URI is configured.
+    store: useMongoSessionStore
       ? MongoStore.create({
           mongoUrl: MONGODB_URI,
           collectionName: 'sessions',
@@ -2038,13 +2050,14 @@ function draftToProductPayload(draft) {
 
   if (!hasVariants) {
     const simple = v.simple && typeof v.simple === 'object' ? v.simple : {};
+    const forcedCodPrice = Number(simple.price ?? d.price ?? 0);
     return {
       ...base,
       price: Number(simple.price ?? d.price ?? 0),
       stock: Number(simple.stock ?? d.stock ?? 0) || 0,
       sku: simple.sku != null ? String(simple.sku).trim() : undefined,
       onlinePrice: simple.onlinePrice != null ? Number(simple.onlinePrice) : undefined,
-      codPrice: simple.codPrice != null ? Number(simple.codPrice) : undefined,
+      codPrice: Number.isFinite(forcedCodPrice) ? forcedCodPrice : undefined,
       variantModel: undefined,
     };
   }
@@ -2103,7 +2116,7 @@ function draftToProductPayload(draft) {
     price: Number((minPrice ?? first.price) ?? d.price ?? 0),
     stock: stockSum || Number(first.stock ?? d.stock ?? 0) || 0,
     onlinePrice: first.onlinePrice != null ? Number(first.onlinePrice) : undefined,
-    codPrice: first.codPrice != null ? Number(first.codPrice) : undefined,
+    codPrice: Number.isFinite(Number(first.price)) ? Number(first.price) : undefined,
     variantOptions: legacyVariantOptions.length ? legacyVariantOptions : undefined,
     variantModel: {
       types: types.map((t) => ({
@@ -2113,10 +2126,12 @@ function draftToProductPayload(draft) {
       items: items.map((it) => ({
         key: String(it?.key ?? '').trim(),
         attrs: it?.attrs && typeof it.attrs === 'object' ? it.attrs : {},
+        isDefault: !!it?.isDefault,
         sku: String(it?.sku ?? '').trim(),
         price: Number(it?.price ?? 0),
+        originalPrice: it?.originalPrice != null ? Number(it.originalPrice) : undefined,
         onlinePrice: it?.onlinePrice != null ? Number(it.onlinePrice) : undefined,
-        codPrice: it?.codPrice != null ? Number(it.codPrice) : undefined,
+        codPrice: Number.isFinite(Number(it?.price)) ? Number(it.price) : undefined,
         stock: Number(it?.stock ?? 0) || 0,
         image: it?.image ? String(it.image) : undefined,
         images: Array.isArray(it?.images) ? it.images.map((u) => String(u)).filter(Boolean).slice(0, 8) : undefined,
@@ -2254,6 +2269,7 @@ app.post('/api/products', mongoReady, async (req, res) => {
   try {
     const body = req.body;
     const id = body.id || `p${Date.now()}`;
+    const forcedCodPrice = Number(body.price);
     const doc = await Product.create({
       _id: id,
       name: body.name,
@@ -2261,7 +2277,7 @@ app.post('/api/products', mongoReady, async (req, res) => {
       sku: body.sku != null ? String(body.sku) : '',
       price: Number(body.price),
       onlinePrice: body.onlinePrice != null ? Number(body.onlinePrice) : undefined,
-      codPrice: body.codPrice != null ? Number(body.codPrice) : undefined,
+      codPrice: Number.isFinite(forcedCodPrice) ? forcedCodPrice : undefined,
       originalPrice: body.originalPrice != null ? Number(body.originalPrice) : undefined,
       images: Array.isArray(body.images) && body.images.length ? body.images : ['https://images.unsplash.com/photo-1553062407-98d43420e9e7?w=600'],
       category: body.category,
@@ -2269,7 +2285,19 @@ app.post('/api/products', mongoReady, async (req, res) => {
       sizes: body.sizes,
       variantOptions: normalizeVariantOptionsFromBody(body.variantOptions),
       variants: body.variants,
-      variantModel: body.variantModel && typeof body.variantModel === 'object' ? body.variantModel : undefined,
+      variantModel: (() => {
+        const vm = body.variantModel && typeof body.variantModel === 'object' ? body.variantModel : undefined;
+        if (!vm || typeof vm !== 'object') return undefined;
+        const items = Array.isArray(vm.items) ? vm.items : undefined;
+        if (!items) return vm;
+        return {
+          ...vm,
+          items: items.map((it) => {
+            const price = Number(it?.price);
+            return { ...it, codPrice: Number.isFinite(price) ? price : undefined };
+          }),
+        };
+      })(),
       sleeveTypes: body.sleeveTypes,
       stock: Number(body.stock) || 0,
       rating: Number(body.rating) || 4,
@@ -2303,6 +2331,8 @@ function buildProductUpdateSet(src) {
     const n = Number(src.price);
     if (!Number.isFinite(n)) throw new Error('Invalid price');
     out.price = n;
+    // Admin invariant: regular price == COD price
+    out.codPrice = n;
   }
   if (src.onlinePrice !== undefined) {
     if (src.onlinePrice === null || src.onlinePrice === '') out.onlinePrice = undefined;
@@ -2311,13 +2341,7 @@ function buildProductUpdateSet(src) {
       out.onlinePrice = Number.isFinite(n) ? n : undefined;
     }
   }
-  if (src.codPrice !== undefined) {
-    if (src.codPrice === null || src.codPrice === '') out.codPrice = undefined;
-    else {
-      const n = Number(src.codPrice);
-      out.codPrice = Number.isFinite(n) ? n : undefined;
-    }
-  }
+  // codPrice is derived from price; ignore external codPrice patches.
   if (src.originalPrice !== undefined) {
     if (src.originalPrice === null || src.originalPrice === '') {
       out.originalPrice = undefined;
@@ -2343,7 +2367,22 @@ function buildProductUpdateSet(src) {
     out.variantOptions = normalizeVariantOptionsFromBody(src.variantOptions) ?? [];
   }
   if (src.variantModel !== undefined) {
-    out.variantModel = src.variantModel && typeof src.variantModel === 'object' ? src.variantModel : undefined;
+    if (src.variantModel && typeof src.variantModel === 'object') {
+      const vm = src.variantModel;
+      if (Array.isArray(vm.items)) {
+        out.variantModel = {
+          ...vm,
+          items: vm.items.map((it) => {
+            const price = Number(it?.price);
+            return { ...it, codPrice: Number.isFinite(price) ? price : undefined };
+          }),
+        };
+      } else {
+        out.variantModel = vm;
+      }
+    } else {
+      out.variantModel = undefined;
+    }
   }
   if (src.sleeveTypes !== undefined) {
     out.sleeveTypes = Array.isArray(src.sleeveTypes) ? src.sleeveTypes.map((s) => String(s)) : [];
