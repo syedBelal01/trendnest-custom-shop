@@ -164,6 +164,7 @@ export default function ProductDetailPage() {
     ? Math.round(((mrp - selectedPrice) / mrp) * 100) : 0;
   const stock = (hasVariantModel && selectedVariantItem) ? selectedVariantItem.stock : product.stock;
   const inStock = stock > 0;
+  const stockMessage = !inStock ? 'Out of Stock' : stock <= 5 ? 'Few items left' : 'In Stock';
 
   const summary = ratingSummary[product.id];
   const avg = summary?.avgRating ?? 0;
@@ -404,9 +405,19 @@ export default function ProductDetailPage() {
               </Button>
             </div>
 
-            {/* Stock info */}
-            <p className="text-xs text-muted-foreground hidden md:block">
-              {inStock ? `${stock} available` : 'Currently unavailable'}
+            {/* Stock info (no exact quantities on storefront) */}
+            <p className="text-xs hidden md:block">
+              <span
+                className={
+                  inStock
+                    ? stock <= 5
+                      ? 'text-amber-700 dark:text-amber-300'
+                      : 'text-emerald-700 dark:text-emerald-300'
+                    : 'text-destructive'
+                }
+              >
+                {stockMessage}
+              </span>
             </p>
 
             {/* Product specifications – collapsible (mobile only; desktop uses tabs below) */}

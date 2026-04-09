@@ -443,6 +443,8 @@ const OrderSchema = new mongoose.Schema(
     deliveredEmailSentAt: Date,
     emailSentAt: Date,
     emailError: String,
+    /** When inventory was deducted successfully (prevents double-deduction on retries). */
+    stockDeductedAt: Date,
   },
   { versionKey: false, timestamps: true }
 );
@@ -2450,6 +2452,84 @@ app.delete('/api/products/:id', mongoReady, async (req, res) => {
   }
 });
 
+function normalizeQty(n) {
+  const q = Number(n);
+  if (!Number.isFinite(q)) return 0;
+  return Math.max(0, Math.floor(q));
+}
+
+/**
+ * Atomically decrement inventory for each order line.
+ * - Prevents negative stock (fails with 409 if insufficient).
+ * - Supports variantModel by treating selectedVariant as a variantModel key.
+ */
+async function decrementInventoryForOrderLines(lines, paymentMethod) {
+  const items = Array.isArray(lines) ? lines : [];
+  if (!items.length) return;
+
+  // Reduce duplicate product+variant lines into one decrement per key.
+  const grouped = new Map(); // key -> { productId, variantKey, qty }
+  for (const l of items) {
+    const productId = String(l?.productId ?? '').trim();
+    if (!productId) continue;
+    const variantKey = l?.selectedVariant ? String(l.selectedVariant).trim() : '';
+    const qty = normalizeQty(l?.quantity);
+    if (!qty) continue;
+    const k = `${productId}::${variantKey}`;
+    const prev = grouped.get(k);
+    grouped.set(k, prev ? { ...prev, qty: prev.qty + qty } : { productId, variantKey, qty });
+  }
+
+  const groups = Array.from(grouped.values());
+  if (!groups.length) return;
+
+  // Read current products to decide whether a variantKey belongs to variantModel.
+  const ids = Array.from(new Set(groups.map((g) => g.productId)));
+  const docs = await Product.find({ _id: { $in: ids } }).lean();
+  const byId = new Map(docs.map((d) => [String(d._id), d]));
+
+  // Perform conditional atomic updates; any failure aborts.
+  for (const g of groups) {
+    const p = byId.get(String(g.productId));
+    if (!p) {
+      const msg = `Product not found: ${g.productId}`;
+      const err = new Error(msg);
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const hasVm = !!(p.variantModel && typeof p.variantModel === 'object' && Array.isArray(p.variantModel.items));
+    const wantsVm = hasVm && g.variantKey && p.variantModel.items.some((it) => String(it?.key) === String(g.variantKey));
+
+    if (wantsVm) {
+      const r = await Product.updateOne(
+        {
+          _id: g.productId,
+          stock: { $gte: g.qty },
+          'variantModel.items': { $elemMatch: { key: g.variantKey, stock: { $gte: g.qty } } },
+        },
+        { $inc: { stock: -g.qty, 'variantModel.items.$.stock': -g.qty } }
+      );
+      if (!r.matchedCount) {
+        const err = new Error(`Out of stock: ${g.productId}`);
+        err.statusCode = 409;
+        throw err;
+      }
+    } else {
+      // Simple product (or legacy variants without per-variant stock).
+      const r = await Product.updateOne(
+        { _id: g.productId, stock: { $gte: g.qty } },
+        { $inc: { stock: -g.qty } }
+      );
+      if (!r.matchedCount) {
+        const err = new Error(`Out of stock: ${g.productId}`);
+        err.statusCode = 409;
+        throw err;
+      }
+    }
+  }
+}
+
 app.post('/api/orders', mongoReady, async (req, res) => {
   try {
     const body = req.body || {};
@@ -2583,6 +2663,12 @@ app.post('/api/orders', mongoReady, async (req, res) => {
     }
 
     const orderId = `ORD-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    // Deduct inventory immediately for COD orders. For Razorpay, we deduct after payment verification.
+    if (paymentMethod === 'cod') {
+      await decrementInventoryForOrderLines(pricedItems, paymentMethod);
+    }
+
     await Order.create({
       _id: orderId,
       customer: { name, email, phone, address, city, state: state || undefined, pincode },
@@ -2598,6 +2684,7 @@ app.post('/api/orders', mongoReady, async (req, res) => {
       amountPaid: 0,
       hasCustomPrint: !!body.hasCustomPrint,
       status: 'pending',
+      stockDeductedAt: paymentMethod === 'cod' ? new Date() : undefined,
     });
     const fresh = await Order.findById(orderId).lean();
     res.status(201).json(serializeOrder(fresh));
@@ -2617,6 +2704,15 @@ app.post('/api/orders', mongoReady, async (req, res) => {
     });
   } catch (e) {
     console.error(e);
+    const status = Number(e?.statusCode) || 500;
+    if (status === 409) {
+      res.status(409).json({ error: e instanceof Error ? e.message : 'Out of stock' });
+      return;
+    }
+    if (status === 404) {
+      res.status(404).json({ error: e instanceof Error ? e.message : 'Product not found' });
+      return;
+    }
     res.status(500).json({ error: 'Failed to create order' });
   }
 });
@@ -2726,6 +2822,24 @@ app.post('/api/payments/razorpay/verify', mongoReady, async (req, res) => {
       return;
     }
 
+    // Deduct inventory exactly once when payment succeeds.
+    if (!order.stockDeductedAt) {
+      try {
+        await decrementInventoryForOrderLines(order.items, 'razorpay');
+      } catch (invErr) {
+        const status = Number(invErr?.statusCode) || 500;
+        if (status === 409) {
+          await Order.updateOne(
+            { _id: orderId },
+            { $set: { paymentStatus: 'failed', paymentFailureReason: 'Out of stock' } }
+          );
+          res.status(409).json({ error: 'Out of stock. Payment cannot be confirmed for this order.' });
+          return;
+        }
+        throw invErr;
+      }
+    }
+
     const amountDue = Number(order.amountDue ?? order.total ?? 0);
     await Order.updateOne(
       { _id: orderId },
@@ -2738,6 +2852,7 @@ app.post('/api/payments/razorpay/verify', mongoReady, async (req, res) => {
           razorpayOrderId,
           razorpayPaymentId,
           razorpaySignature,
+          stockDeductedAt: order.stockDeductedAt || new Date(),
         },
       }
     );

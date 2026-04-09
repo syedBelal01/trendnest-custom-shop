@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useProducts } from '@/contexts/ProductsContext';
 import { Product, ProductVariantOption } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -23,6 +23,24 @@ import {
 } from '@/lib/api';
 import { productPrimaryImage } from '@/lib/productImages';
 import { suggestedSpecLabelsForCategory } from '@/data/productSpecPresets';
+
+type StockStatus = 'in' | 'low' | 'out';
+function stockStatus(n: number): StockStatus {
+  const x = Number(n) || 0;
+  if (x <= 0) return 'out';
+  if (x <= 5) return 'low';
+  return 'in';
+}
+function stockStatusLabel(s: StockStatus): string {
+  if (s === 'out') return 'Out of Stock';
+  if (s === 'low') return 'Low Stock';
+  return 'In Stock';
+}
+function stockBadgeClass(s: StockStatus): string {
+  if (s === 'out') return 'bg-destructive/10 text-destructive border-destructive/20';
+  if (s === 'low') return 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20';
+  return 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20';
+}
 
 function normalizeSpecsForPersist(rows: { label: string; value: string }[] | undefined) {
   if (!rows?.length) return [];
@@ -183,6 +201,11 @@ export default function AdminProducts() {
   const variantFileRef = useRef<HTMLInputElement>(null);
   const variantUploadIdxRef = useRef<number | null>(null);
   const [variantUrlDraft, setVariantUrlDraft] = useState<Record<number, string>>({});
+
+  const [q, setQ] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [sortKey, setSortKey] = useState<'name' | 'price' | 'stock' | 'updated'>('updated');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
   const openVariantUpload = (vidx: number) => {
     variantUploadIdxRef.current = vidx;
@@ -546,6 +569,8 @@ export default function AdminProducts() {
     }
   };
 
+  const filtered = products;
+
   return (
     <div>
       {!loading && !apiAvailable && apiIssue && (
@@ -572,7 +597,12 @@ export default function AdminProducts() {
         </p>
       )}
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Products</h1>
+        <div className="space-y-1">
+          <h1 className="text-2xl font-bold">Products</h1>
+          <p className="text-xs text-muted-foreground">
+            {products.length} total
+          </p>
+        </div>
         <div className="flex items-center gap-2">
           <Button
             type="button"
@@ -689,29 +719,41 @@ export default function AdminProducts() {
         </Dialog>
         </div>
       </div>
+
       <div className="border rounded-lg overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-muted text-muted-foreground">
             <tr>
               <th className="text-left p-3">Product</th>
+              <th className="text-left p-3">SKU</th>
               <th className="text-left p-3">Category</th>
-              <th className="text-left p-3">Options</th>
               <th className="text-left p-3">Price</th>
               <th className="text-left p-3">Stock</th>
               <th className="p-3">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {products.map(p => (
+            {filtered.map(p => {
+              return (
               <tr key={p.id} className="border-t">
                 <td className="p-3 flex items-center gap-2">
                   <img src={productPrimaryImage(p)} alt="" className="w-8 h-8 rounded object-cover" />
-                  <span className="truncate max-w-[150px]">{p.name}</span>
+                  <div className="min-w-0">
+                    <div className="truncate max-w-[260px] font-medium">{p.name}</div>
+                    <div className="text-[11px] text-muted-foreground truncate max-w-[260px]">
+                      {p.subcategory ? p.subcategory : optionsSummary(p)}
+                    </div>
+                  </div>
                 </td>
-                <td className="p-3 capitalize">{p.category}</td>
-                <td className="p-3 text-xs text-muted-foreground max-w-[180px]">{optionsSummary(p)}</td>
-                <td className="p-3">₹{p.price}</td>
-                <td className="p-3">{p.stock}</td>
+                <td className="p-3 font-mono text-xs">{p.sku || (p.variantModel?.items?.find((x: any) => x?.isDefault)?.sku ?? '—')}</td>
+                <td className="p-3 capitalize">
+                  <div className="capitalize">{p.category}</div>
+                  {p.subcategory ? <div className="text-[11px] text-muted-foreground">{p.subcategory}</div> : null}
+                </td>
+                <td className="p-3 tabular-nums">₹{p.price}</td>
+                <td className="p-3">
+                  <span className="tabular-nums font-medium">{p.stock}</span>
+                </td>
                 <td className="p-3 text-center space-x-1">
                   <Button
                     variant="ghost"
@@ -728,7 +770,7 @@ export default function AdminProducts() {
                   <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => remove(p.id)}><Trash2 className="h-3 w-3" /></Button>
                 </td>
               </tr>
-            ))}
+            )})}
           </tbody>
         </table>
       </div>

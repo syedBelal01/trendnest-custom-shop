@@ -64,6 +64,13 @@ export function ProductsProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Allow other parts of the app (checkout/admin) to request an immediate refresh.
+  useEffect(() => {
+    const on = () => { void refreshProducts(); };
+    window.addEventListener('trendnest:products-updated', on);
+    return () => window.removeEventListener('trendnest:products-updated', on);
+  }, [refreshProducts]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {

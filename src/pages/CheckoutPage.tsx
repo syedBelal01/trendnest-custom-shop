@@ -52,6 +52,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { usePaymentMethod } from '@/contexts/PaymentMethodContext';
+import { useProducts } from '@/contexts/ProductsContext';
 
 function itemSummary(i: CartItem): string {
   const parts: string[] = [];
@@ -91,6 +92,7 @@ function matchesAddressSearch(a: Address, q: string): boolean {
 export default function CheckoutPage() {
   const { items, subtotal, total, discount, couponCode, clearCart, totalsForPaymentMethod, unitPriceForItem } = useCart();
   const navigate = useNavigate();
+  const { refreshProducts } = useProducts();
   const { user, loading: authLoading, refreshAuth } = useAuth();
   const { method: paymentMethod, setMethod: setPaymentMethod } = usePaymentMethod();
   const [form, setForm] = useState<CustomerInfo>({
@@ -574,6 +576,8 @@ export default function CheckoutPage() {
       });
       if (paymentMethod === 'cod') {
         clearCart();
+        await refreshProducts();
+        window.dispatchEvent(new CustomEvent('trendnest:products-updated'));
         setOrderPlaced(created.id);
         toast.success('Your order has been placed successfully.');
         return;
@@ -604,6 +608,8 @@ export default function CheckoutPage() {
               razorpaySignature: resp.razorpay_signature,
             });
             clearCart();
+            await refreshProducts();
+            window.dispatchEvent(new CustomEvent('trendnest:products-updated'));
             setOrderPlaced(created.id);
             toast.success('Payment successful. Order confirmed.');
           } catch (e) {
