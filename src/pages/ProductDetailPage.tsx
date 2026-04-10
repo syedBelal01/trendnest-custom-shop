@@ -13,6 +13,8 @@ import { fetchProductByIdApi } from '@/lib/api';
 import { parseProductSpecifications } from '@/lib/productSpecifications';
 import { usePaymentMethod } from '@/contexts/PaymentMethodContext';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { fetchShippingServiceabilityApi, type ShippingServiceabilityResult } from '@/lib/shippingApi';
+import { Input } from '@/components/ui/input';
 
 function normKey(s: string) { return String(s ?? '').trim().toLowerCase(); }
 function normVal(s: string) { return String(s ?? '').trim().toLowerCase(); }
@@ -83,6 +85,9 @@ export default function ProductDetailPage() {
   const [reviewsCursor, setReviewsCursor] = useState<string | null>(null);
   const [reviewsLoading, setReviewsLoading] = useState(false);
   const [specsOpen, setSpecsOpen] = useState(false);
+  const [pincode, setPincode] = useState('');
+  const [shippingQuote, setShippingQuote] = useState<ShippingServiceabilityResult | null>(null);
+  const [shippingBusy, setShippingBusy] = useState(false);
 
   const hasVariantModel = !!(product?.variantModel?.items?.length);
 
@@ -110,6 +115,41 @@ export default function ProductDetailPage() {
     setSelectedSleeve(product.sleeveTypes?.[0] || '');
     setQty(1);
   }, [product]);
+
+  useEffect(() => {
+    const pin = pincode.replace(/[^\d]/g, '').slice(0, 6);
+    if (pin.length !== 6 || !product?.id) {
+      setShippingQuote(null);
+      return;
+    }
+    let cancelled = false;
+    const t = window.setTimeout(() => {
+      void (async () => {
+        setShippingBusy(true);
+        try {
+          const q = await fetchShippingServiceabilityApi({
+            pincode: pin,
+            items: [
+              {
+                cartLineId: 'pdp',
+                product,
+                quantity: 1,
+                selectedSize: product.sizes?.[0],
+              } as any,
+            ],
+            paymentMethod: paymentMethod === 'razorpay' ? 'razorpay' : 'cod',
+          });
+          if (!cancelled) setShippingQuote(q);
+        } finally {
+          if (!cancelled) setShippingBusy(false);
+        }
+      })();
+    }, 350);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [pincode, product?.id, paymentMethod, product]);
 
   useEffect(() => {
     if (!product?.id) return;
@@ -236,6 +276,36 @@ export default function ProductDetailPage() {
               ) : (
                 <span className="text-xs font-medium text-destructive bg-destructive/10 px-2.5 py-1 rounded-full">Out of Stock</span>
               )}
+            </div>
+
+            {/* Delivery check */}
+            <div className="rounded-2xl border bg-card p-4 space-y-2">
+              <div className="flex items-center gap-2 text-sm font-semibold">
+                <Truck className="h-4 w-4 text-primary" />
+                Check delivery
+              </div>
+              <div className="flex gap-2">
+                <Input
+                  value={pincode}
+                  onChange={e => setPincode(e.target.value.replace(/[^\d]/g, '').slice(0, 6))}
+                  placeholder="Enter pincode"
+                  className="h-10"
+                  inputMode="numeric"
+                />
+              </div>
+              <div className="text-xs text-muted-foreground">
+                {shippingBusy
+                  ? 'Checking serviceability…'
+                  : shippingQuote?.ok
+                    ? `${shippingQuote.shippingCharge === 0 ? 'Free shipping' : `Shipping from ₹${shippingQuote.shippingCharge}`}${
+                        shippingQuote.estimatedDeliveryDays != null ? ` · ETA ${shippingQuote.estimatedDeliveryDays} day(s)` : ''
+                      }`
+                    : shippingQuote?.reason === 'not_serviceable'
+                      ? 'Not serviceable for this pincode'
+                      : pincode.replace(/[^\d]/g, '').length === 6
+                        ? 'Shipping info currently unavailable'
+                        : 'Enter your pincode to see charges and ETA'}
+              </div>
             </div>
 
             {/* Title */}

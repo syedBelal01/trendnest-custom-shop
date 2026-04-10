@@ -53,6 +53,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { usePaymentMethod } from '@/contexts/PaymentMethodContext';
 import { useProducts } from '@/contexts/ProductsContext';
+import { fetchShippingServiceabilityApi, type ShippingServiceabilityResult } from '@/lib/shippingApi';
 
 function itemSummary(i: CartItem): string {
   const parts: string[] = [];
@@ -142,6 +143,9 @@ export default function CheckoutPage() {
 
   const [geoBusy, setGeoBusy] = useState(false);
   const [mapPreview, setMapPreview] = useState<{ lat: number; lon: number } | null>(null);
+
+  const [shippingQuote, setShippingQuote] = useState<ShippingServiceabilityResult | null>(null);
+  const [shippingQuoteLoading, setShippingQuoteLoading] = useState(false);
 
   const set = (key: keyof CustomerInfo, val: string) => setForm(p => ({ ...p, [key]: val }));
 
@@ -433,6 +437,44 @@ export default function CheckoutPage() {
     }, 450);
     return () => window.clearTimeout(t);
   }, [form.pincode]);
+
+  // Shiprocket serviceability (best-effort)
+  useEffect(() => {
+    const pin = form.pincode.replace(/[^\d]/g, '').slice(0, 6);
+    if (pin.length !== 6) {
+      setShippingQuote(null);
+      return;
+    }
+    if (items.length === 0) {
+      setShippingQuote(null);
+      return;
+    }
+    let cancelled = false;
+    const t = window.setTimeout(() => {
+      void (async () => {
+        setShippingQuoteLoading(true);
+        try {
+          const computed = totalsForPaymentMethod(paymentMethod);
+          const q = await fetchShippingServiceabilityApi({
+            pincode: pin,
+            items,
+            paymentMethod,
+            subtotal: computed.subtotal,
+            total: computed.total,
+          });
+          if (!cancelled) setShippingQuote(q);
+        } catch {
+          if (!cancelled) setShippingQuote({ ok: false, reason: 'unavailable', error: 'Shipping service temporarily unavailable' });
+        } finally {
+          if (!cancelled) setShippingQuoteLoading(false);
+        }
+      })();
+    }, 350);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [form.pincode, paymentMethod, items, totalsForPaymentMethod]);
 
   // Background check: if email exists, skip OTP. If new email, auto-send OTP.
   useEffect(() => {
@@ -1165,6 +1207,32 @@ export default function CheckoutPage() {
                 <div className="flex justify-between text-primary">
                   <span>Discount</span>
                   <span>-₹{discount}</span>
+                </div>
+              )}
+              <div className="flex justify-between text-muted-foreground">
+                <span>
+                  Shipping {shippingQuoteLoading ? '(checking…)' : ''}
+                </span>
+                <span>
+                  {shippingQuote?.ok
+                    ? shippingQuote.shippingCharge === 0
+                      ? 'Free'
+                      : `₹${shippingQuote.shippingCharge}`
+                    : shippingQuote?.reason === 'not_serviceable'
+                      ? 'N/A'
+                      : '—'}
+                </span>
+              </div>
+              {shippingQuote?.ok && (shippingQuote.estimatedDeliveryDays != null || shippingQuote.estimatedDeliveryDate) && (
+                <div className="flex justify-between text-muted-foreground text-xs">
+                  <span>Estimated delivery</span>
+                  <span>
+                    {shippingQuote.estimatedDeliveryDays != null
+                      ? `${shippingQuote.estimatedDeliveryDays} day(s)`
+                      : shippingQuote.estimatedDeliveryDate
+                        ? new Date(shippingQuote.estimatedDeliveryDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+                        : '—'}
+                  </span>
                 </div>
               )}
               <div className="flex justify-between font-bold">

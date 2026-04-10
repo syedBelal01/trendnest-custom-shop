@@ -144,6 +144,32 @@ export interface Order {
   updatedAt?: string;
   hasCustomPrint: boolean;
   emailError?: string;
+  shipping?: {
+    provider?: string;
+    shiprocketOrderId?: string;
+    shipmentId?: number;
+    awb?: string;
+    courierId?: number;
+    courierName?: string;
+    estimatedDeliveryDate?: string;
+    trackingStatus?: string;
+    manualRequired?: boolean;
+    manualReason?: string;
+    error?: string;
+    timeline?: Array<{
+      at: string;
+      kind: string;
+      status?: string;
+      awb?: string;
+      courierName?: string;
+      error?: string;
+      source?: string;
+      [k: string]: any;
+    }>;
+    rto?: { status?: string; updatedAt?: string };
+    cancelledAt?: string;
+    [k: string]: any;
+  };
 }
 
 export interface CustomerInfo {

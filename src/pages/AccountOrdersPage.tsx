@@ -131,6 +131,18 @@ export default function AccountOrdersPage() {
                   <span className="font-bold text-sm">₹{o.total}</span>
                 </div>
 
+                <div className="flex items-center justify-between pt-1">
+                  <Link
+                    to={`/account/orders/${encodeURIComponent(o.id)}`}
+                    className="text-xs font-semibold text-primary hover:underline active:opacity-70"
+                  >
+                    View tracking →
+                  </Link>
+                  {o.shipping?.awb ? (
+                    <span className="text-[11px] text-muted-foreground">AWB: {o.shipping.awb}</span>
+                  ) : null}
+                </div>
+
                 {(o.paymentMethod || o.paymentStatus) && (
                   <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
                     <span>

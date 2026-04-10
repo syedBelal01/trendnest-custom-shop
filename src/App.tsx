@@ -27,6 +27,7 @@ import AdminCustomers from "@/pages/admin/AdminCustomers";
 import UserGuard from "@/components/UserGuard";
 import AccountPage from "@/pages/AccountPage";
 import AccountOrdersPage from "@/pages/AccountOrdersPage";
+import AccountOrderDetailPage from "@/pages/AccountOrderDetailPage";
 import AccountSettingsPage from "@/pages/AccountSettingsPage";
 import AccountAddressesPage from "@/pages/AccountAddressesPage";
 import LoginPage from "@/pages/LoginPage";
@@ -79,6 +80,14 @@ const App = () => (
                   element={
                     <UserGuard>
                       <AccountOrdersPage />
+                    </UserGuard>
+                  }
+                />
+                <Route
+                  path="/account/orders/:id"
+                  element={
+                    <UserGuard>
+                      <AccountOrderDetailPage />
                     </UserGuard>
                   }
                 />

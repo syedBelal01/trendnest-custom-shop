@@ -141,6 +141,19 @@ export async function fetchMyOrdersApi(): Promise<Order[]> {
   return data as Order[];
 }
 
+export async function fetchMyOrderByIdApi(orderId: string): Promise<Order> {
+  const res = await fetch(apiUrl(`/api/me/orders/${encodeURIComponent(orderId)}`), {
+    method: 'GET',
+    credentials: 'include',
+    headers: withAuthHeaders(),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(typeof data.error === 'string' ? data.error : 'Failed to load order');
+  }
+  return data as Order;
+}
+
 export type Address = NonNullable<import('@/types').User['addresses']>[number];
 
 export async function fetchMyAddressesApi(): Promise<Address[]> {
