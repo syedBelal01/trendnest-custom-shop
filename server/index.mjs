@@ -451,6 +451,34 @@ const OrderSchema = new mongoose.Schema(
 
 const Order = mongoose.model('Order', OrderSchema);
 
+// --- Payment sessions (online payments) ---
+const PAYMENT_SESSION_STATUSES = ['pending', 'paid', 'failed', 'cancelled', 'expired'];
+const PaymentSessionSchema = new mongoose.Schema(
+  {
+    _id: { type: String, required: true },
+    status: { type: String, enum: PAYMENT_SESSION_STATUSES, default: 'pending', index: true },
+    expiresAt: { type: Date, required: true, index: true },
+    userId: { type: String, default: undefined },
+    customer: { type: Object, default: {} },
+    items: { type: [OrderLineSchema], default: [] },
+    subtotal: { type: Number, required: true },
+    discount: { type: Number, default: 0 },
+    couponCode: String,
+    total: { type: Number, required: true },
+    hasCustomPrint: { type: Boolean, default: false },
+    // Razorpay identifiers
+    razorpayOrderId: String,
+    razorpayPaymentId: String,
+    razorpaySignature: String,
+    paidAt: Date,
+    orderId: String, // created Order._id after payment success
+    error: String,
+  },
+  { versionKey: false, timestamps: true }
+);
+PaymentSessionSchema.index({ razorpayOrderId: 1 }, { unique: true, sparse: true });
+const PaymentSession = mongoose.model('PaymentSession', PaymentSessionSchema);
+
 function serialize(doc) {
   if (!doc) return null;
   const o = doc.toObject ? doc.toObject({ flattenMaps: true, versionKey: false }) : { ...doc };
@@ -474,6 +502,20 @@ function serializeProductDoc(doc) {
       }))
       .filter((x) => x.label.length > 0 && x.value.length > 0);
   }
+
+  // Keep derived stock consistent for variantModel products.
+  // `o.stock` is treated as a derived display value (sum of variant stocks).
+  if (o.variantModel && Array.isArray(o.variantModel.items)) {
+    let sum = 0;
+    o.variantModel.items = o.variantModel.items.map((it) => {
+      const s = Math.max(0, Math.floor(Number(it?.stock) || 0));
+      sum += s;
+      return { ...it, stock: s };
+    });
+    o.stock = sum;
+  } else {
+    o.stock = Math.max(0, Math.floor(Number(o.stock) || 0));
+  }
   return o;
 }
 
@@ -485,6 +527,19 @@ function serializeOrder(doc) {
   const out = { id, ...o };
   if (out.createdAt instanceof Date) out.createdAt = out.createdAt.toISOString();
   if (out.updatedAt instanceof Date) out.updatedAt = out.updatedAt.toISOString();
+  return out;
+}
+
+function serializePaymentSession(doc) {
+  if (!doc) return null;
+  const o = doc.toObject ? doc.toObject({ flattenMaps: true, versionKey: false }) : { ...doc };
+  const id = o._id;
+  delete o._id;
+  const out = { id, ...o };
+  if (out.createdAt instanceof Date) out.createdAt = out.createdAt.toISOString();
+  if (out.updatedAt instanceof Date) out.updatedAt = out.updatedAt.toISOString();
+  if (out.expiresAt instanceof Date) out.expiresAt = out.expiresAt.toISOString();
+  if (out.paidAt instanceof Date) out.paidAt = out.paidAt.toISOString();
   return out;
 }
 
@@ -2417,10 +2472,18 @@ app.put('/api/products/:id', mongoReady, async (req, res) => {
     const src = { ...req.body };
     delete src.id;
 
-    const exists = await Product.exists({ _id: id });
-    if (!exists) {
+    const existing = await Product.findById(id).lean();
+    if (!existing) {
       res.status(404).json({ error: 'Product not found' });
       return;
+    }
+
+    // Prevent manual edits to derived stock when a variantModel exists.
+    if (src.stock !== undefined && src.variantModel === undefined) {
+      const hasVm = !!(existing.variantModel && typeof existing.variantModel === 'object' && Array.isArray(existing.variantModel.items));
+      if (hasVm) {
+        delete src.stock;
+      }
     }
 
     const $set = buildProductUpdateSet(src);
@@ -2505,10 +2568,9 @@ async function decrementInventoryForOrderLines(lines, paymentMethod) {
       const r = await Product.updateOne(
         {
           _id: g.productId,
-          stock: { $gte: g.qty },
           'variantModel.items': { $elemMatch: { key: g.variantKey, stock: { $gte: g.qty } } },
         },
-        { $inc: { stock: -g.qty, 'variantModel.items.$.stock': -g.qty } }
+        { $inc: { 'variantModel.items.$.stock': -g.qty } }
       );
       if (!r.matchedCount) {
         const err = new Error(`Out of stock: ${g.productId}`);
@@ -2528,6 +2590,17 @@ async function decrementInventoryForOrderLines(lines, paymentMethod) {
       }
     }
   }
+}
+
+function availableStockForDoc(p, variantKey) {
+  const base = Math.max(0, Number(p?.stock) || 0);
+  const key = variantKey ? String(variantKey).trim() : '';
+  const vm = p?.variantModel && typeof p.variantModel === 'object' ? p.variantModel : null;
+  if (vm && Array.isArray(vm.items) && key) {
+    const hit = vm.items.find((it) => String(it?.key) === key);
+    if (hit) return Math.max(0, Number(hit?.stock) || 0);
+  }
+  return base;
 }
 
 app.post('/api/orders', mongoReady, async (req, res) => {
@@ -2571,6 +2644,10 @@ app.post('/api/orders', mongoReady, async (req, res) => {
       return;
     }
     const paymentMethod = String(body.paymentMethod || '').toLowerCase() === 'razorpay' ? 'razorpay' : 'cod';
+    if (paymentMethod === 'razorpay') {
+      res.status(400).json({ error: 'Online payments use a payment session. Start checkout again.' });
+      return;
+    }
 
     // Server-side pricing enforcement: recompute item prices + subtotal based on selected payment method.
     const ids = Array.from(new Set(items.map((x) => String(x.productId)).filter(Boolean)));
@@ -2664,10 +2741,8 @@ app.post('/api/orders', mongoReady, async (req, res) => {
 
     const orderId = `ORD-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-    // Deduct inventory immediately for COD orders. For Razorpay, we deduct after payment verification.
-    if (paymentMethod === 'cod') {
-      await decrementInventoryForOrderLines(pricedItems, paymentMethod);
-    }
+    // Deduct inventory immediately for COD orders.
+    await decrementInventoryForOrderLines(pricedItems, paymentMethod);
 
     await Order.create({
       _id: orderId,
@@ -2684,7 +2759,7 @@ app.post('/api/orders', mongoReady, async (req, res) => {
       amountPaid: 0,
       hasCustomPrint: !!body.hasCustomPrint,
       status: 'pending',
-      stockDeductedAt: paymentMethod === 'cod' ? new Date() : undefined,
+      stockDeductedAt: new Date(),
     });
     const fresh = await Order.findById(orderId).lean();
     res.status(201).json(serializeOrder(fresh));
@@ -2734,52 +2809,236 @@ function verifyRazorpaySignature({ razorpayOrderId, razorpayPaymentId, razorpayS
   return crypto.timingSafeEqual(a, b);
 }
 
-app.post('/api/payments/razorpay/order', mongoReady, async (req, res) => {
+function isExpired(expiresAt) {
+  if (!(expiresAt instanceof Date)) return true;
+  return expiresAt.getTime() <= Date.now();
+}
+
+async function markExpiredPaymentSessionsOnce() {
+  const now = new Date();
+  await PaymentSession.updateMany(
+    { status: 'pending', expiresAt: { $lte: now } },
+    { $set: { status: 'expired', error: 'Timed out' } }
+  );
+}
+
+// Best-effort background expiry; also enforced on read/verify.
+setInterval(() => {
+  void markExpiredPaymentSessionsOnce().catch(() => {});
+}, 60_000).unref?.();
+
+/** Create a pending Razorpay payment session (no Order is created here). */
+app.post('/api/payments/razorpay/session', mongoReady, async (req, res) => {
   try {
     if (!requireRazorpayConfigured(res)) return;
-    const orderId = String(req.body?.orderId || '').trim();
-    if (!orderId) {
-      res.status(400).json({ error: 'Missing orderId' });
+    const body = req.body || {};
+    const c = body.customer || {};
+    const name = String(c.name || '').trim();
+    const email = String(c.email || '').trim();
+    const phone = String(c.phone || '').trim();
+    const address = String(c.address || '').trim();
+    const city = String(c.city || '').trim();
+    const state = c.state != null ? String(c.state).trim() : '';
+    const pincode = String(c.pincode || '').trim();
+    if (!name || !email || !phone || !address || !city || !pincode) {
+      res.status(400).json({ error: 'All customer fields including email are required.' });
       return;
     }
-    const order = await Order.findById(orderId).lean();
-    if (!order) {
-      res.status(404).json({ error: 'Order not found' });
+    if (!simpleEmailValid(email)) {
+      res.status(400).json({ error: 'Invalid email address.' });
       return;
     }
-    if (String(order.paymentMethod || 'cod') !== 'razorpay') {
-      res.status(400).json({ error: 'Order is not set for online payment' });
+
+    // Attach session userId when email exists (same behavior as /api/orders).
+    let sessionTouched = false;
+    if (!req.session?.userId) {
+      const u = await User.findOne({ email }).exec();
+      if (u) {
+        req.session.userId = u._id;
+        sessionTouched = true;
+      }
+    }
+    if (sessionTouched) await saveSession(req);
+
+    let items;
+    try {
+      items = normalizeOrderItemsFromBody(body.items);
+    } catch (e) {
+      res.status(400).json({ error: e.message || 'Invalid items' });
       return;
     }
-    if (String(order.paymentStatus || 'unpaid') === 'paid') {
-      res.status(400).json({ error: 'Order is already paid' });
-      return;
+
+    // Price enforcement (same as /api/orders).
+    const ids = Array.from(new Set(items.map((x) => String(x.productId)).filter(Boolean)));
+    const docs = ids.length ? await Product.find({ _id: { $in: ids } }).lean() : [];
+    const byId = new Map(docs.map((d) => [String(d._id), d]));
+
+    // Stock validation: block starting payment if any item is unavailable.
+    for (const line of items) {
+      const p = byId.get(String(line.productId));
+      if (!p) {
+        res.status(404).json({ error: `Product not found: ${String(line.productId)}` });
+        return;
+      }
+      const want = Math.max(1, Math.floor(Number(line.quantity) || 1));
+      const have = availableStockForDoc(p, line.selectedVariant);
+      if (have <= 0) {
+        res.status(409).json({ error: `Out of stock: ${String(line.productId)}` });
+        return;
+      }
+      if (want > have) {
+        res.status(409).json({ error: `Only ${have} left for ${String(line.productId)}` });
+        return;
+      }
     }
-    const amountDue = Number(order.amountDue ?? order.total ?? 0);
-    if (!Number.isFinite(amountDue) || amountDue <= 0) {
-      res.status(400).json({ error: 'Invalid order amount' });
-      return;
+    const pricedItems = items.map((line) => {
+      const p = byId.get(String(line.productId));
+      if (!p) throw new Error(`Product not found: ${String(line.productId)}`);
+
+      let unit = Number(p.price) || 0;
+      const selectedVariantKey = line.selectedVariant ? String(line.selectedVariant) : '';
+      const vm = p.variantModel && typeof p.variantModel === 'object' ? p.variantModel : null;
+      if (vm && Array.isArray(vm.items) && selectedVariantKey) {
+        const hit = vm.items.find((it) => String(it?.key) === selectedVariantKey);
+        if (hit) {
+          if (hit.onlinePrice != null) unit = Number(hit.onlinePrice);
+          else unit = Number(hit.price);
+        }
+      } else {
+        if (p.onlinePrice != null) unit = Number(p.onlinePrice);
+        else unit = Number(p.price);
+      }
+      if (!Number.isFinite(unit) || unit < 0) unit = 0;
+      return { ...line, price: unit };
+    });
+    const subtotal = pricedItems.reduce((acc, l) => acc + (Number(l.price) || 0) * (Number(l.quantity) || 0), 0);
+
+    // Coupon enforcement (same logic; requires login).
+    let discount = Number(body.discount) || 0;
+    let couponCode = body.couponCode ? normalizeCouponCode(body.couponCode) : undefined;
+    let total = Math.max(0, subtotal - discount);
+    if (couponCode) {
+      const itemsForValidate = items.map(l => ({ productId: l.productId, quantity: l.quantity }));
+      const sessionUserId = req.session?.userId ? String(req.session.userId) : undefined;
+      const validation = await validateCouponForCart({
+        code: couponCode,
+        subtotal,
+        items: itemsForValidate,
+        userId: sessionUserId,
+      });
+      if (!validation.ok) {
+        res.status(400).json({ error: validation.error || 'Invalid coupon' });
+        return;
+      }
+      const couponDoc = await Coupon.findById(validation.couponId).lean();
+      if (!couponDoc) {
+        res.status(400).json({ error: 'Invalid coupon' });
+        return;
+      }
+      const couponId = String(couponDoc._id);
+      const userId = req.session?.userId ? String(req.session.userId) : undefined;
+      if (!userId) {
+        res.status(400).json({ error: 'Login is required to use coupons' });
+        return;
+      }
+      if (couponDoc.usageTotalLimit != null && Number.isFinite(Number(couponDoc.usageTotalLimit))) {
+        const usedTotal = await CouponUsage.countDocuments({ couponId });
+        if (usedTotal >= Number(couponDoc.usageTotalLimit)) {
+          res.status(400).json({ error: 'Coupon usage limit reached' });
+          return;
+        }
+      }
+      if (couponDoc.usagePerUserLimit != null && Number.isFinite(Number(couponDoc.usagePerUserLimit))) {
+        const u = await CouponUsage.findOne({ couponId, userId }).lean();
+        const usedByUser = u?.count ? Number(u.count) : 0;
+        if (usedByUser >= Number(couponDoc.usagePerUserLimit)) {
+          res.status(400).json({ error: 'You already used this coupon' });
+          return;
+        }
+      }
+      discount = validation.discount;
+      couponCode = validation.couponCode;
+      total = Math.max(0, subtotal - discount);
+      await CouponUsage.findOneAndUpdate(
+        { couponId, userId },
+        { $inc: { count: 1 }, $set: { lastUsedAt: new Date() } },
+        { upsert: true, new: false }
+      );
     }
+
+    const sessionId = `PS-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
     const razorpay = new Razorpay({ key_id: String(RAZORPAY_KEY_ID), key_secret: String(RAZORPAY_KEY_SECRET) });
     const rpOrder = await razorpay.orders.create({
-      amount: Math.round(amountDue * 100),
+      amount: Math.round(Number(total) * 100),
       currency: 'INR',
-      receipt: String(orderId),
-      notes: { orderId: String(orderId) },
+      receipt: String(sessionId),
+      notes: { sessionId: String(sessionId) },
     });
 
-    await Order.updateOne(
-      { _id: orderId },
-      { $set: { razorpayOrderId: String(rpOrder.id), paymentFailureReason: null } }
-    );
+    await PaymentSession.create({
+      _id: sessionId,
+      status: 'pending',
+      expiresAt,
+      userId: req.session?.userId,
+      customer: { name, email, phone, address, city, state: state || undefined, pincode },
+      items: pricedItems,
+      subtotal,
+      discount,
+      couponCode,
+      total,
+      hasCustomPrint: !!body.hasCustomPrint,
+      razorpayOrderId: String(rpOrder.id),
+    });
 
-    res.json({
+    res.status(201).json({
+      session: serializePaymentSession(await PaymentSession.findById(sessionId).lean()),
       keyId: String(RAZORPAY_KEY_ID),
       razorpayOrderId: String(rpOrder.id),
       amount: Number(rpOrder.amount),
       currency: String(rpOrder.currency || 'INR'),
     });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to start payment session' });
+  }
+});
+
+app.post('/api/payments/razorpay/cancel', mongoReady, async (req, res) => {
+  try {
+    const sessionId = String(req.body?.sessionId || '').trim();
+    if (!sessionId) {
+      res.status(400).json({ error: 'Missing sessionId' });
+      return;
+    }
+    const s = await PaymentSession.findById(sessionId).lean();
+    if (!s) {
+      res.status(404).json({ error: 'Payment session not found' });
+      return;
+    }
+    if (String(s.status) === 'paid') {
+      res.json({ ok: true, session: serializePaymentSession(s) });
+      return;
+    }
+    if (isExpired(s.expiresAt)) {
+      await PaymentSession.updateOne({ _id: sessionId }, { $set: { status: 'expired', error: 'Timed out' } });
+      const fresh = await PaymentSession.findById(sessionId).lean();
+      res.json({ ok: true, session: serializePaymentSession(fresh) });
+      return;
+    }
+    await PaymentSession.updateOne({ _id: sessionId }, { $set: { status: 'cancelled', error: null } });
+    const fresh = await PaymentSession.findById(sessionId).lean();
+    res.json({ ok: true, session: serializePaymentSession(fresh) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to cancel payment session' });
+  }
+});
+
+app.post('/api/payments/razorpay/order', mongoReady, async (req, res) => {
+  try {
+    res.status(410).json({ error: 'Deprecated endpoint. Use /api/payments/razorpay/session.' });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Failed to create Razorpay order' });
@@ -2789,70 +3048,120 @@ app.post('/api/payments/razorpay/order', mongoReady, async (req, res) => {
 app.post('/api/payments/razorpay/verify', mongoReady, async (req, res) => {
   try {
     if (!requireRazorpayConfigured(res)) return;
-    const orderId = String(req.body?.orderId || '').trim();
+    const sessionId = String(req.body?.sessionId || '').trim();
     const razorpayOrderId = String(req.body?.razorpayOrderId || '').trim();
     const razorpayPaymentId = String(req.body?.razorpayPaymentId || '').trim();
     const razorpaySignature = String(req.body?.razorpaySignature || '').trim();
-    if (!orderId || !razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
+    if (!sessionId || !razorpayOrderId || !razorpayPaymentId || !razorpaySignature) {
       res.status(400).json({ error: 'Missing payment verification fields' });
       return;
     }
-    const order = await Order.findById(orderId).lean();
-    if (!order) {
-      res.status(404).json({ error: 'Order not found' });
+    const session = await PaymentSession.findById(sessionId).lean();
+    if (!session) {
+      res.status(404).json({ error: 'Payment session not found' });
       return;
     }
-    if (String(order.paymentMethod || 'cod') !== 'razorpay') {
-      res.status(400).json({ error: 'Order is not set for online payment' });
+    if (String(session.status) === 'paid' && session.orderId) {
+      const existingOrder = await Order.findById(String(session.orderId)).lean();
+      res.json({ ok: true, order: serializeOrder(existingOrder) });
       return;
     }
-
-    if (String(order.paymentStatus || 'unpaid') === 'paid') {
-      res.json({ ok: true, order: serializeOrder(order) });
+    if (isExpired(session.expiresAt)) {
+      await PaymentSession.updateOne({ _id: sessionId }, { $set: { status: 'expired', error: 'Timed out' } });
+      res.status(410).json({ error: 'Payment session expired. Please try again.' });
+      return;
+    }
+    if (String(session.razorpayOrderId || '') !== razorpayOrderId) {
+      res.status(400).json({ error: 'Razorpay order id mismatch' });
       return;
     }
 
     const ok = verifyRazorpaySignature({ razorpayOrderId, razorpayPaymentId, razorpaySignature });
     if (!ok) {
-      await Order.updateOne(
-        { _id: orderId },
-        { $set: { paymentStatus: 'failed', paymentFailureReason: 'Invalid Razorpay signature' } }
+      await PaymentSession.updateOne(
+        { _id: sessionId },
+        { $set: { status: 'failed', error: 'Invalid Razorpay signature' } }
       );
       res.status(400).json({ error: 'Payment verification failed' });
       return;
     }
 
-    // Deduct inventory exactly once when payment succeeds.
-    if (!order.stockDeductedAt) {
-      try {
-        await decrementInventoryForOrderLines(order.items, 'razorpay');
-      } catch (invErr) {
-        const status = Number(invErr?.statusCode) || 500;
-        if (status === 409) {
-          await Order.updateOne(
-            { _id: orderId },
-            { $set: { paymentStatus: 'failed', paymentFailureReason: 'Out of stock' } }
-          );
-          res.status(409).json({ error: 'Out of stock. Payment cannot be confirmed for this order.' });
-          return;
-        }
-        throw invErr;
-      }
+    // Server-side payment validation (do not trust frontend callback):
+    // confirm payment is captured and amounts match.
+    const razorpay = new Razorpay({ key_id: String(RAZORPAY_KEY_ID), key_secret: String(RAZORPAY_KEY_SECRET) });
+    const payment = await razorpay.payments.fetch(razorpayPaymentId);
+    const payStatus = String(payment?.status || '').toLowerCase(); // 'captured' when successful
+    const payAmount = Number(payment?.amount || 0); // paise
+    const expectedAmount = Math.round(Number(session.total || 0) * 100);
+    if (payStatus !== 'captured') {
+      await PaymentSession.updateOne(
+        { _id: sessionId },
+        { $set: { status: 'failed', error: `Payment not captured (${payStatus || 'unknown'})` } }
+      );
+      res.status(400).json({ error: 'Payment is not captured. Order will not be confirmed.' });
+      return;
+    }
+    if (!Number.isFinite(payAmount) || payAmount !== expectedAmount) {
+      await PaymentSession.updateOne(
+        { _id: sessionId },
+        { $set: { status: 'failed', error: 'Amount mismatch' } }
+      );
+      res.status(400).json({ error: 'Payment amount mismatch. Order will not be confirmed.' });
+      return;
     }
 
-    const amountDue = Number(order.amountDue ?? order.total ?? 0);
-    await Order.updateOne(
-      { _id: orderId },
+    // Deduct inventory only after payment is captured.
+    try {
+      await decrementInventoryForOrderLines(session.items, 'razorpay');
+    } catch (invErr) {
+      const status = Number(invErr?.statusCode) || 500;
+      if (status === 409) {
+        await PaymentSession.updateOne(
+          { _id: sessionId },
+          { $set: { status: 'failed', error: 'Out of stock' } }
+        );
+        res.status(409).json({ error: 'Out of stock. Payment cannot be confirmed for this cart.' });
+        return;
+      }
+      throw invErr;
+    }
+
+    // Create the actual Order now (confirmed/paid).
+    const orderId = `ORD-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const amountDue = Number(session.total ?? 0);
+    await Order.create({
+      _id: orderId,
+      customer: session.customer || {},
+      userId: session.userId,
+      items: session.items || [],
+      subtotal: Number(session.subtotal ?? 0),
+      discount: Number(session.discount ?? 0),
+      couponCode: session.couponCode,
+      total: Number(session.total ?? 0),
+      paymentMethod: 'razorpay',
+      paymentStatus: 'paid',
+      amountDue,
+      amountPaid: amountDue,
+      paidAt: new Date(),
+      paymentFailureReason: null,
+      razorpayOrderId,
+      razorpayPaymentId,
+      razorpaySignature,
+      hasCustomPrint: !!session.hasCustomPrint,
+      status: 'pending',
+      stockDeductedAt: new Date(),
+    });
+
+    await PaymentSession.updateOne(
+      { _id: sessionId },
       {
         $set: {
-          paymentStatus: 'paid',
-          amountPaid: amountDue,
-          paidAt: new Date(),
-          paymentFailureReason: null,
-          razorpayOrderId,
+          status: 'paid',
           razorpayPaymentId,
           razorpaySignature,
-          stockDeductedAt: order.stockDeductedAt || new Date(),
+          paidAt: new Date(),
+          orderId,
+          error: null,
         },
       }
     );

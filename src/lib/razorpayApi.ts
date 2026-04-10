@@ -1,6 +1,7 @@
 import { apiUrl } from '@/lib/api';
 import { withAuthHeaders } from '@/lib/authApi';
 import type { Order } from '@/types';
+import type { CreateOrderPayload } from '@/lib/ordersApi';
 
 type RazorpayCreateOrderResp = {
   keyId: string;
@@ -9,20 +10,26 @@ type RazorpayCreateOrderResp = {
   currency: string;
 };
 
-export async function createRazorpayOrderApi(orderId: string): Promise<RazorpayCreateOrderResp> {
-  const res = await fetch(apiUrl('/api/payments/razorpay/order'), {
+export async function createRazorpayPaymentSessionApi(payload: CreateOrderPayload): Promise<RazorpayCreateOrderResp & { sessionId: string }> {
+  const res = await fetch(apiUrl('/api/payments/razorpay/session'), {
     method: 'POST',
     credentials: 'include',
     headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ orderId }),
+    body: JSON.stringify(payload),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Failed to create Razorpay order');
-  return data as RazorpayCreateOrderResp;
+  if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Failed to start payment');
+  return {
+    keyId: String((data as any).keyId),
+    razorpayOrderId: String((data as any).razorpayOrderId),
+    amount: Number((data as any).amount),
+    currency: String((data as any).currency || 'INR'),
+    sessionId: String((data as any).session?.id || ''),
+  };
 }
 
 export async function verifyRazorpayPaymentApi(input: {
-  orderId: string;
+  sessionId: string;
   razorpayOrderId: string;
   razorpayPaymentId: string;
   razorpaySignature: string;
@@ -36,6 +43,17 @@ export async function verifyRazorpayPaymentApi(input: {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Payment verification failed');
   return data as { ok: true; order: Order };
+}
+
+export async function cancelRazorpayPaymentSessionApi(sessionId: string): Promise<void> {
+  const res = await fetch(apiUrl('/api/payments/razorpay/cancel'), {
+    method: 'POST',
+    credentials: 'include',
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ sessionId }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Failed to cancel payment');
 }
 
 declare global {

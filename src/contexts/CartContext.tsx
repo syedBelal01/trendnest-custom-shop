@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useReducer, useEffect } from 'react';
-import { CartItem } from '@/types';
+import React, { createContext, useContext, useMemo, useReducer, useEffect, useCallback } from 'react';
+import { CartItem, type Product } from '@/types';
 import { toast } from 'sonner';
+import { useProducts } from '@/contexts/ProductsContext';
 
 interface CartState {
   items: CartItem[];
@@ -13,6 +14,7 @@ type CartAction =
   | { type: 'REMOVE_ITEM'; payload: string }
   | { type: 'UPDATE_QTY'; payload: { cartLineId: string; quantity: number } }
   | { type: 'APPLY_COUPON'; payload: { code: string; discount: number } }
+  | { type: 'REPLACE_ITEMS'; payload: CartItem[] }
   | { type: 'CLEAR_CART' };
 
 const initialState: CartState = { items: [], couponCode: null, discount: 0 };
@@ -87,6 +89,8 @@ function cartReducer(state: CartState, action: CartAction): CartState {
       };
     case 'APPLY_COUPON':
       return { ...state, couponCode: action.payload.code, discount: action.payload.discount };
+    case 'REPLACE_ITEMS':
+      return { ...state, items: action.payload.map(normalizeCartItem) };
     case 'CLEAR_CART':
       return initialState;
     default:
@@ -109,6 +113,8 @@ interface CartContextType {
   updateQuantity: (cartLineId: string, quantity: number) => void;
   applyCoupon: (code: string, discount: number) => void;
   clearCart: () => void;
+  /** Re-validate cart lines against latest product stock. */
+  reconcileWithStock: () => { removed: number; adjusted: number };
   subtotal: number;
   total: number;
   itemCount: number;
@@ -117,6 +123,7 @@ interface CartContextType {
 const CartContext = createContext<CartContextType | undefined>(undefined);
 
 export function CartProvider({ children }: { children: React.ReactNode }) {
+  const { products } = useProducts();
   const [state, dispatch] = useReducer(cartReducer, initialState, () => {
     try {
       const saved = localStorage.getItem('trendnest-cart');
@@ -133,6 +140,50 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const subtotal = state.items.reduce((sum, i) => sum + i.product.price * i.quantity, 0);
   const total = Math.max(0, subtotal - state.discount);
   const itemCount = state.items.reduce((sum, i) => sum + i.quantity, 0);
+
+  const productById = useMemo(() => {
+    const m = new Map<string, Product>();
+    for (const p of products ?? []) m.set(p.id, p);
+    return m;
+  }, [products]);
+
+  const availableStockFor = useCallback(
+    (productId: string, selectedVariant?: string): number => {
+      const p = productById.get(String(productId)) || null;
+      if (!p) return 0;
+      const variantKey = selectedVariant ? String(selectedVariant) : '';
+      const vm = (p as any)?.variantModel;
+      if (vm?.items?.length && variantKey) {
+        const hit = vm.items.find((x: any) => String(x?.key) === variantKey);
+        if (hit) return Math.max(0, Number(hit.stock) || 0);
+      }
+      return Math.max(0, Number((p as any).stock) || 0);
+    },
+    [productById]
+  );
+
+  const reconcileItems = useCallback(
+    (items: CartItem[]) => {
+      const removed: CartItem[] = [];
+      const adjusted: Array<{ before: CartItem; afterQty: number }> = [];
+      const next: CartItem[] = [];
+
+      for (const it of items) {
+        const max = availableStockFor(it.product.id, it.selectedVariant);
+        if (max <= 0) {
+          removed.push(it);
+          continue;
+        }
+        const qty = Math.max(1, Math.floor(Number(it.quantity) || 1));
+        const clamped = Math.min(qty, max);
+        if (clamped !== qty) adjusted.push({ before: it, afterQty: clamped });
+        next.push({ ...it, quantity: clamped });
+      }
+
+      return { next, removed, adjusted };
+    },
+    [availableStockFor]
+  );
 
   const unitPriceForItem = (item: CartItem, method: 'cod' | 'razorpay' = 'cod'): number => {
     const p = item.product as any;
@@ -159,8 +210,33 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     return { subtotal: sub, total: Math.max(0, sub - state.discount) };
   };
 
+  const reconcileWithStock = useCallback(() => {
+    const { next, removed, adjusted } = reconcileItems(state.items);
+    if (removed.length || adjusted.length) {
+      dispatch({ type: 'REPLACE_ITEMS', payload: next });
+      if (removed.length) toast.message(`${removed.length} item(s) removed — out of stock.`);
+      if (adjusted.length) toast.message(`${adjusted.length} item(s) quantity adjusted to available stock.`);
+    }
+    return { removed: removed.length, adjusted: adjusted.length };
+  }, [reconcileItems, state.items]);
+
+  // Validate cart anytime product stock changes (real-time sync).
+  useEffect(() => {
+    if (!state.items.length) return;
+    reconcileWithStock();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [products]);
+
   const addItem = (item: CartItemInput) => {
-    const payload: CartItem = normalizeCartItem(item as CartItem);
+    const desired = Math.max(1, Math.floor(Number(item.quantity) || 1));
+    const max = availableStockFor(item.product.id, item.selectedVariant);
+    if (max <= 0) {
+      toast.error('This item is out of stock.');
+      return;
+    }
+    const qty = Math.min(desired, max);
+    if (qty !== desired) toast.message(`Quantity adjusted to ${qty} (available stock).`);
+    const payload: CartItem = normalizeCartItem({ ...(item as CartItem), quantity: qty });
     dispatch({ type: 'ADD_ITEM', payload });
     toast.success(`${item.product.name} added to cart`);
   };
@@ -175,10 +251,22 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         totalsForPaymentMethod,
         addItem,
         removeItem: id => dispatch({ type: 'REMOVE_ITEM', payload: id }),
-        updateQuantity: (cartLineId, qty) =>
-          dispatch({ type: 'UPDATE_QTY', payload: { cartLineId, quantity: qty } }),
+        updateQuantity: (cartLineId, qty) => {
+          const line = state.items.find(x => x.cartLineId === cartLineId);
+          if (!line) return;
+          const max = availableStockFor(line.product.id, line.selectedVariant);
+          if (max <= 0) {
+            dispatch({ type: 'REMOVE_ITEM', payload: cartLineId });
+            toast.message('Item removed — out of stock.');
+            return;
+          }
+          const nextQty = Math.max(1, Math.min(Math.floor(Number(qty) || 1), max));
+          if (nextQty !== qty) toast.message(`Quantity adjusted to ${nextQty} (available stock).`);
+          dispatch({ type: 'UPDATE_QTY', payload: { cartLineId, quantity: nextQty } });
+        },
         applyCoupon: (code, discount) => dispatch({ type: 'APPLY_COUPON', payload: { code, discount } }),
         clearCart: () => dispatch({ type: 'CLEAR_CART' }),
+        reconcileWithStock,
         subtotal,
         total,
         itemCount,

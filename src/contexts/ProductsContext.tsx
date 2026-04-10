@@ -71,6 +71,21 @@ export function ProductsProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('trendnest:products-updated', on);
   }, [refreshProducts]);
 
+  // Keep stock reasonably fresh in the storefront (prevents stale "In Stock" state).
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === 'visible') void refreshProducts();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    const t = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void refreshProducts();
+    }, 30_000);
+    return () => {
+      document.removeEventListener('visibilitychange', onVis);
+      window.clearInterval(t);
+    };
+  }, [refreshProducts]);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {

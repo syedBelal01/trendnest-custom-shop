@@ -697,7 +697,13 @@ export default function AdminProducts() {
                       <SelectItem value="trending">Trending</SelectItem>
                     </SelectContent>
                   </Select>
-                  <Input type="number" placeholder="Stock" value={editing.stock || ''} onChange={e => setEditing(p => ({ ...p, stock: +e.target.value }))} />
+                  <Input
+                    type="number"
+                    placeholder={editing.variantModel?.items?.length ? 'Stock is derived from variants' : 'Stock'}
+                    value={editing.stock || ''}
+                    disabled={!!editing.variantModel?.items?.length}
+                    onChange={e => setEditing(p => ({ ...p, stock: +e.target.value }))}
+                  />
                 </div>
                 <Input placeholder="Subcategory" value={editing.subcategory || ''} onChange={e => setEditing(p => ({ ...p, subcategory: e.target.value }))} />
                 <Input placeholder="Sizes (comma separated, e.g. waist or tee sizes)" value={editing.sizes?.join(',') || ''} onChange={e => setEditing(p => ({ ...p, sizes: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))} />

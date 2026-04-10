@@ -58,12 +58,20 @@ export default function ProductDetailPage() {
     load();
     const onVis = () => { if (document.visibilityState === 'visible') load(); };
     document.addEventListener('visibilitychange', onVis);
+    const onProductsUpdated = () => { load(); };
+    window.addEventListener('trendnest:products-updated', onProductsUpdated);
     const onProductUpdated = (e: Event) => { const ce = e as CustomEvent<{ id?: string }>; if (ce.detail?.id === id) load(); };
     window.addEventListener('trendnest:product-updated', onProductUpdated);
-    return () => { cancelled = true; document.removeEventListener('visibilitychange', onVis); window.removeEventListener('trendnest:product-updated', onProductUpdated); };
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('trendnest:products-updated', onProductsUpdated);
+      window.removeEventListener('trendnest:product-updated', onProductUpdated);
+    };
   }, [id]);
 
-  const product = fetchedProduct ?? fromList;
+  // Prefer the latest list copy for stock; fall back to fetched detail.
+  const product = fromList ?? fetchedProduct;
   const { addItem } = useCart();
   const [selectedSize, setSelectedSize] = useState('');
   const [selectedVariant, setSelectedVariant] = useState('');
@@ -140,6 +148,14 @@ export default function ProductDetailPage() {
     return parseProductSpecifications(fetchedProduct ?? product);
   }, [product, fetchedProduct]);
 
+  const related = useMemo(() => {
+    if (!product?.id) return [];
+    return (products ?? [])
+      .filter(p => p.id !== product.id)
+      .filter(p => (p.category || '') === (product.category || ''))
+      .slice(0, 5);
+  }, [products, product?.id, product?.category]);
+
   if (!product) {
     return (
       <div className="max-w-7xl mx-auto px-4 py-20 text-center animate-fade-in">
@@ -170,14 +186,6 @@ export default function ProductDetailPage() {
   const avg = summary?.avgRating ?? 0;
   const count = summary?.reviewCount ?? 0;
   const filled = Math.round(avg);
-
-  const related = useMemo(() => {
-    if (!product?.id) return [];
-    return (products ?? [])
-      .filter(p => p.id !== product.id)
-      .filter(p => (p.category || '') === (product.category || ''))
-      .slice(0, 5);
-  }, [products, product?.id, product?.category]);
 
   const handleAddToCart = () => addItem({
     product, quantity: qty,
@@ -273,6 +281,7 @@ export default function ProductDetailPage() {
                 <button
                   type="button"
                   onClick={() => setPaymentMethod('cod')}
+                  disabled={!inStock}
                   className={`flex-1 text-center text-sm py-2.5 rounded-xl border-2 font-medium transition-all duration-200 ${
                     paymentMethod === 'cod'
                       ? 'border-primary bg-primary/10 text-primary'
@@ -284,6 +293,7 @@ export default function ProductDetailPage() {
                 <button
                   type="button"
                   onClick={() => setPaymentMethod('razorpay')}
+                  disabled={!inStock}
                   className={`flex-1 text-center text-sm py-2.5 rounded-xl border-2 font-medium transition-all duration-200 ${
                     paymentMethod === 'razorpay'
                       ? 'border-primary bg-primary/10 text-primary'

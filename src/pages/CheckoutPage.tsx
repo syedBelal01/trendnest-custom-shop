@@ -20,7 +20,7 @@ import {
   Star,
 } from 'lucide-react';
 import { cartItemsToOrderLines, createOrderApi } from '@/lib/ordersApi';
-import { createRazorpayOrderApi, loadRazorpayCheckoutJs, verifyRazorpayPaymentApi } from '@/lib/razorpayApi';
+import { cancelRazorpayPaymentSessionApi, createRazorpayPaymentSessionApi, loadRazorpayCheckoutJs, verifyRazorpayPaymentApi } from '@/lib/razorpayApi';
 import {
   addAddressApi,
   emailExistsApi,
@@ -90,7 +90,7 @@ function matchesAddressSearch(a: Address, q: string): boolean {
 }
 
 export default function CheckoutPage() {
-  const { items, subtotal, total, discount, couponCode, clearCart, totalsForPaymentMethod, unitPriceForItem } = useCart();
+  const { items, subtotal, total, discount, couponCode, clearCart, totalsForPaymentMethod, unitPriceForItem, reconcileWithStock } = useCart();
   const navigate = useNavigate();
   const { refreshProducts } = useProducts();
   const { user, loading: authLoading, refreshAuth } = useAuth();
@@ -553,6 +553,14 @@ export default function CheckoutPage() {
   };
 
   const handlePlaceOrder = async () => {
+    const reconciled = reconcileWithStock();
+    if (reconciled.removed > 0) {
+      toast.message('Some items were removed because they are out of stock.');
+      if (items.length - reconciled.removed <= 0) {
+        navigate('/cart');
+        return;
+      }
+    }
     if (!deliveryValid) {
       toast.error('Please fill all required fields');
       return;
@@ -564,7 +572,7 @@ export default function CheckoutPage() {
     setSubmitting(true);
     try {
       const computed = totalsForPaymentMethod(paymentMethod);
-      const created = await createOrderApi({
+      const payload = {
         customer: { ...form, email: form.email.trim() },
         items: cartItemsToOrderLines(items).map((l, idx) => ({ ...l, price: unitPriceForItem(items[idx], paymentMethod) })),
         subtotal: computed.subtotal,
@@ -573,8 +581,10 @@ export default function CheckoutPage() {
         couponCode: couponCode || undefined,
         hasCustomPrint: items.some(i => !!(i.customDesignFile || i.customDesignName)),
         paymentMethod,
-      });
+      } as const;
+
       if (paymentMethod === 'cod') {
+        const created = await createOrderApi(payload);
         clearCart();
         await refreshProducts();
         window.dispatchEvent(new CustomEvent('trendnest:products-updated'));
@@ -585,24 +595,24 @@ export default function CheckoutPage() {
 
       // Online payment flow
       await loadRazorpayCheckoutJs();
-      const rp = await createRazorpayOrderApi(created.id);
+      const rp = await createRazorpayPaymentSessionApi(payload);
       const options = {
         key: rp.keyId,
         amount: rp.amount,
         currency: rp.currency,
         name: 'TrendNest',
-        description: `Order ${created.id}`,
+        description: 'Secure payment',
         order_id: rp.razorpayOrderId,
         prefill: {
           name: form.name,
           email: form.email.trim(),
           contact: form.phone,
         },
-        notes: { orderId: created.id },
+        notes: { sessionId: rp.sessionId },
         handler: async (resp: any) => {
           try {
             await verifyRazorpayPaymentApi({
-              orderId: created.id,
+              sessionId: rp.sessionId,
               razorpayOrderId: resp.razorpay_order_id,
               razorpayPaymentId: resp.razorpay_payment_id,
               razorpaySignature: resp.razorpay_signature,
@@ -610,7 +620,7 @@ export default function CheckoutPage() {
             clearCart();
             await refreshProducts();
             window.dispatchEvent(new CustomEvent('trendnest:products-updated'));
-            setOrderPlaced(created.id);
+            setOrderPlaced(`Paid`);
             toast.success('Payment successful. Order confirmed.');
           } catch (e) {
             toast.error(e instanceof Error ? e.message : 'Payment verification failed');
@@ -618,7 +628,8 @@ export default function CheckoutPage() {
         },
         modal: {
           ondismiss: () => {
-            toast.message('Payment cancelled. Your order is still pending payment.');
+            void cancelRazorpayPaymentSessionApi(rp.sessionId).catch(() => {});
+            toast.message('Payment cancelled. No order was created.');
           },
         },
       };
@@ -627,6 +638,7 @@ export default function CheckoutPage() {
       if (!RazorpayCtor) throw new Error('Razorpay is not available');
       const rzp = new RazorpayCtor(options);
       rzp.on?.('payment.failed', () => {
+        void cancelRazorpayPaymentSessionApi(rp.sessionId).catch(() => {});
         toast.error('Payment failed. Your order is still pending payment.');
       });
       rzp.open();
