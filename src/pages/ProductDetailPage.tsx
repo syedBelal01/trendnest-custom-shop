@@ -94,7 +94,11 @@ export default function ProductDetailPage() {
   const selectedVariantItem = useMemo(() => {
     if (!product?.variantModel?.items?.length) return null;
     const items = product.variantModel.items;
-    if (selectedVariantKey) { const hit = items.find(x => x.key === selectedVariantKey); if (hit) return hit; }
+    if (selectedVariantKey) {
+      const k = String(selectedVariantKey);
+      const hit = items.find(x => String(x.key) === k);
+      if (hit) return hit;
+    }
     return items[0] ?? null;
   }, [product, selectedVariantKey]);
 
@@ -212,10 +216,11 @@ export default function ProductDetailPage() {
     if (hasVariantModel && selectedVariantItem) {
       const variantImages = (Array.isArray(selectedVariantItem.images) ? selectedVariantItem.images : []).map((u: unknown) => String(u).trim()).filter(Boolean);
       const legacyImg = selectedVariantItem.image ? String(selectedVariantItem.image).trim() : '';
-      if (variantImages.length === 0 && !legacyImg) return dedupeImageUrls((product.images ?? []).map(u => String(u).trim()).filter(Boolean));
+      const rootOnly = dedupeImageUrls((product.images ?? []).map(u => String(u).trim()).filter(Boolean));
+      if (variantImages.length === 0 && !legacyImg) return rootOnly;
       const primaryList = variantImages.length > 0 ? variantImages : legacyImg ? [legacyImg] : [];
-      const productRest = (product.images ?? []).map(u => String(u).trim()).filter(Boolean);
-      return dedupeImageUrls([...primaryList, ...productRest]);
+      // Only that variant’s photos — do not append `product.images` or other colors appear when swiping.
+      return dedupeImageUrls(primaryList);
     }
     return galleryImagesForSelection(product, selectedVariant);
   }, [product, selectedVariant, hasVariantModel, selectedVariantItem]);
