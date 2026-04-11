@@ -36,6 +36,8 @@ export async function fetchShippingServiceabilityApi(input: {
   pincode: string;
   items: CartItem[];
   paymentMethod: 'cod' | 'razorpay';
+  /** Merchandise total after coupon (rupees); used for free-shipping threshold on the server. */
+  goodsAfterDiscount?: number;
   subtotal?: number;
   total?: number;
 }): Promise<ShippingServiceabilityResult> {
@@ -46,6 +48,7 @@ export async function fetchShippingServiceabilityApi(input: {
       pincode: input.pincode,
       paymentMethod: input.paymentMethod,
       items: cartItemsToServiceabilityItems(input.items),
+      goodsAfterDiscount: input.goodsAfterDiscount,
       subtotal: input.subtotal,
       total: input.total,
     }),

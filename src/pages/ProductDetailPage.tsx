@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import ProductImageGallery from '@/components/ProductImageGallery';
 import { useEffect, useMemo, useState } from 'react';
 import { ShoppingCart, ArrowLeft, Minus, Plus, Check, ChevronDown, ChevronUp, Truck, ShieldCheck, BadgeCheck, Package } from 'lucide-react';
-import type { Product } from '@/types';
+import type { CartItem, Product } from '@/types';
 import { productVariantNames } from '@/lib/productVariants';
 import { galleryImagesForSelection } from '@/lib/productImages';
 import { fetchProductReviewsApi, type Review as ApiReview } from '@/lib/reviewsApi';
@@ -98,6 +98,28 @@ export default function ProductDetailPage() {
     return items[0] ?? null;
   }, [product, selectedVariantKey]);
 
+  const pdpGoodsLineTotal = useMemo(() => {
+    if (!product) return 0;
+    const hasVM = !!(product.variantModel?.items?.length);
+    const basePrice = hasVM && selectedVariantItem ? Number(selectedVariantItem.price) : Number(product.price);
+    const codP =
+      hasVM && selectedVariantItem && selectedVariantItem.codPrice != null
+        ? Number(selectedVariantItem.codPrice)
+        : product.codPrice != null
+          ? Number(product.codPrice)
+          : basePrice;
+    const onlP =
+      hasVM && selectedVariantItem && selectedVariantItem.onlinePrice != null
+        ? Number(selectedVariantItem.onlinePrice)
+        : product.onlinePrice != null
+          ? Number(product.onlinePrice)
+          : codP;
+    const unit = paymentMethod === 'razorpay' ? onlP : codP;
+    const u = Number.isFinite(unit) ? unit : 0;
+    const q = Math.max(1, Math.floor(Number(qty)) || 1);
+    return Math.max(0, u * q);
+  }, [product, selectedVariantItem, paymentMethod, qty]);
+
   useEffect(() => {
     if (!product) return;
     setSelectedSize(product.sizes?.[0] || '');
@@ -122,6 +144,8 @@ export default function ProductDetailPage() {
       setShippingQuote(null);
       return;
     }
+    const hasVM = !!(product.variantModel?.items?.length);
+    const lineQty = Math.max(1, Math.floor(Number(qty)) || 1);
     let cancelled = false;
     const t = window.setTimeout(() => {
       void (async () => {
@@ -133,11 +157,14 @@ export default function ProductDetailPage() {
               {
                 cartLineId: 'pdp',
                 product,
-                quantity: 1,
-                selectedSize: product.sizes?.[0],
-              } as any,
+                quantity: lineQty,
+                selectedSize: selectedSize || product.sizes?.[0],
+                selectedVariant: hasVM ? selectedVariantKey : selectedVariant,
+                selectedSleeve: selectedSleeve || product.sleeveTypes?.[0],
+              } as CartItem,
             ],
             paymentMethod: paymentMethod === 'razorpay' ? 'razorpay' : 'cod',
+            goodsAfterDiscount: pdpGoodsLineTotal,
           });
           if (!cancelled) setShippingQuote(q);
         } finally {
@@ -149,7 +176,17 @@ export default function ProductDetailPage() {
       cancelled = true;
       window.clearTimeout(t);
     };
-  }, [pincode, product?.id, paymentMethod, product]);
+  }, [
+    pincode,
+    product,
+    paymentMethod,
+    pdpGoodsLineTotal,
+    qty,
+    selectedSize,
+    selectedVariant,
+    selectedVariantKey,
+    selectedSleeve,
+  ]);
 
   useEffect(() => {
     if (!product?.id) return;

@@ -18,7 +18,13 @@ export async function createRazorpayPaymentSessionApi(payload: CreateOrderPayloa
     body: JSON.stringify(payload),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Failed to start payment');
+  if (!res.ok) {
+    const base = typeof (data as any).error === 'string' ? (data as any).error : 'Failed to start payment';
+    const st = (data as any).serverTotal;
+    const extra =
+      typeof st === 'number' && Number.isFinite(st) ? ` (correct total ₹${st.toFixed(2)})` : '';
+    throw new Error(`${base}${extra}`);
+  }
   return {
     keyId: String((data as any).keyId),
     razorpayOrderId: String((data as any).razorpayOrderId),

@@ -554,6 +554,10 @@ const OrderSchema = new mongoose.Schema(
     subtotal: { type: Number, required: true },
     discount: { type: Number, default: 0 },
     couponCode: String,
+    /** Merchandise after discount (before shipping). */
+    goodsTotal: { type: Number, default: undefined },
+    shippingCharge: { type: Number, default: 0 },
+    freeShippingApplied: { type: Boolean, default: false },
     total: { type: Number, required: true },
     // Payment is separate from fulfillment `status` (keeps COD flow unchanged).
     paymentMethod: { type: String, enum: ['cod', 'razorpay'], default: 'cod' },
@@ -623,6 +627,9 @@ const PaymentSessionSchema = new mongoose.Schema(
     subtotal: { type: Number, required: true },
     discount: { type: Number, default: 0 },
     couponCode: String,
+    goodsTotal: { type: Number, default: undefined },
+    shippingCharge: { type: Number, default: 0 },
+    freeShippingApplied: { type: Boolean, default: false },
     total: { type: Number, required: true },
     hasCustomPrint: { type: Boolean, default: false },
     // Razorpay identifiers
@@ -1438,63 +1445,66 @@ app.get('/api/health', (_req, res) => {
 });
 
 /**
- * Shiprocket serviceability + quote (best-effort).
- * Returns shipping charge + ETA; uses caching + safe fallback when Shiprocket is unavailable.
+ * Server-side shipping quote (same rules as checkout). Cached by pincode + weight + COD + goods threshold.
  */
-app.post('/api/shipping/serviceability', async (req, res) => {
+async function resolveShippingChargeForPricing({ pincode, cod, pricedLines, goodsAfterDiscount }) {
+  const pin = normalizePincode(pincode);
+  if (pin.length !== 6) {
+    return {
+      ok: false,
+      reason: 'bad_pincode',
+      shippingCharge: 0,
+      freeShippingApplied: false,
+      courierSuggestions: [],
+    };
+  }
+  if (!shiprocketConfigured()) {
+    return {
+      ok: false,
+      reason: 'unavailable',
+      shippingCharge: 0,
+      freeShippingApplied: false,
+      courierSuggestions: [],
+    };
+  }
+
+  const qtySum = (pricedLines || []).reduce((acc, l) => acc + Math.max(0, Math.floor(Number(l?.quantity) || 0)), 0);
+  const weight = clampNum((qtySum || 1) * SHIPROCKET_DEFAULT_WEIGHT_KG, { min: 0.1, max: 25 });
+  const goodsRound = Math.round(Math.max(0, Number(goodsAfterDiscount) || 0));
+
+  const cacheKey = JSON.stringify({
+    pickup: normalizePincode(SHIPROCKET_PICKUP_PINCODE),
+    delivery: pin,
+    cod: cod ? 1 : 0,
+    weight: Math.round(weight * 100) / 100,
+    g: goodsRound,
+  });
+  const now = Date.now();
+  const hit = shiprocketServiceabilityCache.get(cacheKey);
+  if (hit && hit.expiresAtMs > now && hit.value) {
+    return { ...hit.value, cached: true };
+  }
+
+  const qs = new URLSearchParams({
+    pickup_postcode: normalizePincode(SHIPROCKET_PICKUP_PINCODE),
+    delivery_postcode: pin,
+    cod: cod ? '1' : '0',
+    weight: String(Math.round(weight * 100) / 100),
+  });
+
   try {
-    const body = req.body || {};
-    const pincode = normalizePincode(body?.pincode);
-    const paymentMethod = String(body?.paymentMethod || '').toLowerCase() === 'razorpay' ? 'razorpay' : 'cod';
-    const cod = paymentMethod === 'cod';
-
-    if (pincode.length !== 6) {
-      res.status(400).json({ ok: false, error: 'Invalid pincode' });
-      return;
-    }
-
-    // If Shiprocket isn't configured, return a graceful fallback (allows checkout to proceed).
-    if (!shiprocketConfigured()) {
-      res.status(200).json({
-        ok: false,
-        reason: 'unavailable',
-        error: 'Shipping service is not configured',
-      });
-      return;
-    }
-
-    const items = Array.isArray(body?.items) ? body.items : [];
-    const qtySum = items.reduce((acc, it) => acc + Math.max(0, Math.floor(Number(it?.quantity) || 0)), 0);
-    const weight = clampNum((qtySum || 1) * SHIPROCKET_DEFAULT_WEIGHT_KG, { min: 0.1, max: 25 });
-
-    const cacheKey = JSON.stringify({
-      pickup: normalizePincode(SHIPROCKET_PICKUP_PINCODE),
-      delivery: pincode,
-      cod: cod ? 1 : 0,
-      weight: Math.round(weight * 100) / 100,
-    });
-    const now = Date.now();
-    const hit = shiprocketServiceabilityCache.get(cacheKey);
-    if (hit && hit.expiresAtMs > now) {
-      res.json({ ...hit.value, cached: true });
-      return;
-    }
-
-    const qs = new URLSearchParams({
-      pickup_postcode: normalizePincode(SHIPROCKET_PICKUP_PINCODE),
-      delivery_postcode: pincode,
-      cod: cod ? '1' : '0',
-      weight: String(Math.round(weight * 100) / 100),
-    });
-
     const { res: srRes, data } = await shiprocketFetch(`/courier/serviceability?${qs.toString()}`);
     if (!srRes.ok) {
-      res.status(200).json({
+      const out = {
         ok: false,
         reason: 'unavailable',
         error: 'Shipping service temporarily unavailable',
-      });
-      return;
+        shippingCharge: 0,
+        freeShippingApplied: false,
+        courierSuggestions: [],
+      };
+      shiprocketServiceabilityCache.set(cacheKey, { value: out, expiresAtMs: now + SHIPROCKET_CACHE_TTL_MS });
+      return out;
     }
 
     const companies = Array.isArray(data?.data?.available_courier_companies)
@@ -1506,11 +1516,12 @@ app.post('/api/shipping/serviceability', async (req, res) => {
         ok: false,
         reason: 'not_serviceable',
         error: 'Not serviceable for this pincode',
+        shippingCharge: 0,
+        freeShippingApplied: false,
         courierSuggestions: [],
       };
       shiprocketServiceabilityCache.set(cacheKey, { value: out, expiresAtMs: now + SHIPROCKET_CACHE_TTL_MS });
-      res.json(out);
-      return;
+      return out;
     }
 
     const suggestions = companies
@@ -1530,14 +1541,11 @@ app.post('/api/shipping/serviceability', async (req, res) => {
     const surcharge = cod && Number.isFinite(COD_SHIPPING_SURCHARGE) ? Math.max(0, Number(COD_SHIPPING_SURCHARGE)) : 0;
     const computedCharge = rawCharge + surcharge;
 
-    const cartTotal = Number(body?.total ?? body?.subtotal ?? NaN);
     const freeShippingApplied =
       Number.isFinite(FREE_SHIPPING_MIN_TOTAL) &&
       FREE_SHIPPING_MIN_TOTAL != null &&
-      Number.isFinite(cartTotal) &&
-      cartTotal >= Number(FREE_SHIPPING_MIN_TOTAL);
+      goodsRound >= Number(FREE_SHIPPING_MIN_TOTAL);
 
-    // ETA: best-effort parse. Prefer the cheapest courier's etd string if present.
     const etdStr = cheapest?.etd || '';
     const m = etdStr.match(/(\d+)\s*-\s*(\d+)/) || etdStr.match(/(\d+)/);
     const minDays = m ? Math.max(0, Number(m[1]) || 0) : null;
@@ -1556,7 +1564,47 @@ app.post('/api/shipping/serviceability', async (req, res) => {
     };
 
     shiprocketServiceabilityCache.set(cacheKey, { value: out, expiresAtMs: now + SHIPROCKET_CACHE_TTL_MS });
-    res.json(out);
+    return out;
+  } catch (e) {
+    console.error(e);
+    return {
+      ok: false,
+      reason: 'unavailable',
+      error: 'Shipping service temporarily unavailable',
+      shippingCharge: 0,
+      freeShippingApplied: false,
+      courierSuggestions: [],
+    };
+  }
+}
+
+/**
+ * Shiprocket serviceability + quote (best-effort).
+ * Returns shipping charge + ETA; uses caching + safe fallback when Shiprocket is unavailable.
+ */
+app.post('/api/shipping/serviceability', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const pincode = normalizePincode(body?.pincode);
+    const paymentMethod = String(body?.paymentMethod || '').toLowerCase() === 'razorpay' ? 'razorpay' : 'cod';
+    const cod = paymentMethod === 'cod';
+
+    if (pincode.length !== 6) {
+      res.status(400).json({ ok: false, error: 'Invalid pincode' });
+      return;
+    }
+
+    const items = Array.isArray(body?.items) ? body.items : [];
+    const goodsAfterDiscount = Number(body?.goodsAfterDiscount ?? body?.total ?? body?.subtotal ?? 0);
+
+    const result = await resolveShippingChargeForPricing({
+      pincode,
+      cod,
+      pricedLines: items.map((it) => ({ quantity: it?.quantity })),
+      goodsAfterDiscount: Number.isFinite(goodsAfterDiscount) ? goodsAfterDiscount : 0,
+    });
+
+    res.status(200).json(result);
   } catch (e) {
     console.error(e);
     res.status(200).json({ ok: false, reason: 'unavailable', error: 'Shipping service temporarily unavailable' });
@@ -3366,6 +3414,148 @@ function availableStockForDoc(p, variantKey) {
   return base;
 }
 
+function assertDeclaredMoneyMatches(label, bodyFieldNames, body, serverRupee) {
+  for (const key of bodyFieldNames) {
+    const raw = body?.[key];
+    if (raw === undefined || raw === null || raw === '') continue;
+    const declaredPaise = Math.round(Number(raw) * 100);
+    const serverPaise = Math.round(Number(serverRupee) * 100);
+    if (!Number.isFinite(declaredPaise) || !Number.isFinite(serverPaise)) continue;
+    if (declaredPaise !== serverPaise) {
+      const err = new Error(
+        `${label} mismatch. Please refresh checkout (server ₹${(serverPaise / 100).toFixed(2)}).`
+      );
+      err.statusCode = 400;
+      err.serverTotal = serverPaise / 100;
+      throw err;
+    }
+    return;
+  }
+}
+
+/**
+ * Single source of truth for checkout: line prices from DB, coupon from server rules,
+ * shipping from Shiprocket rules, total = goodsAfterDiscount + shippingCharge.
+ */
+async function computeServerCheckoutPricing({ req, body, rawItems, paymentMethod, pincode, incrementCouponUsage }) {
+  const ids = Array.from(new Set(rawItems.map((x) => String(x.productId)).filter(Boolean)));
+  const docs = ids.length ? await Product.find({ _id: { $in: ids } }).lean() : [];
+  const byId = new Map(docs.map((d) => [String(d._id), d]));
+
+  const pricedItems = rawItems.map((line) => {
+    const p = byId.get(String(line.productId));
+    if (!p) {
+      const err = new Error(`Product not found: ${String(line.productId)}`);
+      err.statusCode = 404;
+      throw err;
+    }
+    let unit = Number(p.price) || 0;
+    const selectedVariantKey = line.selectedVariant ? String(line.selectedVariant) : '';
+    const vm = p.variantModel && typeof p.variantModel === 'object' ? p.variantModel : null;
+    if (vm && Array.isArray(vm.items) && selectedVariantKey) {
+      const hit = vm.items.find((it) => String(it?.key) === selectedVariantKey);
+      if (hit) {
+        if (paymentMethod === 'razorpay' && hit.onlinePrice != null) unit = Number(hit.onlinePrice);
+        else if (paymentMethod === 'cod' && hit.codPrice != null) unit = Number(hit.codPrice);
+        else unit = Number(hit.price);
+      }
+    } else {
+      if (paymentMethod === 'razorpay' && p.onlinePrice != null) unit = Number(p.onlinePrice);
+      else if (paymentMethod === 'cod' && p.codPrice != null) unit = Number(p.codPrice);
+      else unit = Number(p.price);
+    }
+    if (!Number.isFinite(unit) || unit < 0) unit = 0;
+    return { ...line, price: unit };
+  });
+
+  const subtotal = pricedItems.reduce((acc, l) => acc + (Number(l.price) || 0) * (Number(l.quantity) || 0), 0);
+
+  let discount = 0;
+  let couponCode = body.couponCode ? normalizeCouponCode(body.couponCode) : undefined;
+
+  if (couponCode) {
+    const itemsForValidate = rawItems.map((l) => ({ productId: l.productId, quantity: l.quantity }));
+    const sessionUserId = req.session?.userId ? String(req.session.userId) : undefined;
+    const validation = await validateCouponForCart({
+      code: couponCode,
+      subtotal,
+      items: itemsForValidate,
+      userId: sessionUserId,
+    });
+    if (!validation.ok) {
+      const err = new Error(validation.error || 'Invalid coupon');
+      err.statusCode = 400;
+      throw err;
+    }
+    const couponDoc = await Coupon.findById(validation.couponId).lean();
+    if (!couponDoc) {
+      const err = new Error('Invalid coupon');
+      err.statusCode = 400;
+      throw err;
+    }
+    const couponId = String(couponDoc._id);
+    const userId = req.session?.userId ? String(req.session.userId) : undefined;
+    if (!userId) {
+      const err = new Error('Login is required to use coupons');
+      err.statusCode = 400;
+      throw err;
+    }
+    if (couponDoc.usageTotalLimit != null && Number.isFinite(Number(couponDoc.usageTotalLimit))) {
+      const usedTotal = await CouponUsage.countDocuments({ couponId });
+      if (usedTotal >= Number(couponDoc.usageTotalLimit)) {
+        const err = new Error('Coupon usage limit reached');
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+    if (couponDoc.usagePerUserLimit != null && Number.isFinite(Number(couponDoc.usagePerUserLimit))) {
+      const u = await CouponUsage.findOne({ couponId, userId }).lean();
+      const usedByUser = u?.count ? Number(u.count) : 0;
+      if (usedByUser >= Number(couponDoc.usagePerUserLimit)) {
+        const err = new Error('You already used this coupon');
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+    discount = validation.discount;
+    couponCode = validation.couponCode;
+    if (incrementCouponUsage) {
+      await CouponUsage.findOneAndUpdate(
+        { couponId, userId },
+        { $inc: { count: 1 }, $set: { lastUsedAt: new Date() } },
+        { upsert: true, new: false }
+      );
+    }
+  } else {
+    discount = 0;
+    couponCode = undefined;
+  }
+
+  const goodsAfterDiscount = Math.max(0, subtotal - discount);
+  const cod = paymentMethod === 'cod';
+  const ship = await resolveShippingChargeForPricing({
+    pincode,
+    cod,
+    pricedLines: pricedItems,
+    goodsAfterDiscount,
+  });
+
+  const shippingCharge = Number(ship.shippingCharge) || 0;
+  const freeShippingApplied = !!ship.freeShippingApplied;
+  const total = goodsAfterDiscount + shippingCharge;
+
+  return {
+    pricedItems,
+    subtotal,
+    discount,
+    couponCode,
+    goodsAfterDiscount,
+    shippingCharge,
+    freeShippingApplied,
+    total,
+  };
+}
+
 app.post('/api/orders', mongoReady, async (req, res) => {
   try {
     const body = req.body || {};
@@ -3412,95 +3602,19 @@ app.post('/api/orders', mongoReady, async (req, res) => {
       return;
     }
 
-    // Server-side pricing enforcement: recompute item prices + subtotal based on selected payment method.
-    const ids = Array.from(new Set(items.map((x) => String(x.productId)).filter(Boolean)));
-    const docs = ids.length ? await Product.find({ _id: { $in: ids } }).lean() : [];
-    const byId = new Map(docs.map((d) => [String(d._id), d]));
-
-    const pricedItems = items.map((line) => {
-      const p = byId.get(String(line.productId));
-      if (!p) throw new Error(`Product not found: ${String(line.productId)}`);
-
-      // If cart selectedVariant is a variantModel key, match it.
-      let unit = Number(p.price) || 0;
-      const selectedVariantKey = line.selectedVariant ? String(line.selectedVariant) : '';
-      const vm = p.variantModel && typeof p.variantModel === 'object' ? p.variantModel : null;
-      if (vm && Array.isArray(vm.items) && selectedVariantKey) {
-        const hit = vm.items.find((it) => String(it?.key) === selectedVariantKey);
-        if (hit) {
-          if (paymentMethod === 'razorpay' && hit.onlinePrice != null) unit = Number(hit.onlinePrice);
-          else if (paymentMethod === 'cod' && hit.codPrice != null) unit = Number(hit.codPrice);
-          else unit = Number(hit.price);
-        }
-      } else {
-        if (paymentMethod === 'razorpay' && p.onlinePrice != null) unit = Number(p.onlinePrice);
-        else if (paymentMethod === 'cod' && p.codPrice != null) unit = Number(p.codPrice);
-        else unit = Number(p.price);
-      }
-      if (!Number.isFinite(unit) || unit < 0) unit = 0;
-      return { ...line, price: unit };
+    const pricing = await computeServerCheckoutPricing({
+      req,
+      body,
+      rawItems: items,
+      paymentMethod: 'cod',
+      pincode,
+      incrementCouponUsage: true,
     });
+    assertDeclaredMoneyMatches('Subtotal', ['declaredSubtotal', 'subtotal'], body, pricing.subtotal);
+    assertDeclaredMoneyMatches('Payable total', ['declaredTotal', 'total'], body, pricing.total);
 
-    const subtotal = pricedItems.reduce((acc, l) => acc + (Number(l.price) || 0) * (Number(l.quantity) || 0), 0);
-
-    // Coupon enforcement (server-side): compute discount and total again to prevent tampering.
-    let discount = Number(body.discount) || 0;
-    let couponCode = body.couponCode ? normalizeCouponCode(body.couponCode) : undefined;
-    let total = Math.max(0, subtotal - discount);
-
-    if (couponCode) {
-      const itemsForValidate = items.map(l => ({ productId: l.productId, quantity: l.quantity }));
-      const sessionUserId = req.session?.userId ? String(req.session.userId) : undefined;
-      const validation = await validateCouponForCart({
-        code: couponCode,
-        subtotal,
-        items: itemsForValidate,
-        userId: sessionUserId,
-      });
-      if (!validation.ok) {
-        res.status(400).json({ error: validation.error || 'Invalid coupon' });
-        return;
-      }
-
-      // Enforce usage limits again only when we have userId (required for usage accounting).
-      const couponDoc = await Coupon.findById(validation.couponId).lean();
-      if (!couponDoc) {
-        res.status(400).json({ error: 'Invalid coupon' });
-        return;
-      }
-      const couponId = String(couponDoc._id);
-      const userId = req.session?.userId ? String(req.session.userId) : undefined;
-      if (!userId) {
-        res.status(400).json({ error: 'Login is required to use coupons' });
-        return;
-      }
-
-      if (couponDoc.usageTotalLimit != null && Number.isFinite(Number(couponDoc.usageTotalLimit))) {
-        const usedTotal = await CouponUsage.countDocuments({ couponId });
-        if (usedTotal >= Number(couponDoc.usageTotalLimit)) {
-          res.status(400).json({ error: 'Coupon usage limit reached' });
-          return;
-        }
-      }
-      if (couponDoc.usagePerUserLimit != null && Number.isFinite(Number(couponDoc.usagePerUserLimit))) {
-        const u = await CouponUsage.findOne({ couponId, userId }).lean();
-        const usedByUser = u?.count ? Number(u.count) : 0;
-        if (usedByUser >= Number(couponDoc.usagePerUserLimit)) {
-          res.status(400).json({ error: 'You already used this coupon' });
-          return;
-        }
-      }
-
-      discount = validation.discount;
-      couponCode = validation.couponCode;
-      total = Math.max(0, subtotal - discount);
-
-      await CouponUsage.findOneAndUpdate(
-        { couponId, userId },
-        { $inc: { count: 1 }, $set: { lastUsedAt: new Date() } },
-        { upsert: true, new: false }
-      );
-    }
+    const pricedItems = pricing.pricedItems;
+    const { subtotal, discount, couponCode, goodsAfterDiscount, shippingCharge, freeShippingApplied, total } = pricing;
 
     const orderId = `ORD-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -3515,6 +3629,9 @@ app.post('/api/orders', mongoReady, async (req, res) => {
       subtotal,
       discount,
       couponCode,
+      goodsTotal: goodsAfterDiscount,
+      shippingCharge,
+      freeShippingApplied,
       total,
       paymentMethod,
       paymentStatus: 'unpaid',
@@ -3548,6 +3665,13 @@ app.post('/api/orders', mongoReady, async (req, res) => {
   } catch (e) {
     console.error(e);
     const status = Number(e?.statusCode) || 500;
+    if (status === 400) {
+      res.status(400).json({
+        error: e instanceof Error ? e.message : 'Bad request',
+        serverTotal: e?.serverTotal,
+      });
+      return;
+    }
     if (status === 409) {
       res.status(409).json({ error: e instanceof Error ? e.message : 'Out of stock' });
       return;
@@ -3659,80 +3783,27 @@ app.post('/api/payments/razorpay/session', mongoReady, async (req, res) => {
         return;
       }
     }
-    const pricedItems = items.map((line) => {
-      const p = byId.get(String(line.productId));
-      if (!p) throw new Error(`Product not found: ${String(line.productId)}`);
-
-      let unit = Number(p.price) || 0;
-      const selectedVariantKey = line.selectedVariant ? String(line.selectedVariant) : '';
-      const vm = p.variantModel && typeof p.variantModel === 'object' ? p.variantModel : null;
-      if (vm && Array.isArray(vm.items) && selectedVariantKey) {
-        const hit = vm.items.find((it) => String(it?.key) === selectedVariantKey);
-        if (hit) {
-          if (hit.onlinePrice != null) unit = Number(hit.onlinePrice);
-          else unit = Number(hit.price);
-        }
-      } else {
-        if (p.onlinePrice != null) unit = Number(p.onlinePrice);
-        else unit = Number(p.price);
-      }
-      if (!Number.isFinite(unit) || unit < 0) unit = 0;
-      return { ...line, price: unit };
+    const pricing = await computeServerCheckoutPricing({
+      req,
+      body,
+      rawItems: items,
+      paymentMethod: 'razorpay',
+      pincode,
+      incrementCouponUsage: true,
     });
-    const subtotal = pricedItems.reduce((acc, l) => acc + (Number(l.price) || 0) * (Number(l.quantity) || 0), 0);
-
-    // Coupon enforcement (same logic; requires login).
-    let discount = Number(body.discount) || 0;
-    let couponCode = body.couponCode ? normalizeCouponCode(body.couponCode) : undefined;
-    let total = Math.max(0, subtotal - discount);
-    if (couponCode) {
-      const itemsForValidate = items.map(l => ({ productId: l.productId, quantity: l.quantity }));
-      const sessionUserId = req.session?.userId ? String(req.session.userId) : undefined;
-      const validation = await validateCouponForCart({
-        code: couponCode,
-        subtotal,
-        items: itemsForValidate,
-        userId: sessionUserId,
+    try {
+      assertDeclaredMoneyMatches('Subtotal', ['declaredSubtotal', 'subtotal'], body, pricing.subtotal);
+      assertDeclaredMoneyMatches('Payable total', ['declaredTotal', 'total'], body, pricing.total);
+    } catch (e) {
+      const status = Number(e?.statusCode) || 400;
+      res.status(status).json({
+        error: e instanceof Error ? e.message : 'Bad request',
+        serverTotal: e?.serverTotal,
       });
-      if (!validation.ok) {
-        res.status(400).json({ error: validation.error || 'Invalid coupon' });
-        return;
-      }
-      const couponDoc = await Coupon.findById(validation.couponId).lean();
-      if (!couponDoc) {
-        res.status(400).json({ error: 'Invalid coupon' });
-        return;
-      }
-      const couponId = String(couponDoc._id);
-      const userId = req.session?.userId ? String(req.session.userId) : undefined;
-      if (!userId) {
-        res.status(400).json({ error: 'Login is required to use coupons' });
-        return;
-      }
-      if (couponDoc.usageTotalLimit != null && Number.isFinite(Number(couponDoc.usageTotalLimit))) {
-        const usedTotal = await CouponUsage.countDocuments({ couponId });
-        if (usedTotal >= Number(couponDoc.usageTotalLimit)) {
-          res.status(400).json({ error: 'Coupon usage limit reached' });
-          return;
-        }
-      }
-      if (couponDoc.usagePerUserLimit != null && Number.isFinite(Number(couponDoc.usagePerUserLimit))) {
-        const u = await CouponUsage.findOne({ couponId, userId }).lean();
-        const usedByUser = u?.count ? Number(u.count) : 0;
-        if (usedByUser >= Number(couponDoc.usagePerUserLimit)) {
-          res.status(400).json({ error: 'You already used this coupon' });
-          return;
-        }
-      }
-      discount = validation.discount;
-      couponCode = validation.couponCode;
-      total = Math.max(0, subtotal - discount);
-      await CouponUsage.findOneAndUpdate(
-        { couponId, userId },
-        { $inc: { count: 1 }, $set: { lastUsedAt: new Date() } },
-        { upsert: true, new: false }
-      );
+      return;
     }
+
+    const { pricedItems, subtotal, discount, couponCode, goodsAfterDiscount, shippingCharge, freeShippingApplied, total } = pricing;
 
     const sessionId = `PS-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
@@ -3755,6 +3826,9 @@ app.post('/api/payments/razorpay/session', mongoReady, async (req, res) => {
       subtotal,
       discount,
       couponCode,
+      goodsTotal: goodsAfterDiscount,
+      shippingCharge,
+      freeShippingApplied,
       total,
       hasCustomPrint: !!body.hasCustomPrint,
       razorpayOrderId: String(rpOrder.id),
@@ -3905,6 +3979,9 @@ app.post('/api/payments/razorpay/verify', mongoReady, async (req, res) => {
       subtotal: Number(session.subtotal ?? 0),
       discount: Number(session.discount ?? 0),
       couponCode: session.couponCode,
+      goodsTotal: session.goodsTotal != null ? Number(session.goodsTotal) : Math.max(0, Number(session.subtotal ?? 0) - Number(session.discount ?? 0)),
+      shippingCharge: Number(session.shippingCharge ?? 0),
+      freeShippingApplied: !!session.freeShippingApplied,
       total: Number(session.total ?? 0),
       paymentMethod: 'razorpay',
       paymentStatus: 'paid',

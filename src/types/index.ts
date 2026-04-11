@@ -138,6 +138,10 @@ export interface Order {
   razorpayPaymentId?: string;
   subtotal: number;
   total: number;
+  /** Merchandise after discount (before shipping), when stored by the server. */
+  goodsTotal?: number;
+  shippingCharge?: number;
+  freeShippingApplied?: boolean;
   discount: number;
   couponCode?: string;
   createdAt: string;

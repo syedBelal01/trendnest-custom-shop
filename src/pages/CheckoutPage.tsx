@@ -438,6 +438,13 @@ export default function CheckoutPage() {
     return () => window.clearTimeout(t);
   }, [form.pincode]);
 
+  const checkoutMerchandise = useMemo(
+    () => totalsForPaymentMethod(paymentMethod),
+    [paymentMethod, totalsForPaymentMethod]
+  );
+  const shippingChargeForTotal = shippingQuote?.ok ? shippingQuote.shippingCharge : 0;
+  const payableGrandTotal = checkoutMerchandise.total + shippingChargeForTotal;
+
   // Shiprocket serviceability (best-effort)
   useEffect(() => {
     const pin = form.pincode.replace(/[^\d]/g, '').slice(0, 6);
@@ -459,6 +466,7 @@ export default function CheckoutPage() {
             pincode: pin,
             items,
             paymentMethod,
+            goodsAfterDiscount: computed.total,
             subtotal: computed.subtotal,
             total: computed.total,
           });
@@ -614,12 +622,14 @@ export default function CheckoutPage() {
     setSubmitting(true);
     try {
       const computed = totalsForPaymentMethod(paymentMethod);
+      const shipAdd = shippingQuote?.ok ? shippingQuote.shippingCharge : 0;
+      const payableTotal = computed.total + shipAdd;
       const payload = {
         customer: { ...form, email: form.email.trim() },
         items: cartItemsToOrderLines(items).map((l, idx) => ({ ...l, price: unitPriceForItem(items[idx], paymentMethod) })),
         subtotal: computed.subtotal,
         discount,
-        total: computed.total,
+        total: payableTotal,
         couponCode: couponCode || undefined,
         hasCustomPrint: items.some(i => !!(i.customDesignFile || i.customDesignName)),
         paymentMethod,
@@ -653,7 +663,7 @@ export default function CheckoutPage() {
         notes: { sessionId: rp.sessionId },
         handler: async (resp: any) => {
           try {
-            await verifyRazorpayPaymentApi({
+            const verified = await verifyRazorpayPaymentApi({
               sessionId: rp.sessionId,
               razorpayOrderId: resp.razorpay_order_id,
               razorpayPaymentId: resp.razorpay_payment_id,
@@ -662,7 +672,7 @@ export default function CheckoutPage() {
             clearCart();
             await refreshProducts();
             window.dispatchEvent(new CustomEvent('trendnest:products-updated'));
-            setOrderPlaced(`Paid`);
+            setOrderPlaced(verified.order.id);
             toast.success('Payment successful. Order confirmed.');
           } catch (e) {
             toast.error(e instanceof Error ? e.message : 'Payment verification failed');
@@ -1180,7 +1190,7 @@ export default function CheckoutPage() {
             disabled={submitting || !deliveryValid || (otpRequired && !otpVerified)}
             onClick={() => void handlePlaceOrder()}
           >
-            {submitting ? 'Placing order…' : `Place Order — ₹${totalsForPaymentMethod(paymentMethod).total}`}
+            {submitting ? 'Placing order…' : `Place Order — ₹${payableGrandTotal}`}
           </Button>
         </form>
 
@@ -1201,7 +1211,7 @@ export default function CheckoutPage() {
             <div className="border-t pt-2 space-y-1">
               <div className="flex justify-between text-muted-foreground">
                 <span>Subtotal</span>
-                <span>₹{totalsForPaymentMethod(paymentMethod).subtotal}</span>
+                <span>₹{checkoutMerchandise.subtotal}</span>
               </div>
               {discount > 0 && (
                 <div className="flex justify-between text-primary">
@@ -1235,9 +1245,13 @@ export default function CheckoutPage() {
                   </span>
                 </div>
               )}
-              <div className="flex justify-between font-bold">
-                <span>Total</span>
-                <span>₹{totalsForPaymentMethod(paymentMethod).total}</span>
+              <div className="flex justify-between text-muted-foreground text-xs">
+                <span>Items after discount</span>
+                <span>₹{checkoutMerchandise.total}</span>
+              </div>
+              <div className="flex justify-between font-bold pt-1 border-t">
+                <span>Total payable</span>
+                <span>₹{payableGrandTotal}</span>
               </div>
             </div>
           </div>
