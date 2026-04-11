@@ -32,6 +32,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { IndianPhoneInput } from '@/components/forms/IndianPhoneInput';
+import { isCompleteValidIndianMobile, isIndianPhoneValid, validateIndianPhone } from '@/lib/indianPhone';
 
 function matchesAddressSearch(a: Address, q: string): boolean {
   if (!q.trim()) return true;
@@ -74,7 +76,7 @@ export default function AccountAddressesPage() {
     () =>
       !!(
         editRecipientName.trim() &&
-        editRecipientPhone.trim() &&
+        isCompleteValidIndianMobile(editRecipientPhone) &&
         editAddress.trim() &&
         editCity.trim() &&
         editPincode.trim()
@@ -160,13 +162,18 @@ export default function AccountAddressesPage() {
 
   const saveDialog = async () => {
     if (!canSaveDialog) return;
+    const pv = validateIndianPhone(editRecipientPhone);
+    if (!isIndianPhoneValid(pv)) {
+      toast.error(pv.error);
+      return;
+    }
     setEditBusy(true);
     try {
       if (!editingId) {
         const next = await addAddressApi({
           label: editLabel.trim() || 'Home',
           recipientName: editRecipientName.trim(),
-          recipientPhone: editRecipientPhone.trim(),
+          recipientPhone: pv.digits,
           address: editAddress.trim(),
           city: editCity.trim(),
           state: editState.trim() || undefined,
@@ -179,7 +186,7 @@ export default function AccountAddressesPage() {
         const next = await updateAddressApi(editingId, {
           label: editLabel.trim() || 'Home',
           recipientName: editRecipientName.trim(),
-          recipientPhone: editRecipientPhone.trim(),
+          recipientPhone: pv.digits,
           address: editAddress.trim(),
           city: editCity.trim(),
           state: editState.trim() || undefined,
@@ -451,13 +458,7 @@ export default function AccountAddressesPage() {
               <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Phone number
               </label>
-              <Input
-                value={editRecipientPhone}
-                onChange={e => setEditRecipientPhone(e.target.value)}
-                placeholder="Phone"
-                type="tel"
-                className="h-10"
-              />
+              <IndianPhoneInput value={editRecipientPhone} onChange={setEditRecipientPhone} className="h-10" />
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">

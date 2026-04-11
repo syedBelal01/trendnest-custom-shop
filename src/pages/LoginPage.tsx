@@ -9,6 +9,8 @@ import { getSafePostLoginRedirect } from '@/lib/safeRedirect';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
 import { Mail, Lock, User, Phone, ArrowRight, ShieldCheck, Sparkles } from 'lucide-react';
+import { IndianPhoneInput } from '@/components/forms/IndianPhoneInput';
+import { isIndianPhoneValid, normalizeIndianPhoneOptional, validateIndianPhone } from '@/lib/indianPhone';
 
 const SESSION_NOT_VERIFIED =
   'Session could not be verified. Try again, or open the site in your regular browser (Safari/Chrome) if you are in an in-app browser.';
@@ -68,9 +70,22 @@ export default function LoginPage() {
       toast.error('Enter your email');
       return;
     }
+    let phoneParam: string | undefined;
+    if (phone.trim()) {
+      const pv = validateIndianPhone(phone);
+      if (!isIndianPhoneValid(pv)) {
+        toast.error(pv.error);
+        return;
+      }
+      phoneParam = pv.digits;
+    }
     setBusy(true);
     try {
-      const { challengeId } = await requestAuthOtpApi({ email: email.trim(), name: name.trim() || undefined, phone: phone.trim() || undefined });
+      const { challengeId } = await requestAuthOtpApi({
+        email: email.trim(),
+        name: name.trim() || undefined,
+        phone: phoneParam,
+      });
       setOtpChallengeId(challengeId);
       toast.success('OTP sent. Enter it to continue.');
     } catch (e) {
@@ -89,13 +104,20 @@ export default function LoginPage() {
       toast.error('Enter OTP');
       return;
     }
+    let phoneForVerify: string | undefined;
+    try {
+      phoneForVerify = normalizeIndianPhoneOptional(phone);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Invalid phone');
+      return;
+    }
     setBusy(true);
     try {
       await verifyOtpApi({
         challengeId: otpChallengeId,
         code: otp,
         name: name.trim() || undefined,
-        phone: phone.trim() || undefined,
+        phone: phoneForVerify,
       });
       const u = await refreshAuth();
       if (!u) {
@@ -202,8 +224,13 @@ export default function LoginPage() {
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Phone (optional)</label>
                   <div className="relative">
-                    <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input value={phone} onChange={e => setPhone(e.target.value)} className="pl-10 h-11 rounded-xl" placeholder="Phone number" />
+                    <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground z-10 pointer-events-none" />
+                    <IndianPhoneInput
+                      value={phone}
+                      onChange={setPhone}
+                      className="pl-10 h-11 rounded-xl"
+                      placeholder="10-digit mobile"
+                    />
                   </div>
                 </div>
               </div>

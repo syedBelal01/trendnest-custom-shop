@@ -13,21 +13,31 @@ export default function ReturnPolicyPage() {
         <h2 className="text-foreground font-semibold text-base mt-6">Eligibility</h2>
         <ul className="list-disc pl-5 space-y-2">
           <li>Items must be unused, in original packaging, with tags attached where applicable.</li>
-          <li>Return requests should be initiated within the timeframe stated at the time of purchase (typically 7–14 days of delivery).</li>
-          <li>Custom or personalized items may not be eligible unless defective or incorrect.</li>
+          <li>
+            Return requests must be submitted from your account within the return window after delivery (default{' '}
+            <strong className="text-foreground">7 days</strong>; the store may configure a different window on the server).
+          </li>
+          <li>Custom or personalized items are not eligible for self-serve returns in the app; contact support for defects or errors.</li>
         </ul>
         <h2 className="text-foreground font-semibold text-base mt-6">How to start a return</h2>
         <p>
-          Contact us at{' '}
+          Sign in, open <Link to="/account/orders" className="text-primary hover:underline">My Orders</Link>, select the
+          delivered order, and use <strong className="text-foreground">Request a return</strong>. You can describe the issue,
+          optionally add photos, and choose a full or partial return. Our team will approve or decline the request; you can
+          track status on the same order page.
+        </p>
+        <p>
+          Need help? Email{' '}
           <a href="mailto:trendnest099@gmail.com" className="text-primary hover:underline">
             trendnest099@gmail.com
-          </a>{' '}
-          or via WhatsApp with your order ID and reason. We&apos;ll confirm next steps.
+          </a>
+          .
         </p>
         <h2 className="text-foreground font-semibold text-base mt-6">Refunds</h2>
         <p>
-          Approved refunds are processed to the original payment method where possible, or as store credit, in line with
-          our team&apos;s confirmation.
+          After your return is received and approved for refund, prepaid (online) orders are refunded via Razorpay to the
+          original payment method when possible. Cash on Delivery orders are recorded as manual refund or store credit in our
+          system after verification.
         </p>
       </div>
       <p className="text-xs text-muted-foreground mt-8">

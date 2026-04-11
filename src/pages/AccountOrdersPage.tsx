@@ -136,7 +136,9 @@ export default function AccountOrdersPage() {
                     to={`/account/orders/${encodeURIComponent(o.id)}`}
                     className="text-xs font-semibold text-primary hover:underline active:opacity-70"
                   >
-                    View tracking →
+                    {o.status === 'shipped' || (o.status === 'packed' && o.shipping?.awb)
+                      ? 'View tracking →'
+                      : 'Order details →'}
                   </Link>
                   {o.shipping?.awb ? (
                     <span className="text-[11px] text-muted-foreground">AWB: {o.shipping.awb}</span>

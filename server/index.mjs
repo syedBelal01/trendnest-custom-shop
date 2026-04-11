@@ -13,6 +13,7 @@ import crypto from 'crypto';
 import Razorpay from 'razorpay';
 import session from 'express-session';
 import MongoStore from 'connect-mongo';
+import { normalizeIndianMobileOrThrow, normalizeIndianMobileOptional } from './indianPhone.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Always load .env from project root (folder above server/), not only from process.cwd()
@@ -22,6 +23,8 @@ const PORT = process.env.PORT || 5000;
 const MONGODB_URI = process.env.MONGODB_URI;
 const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID;
 const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET;
+/** Max days after delivery that a customer may request a return. */
+const RETURN_WINDOW_DAYS = Math.max(1, Math.floor(Number(process.env.RETURN_WINDOW_DAYS || 7)));
 
 // --- Shiprocket (shipping) ---
 const SHIPROCKET_EMAIL = process.env.SHIPROCKET_EMAIL;
@@ -584,6 +587,75 @@ async function validateCouponForCart({ code, subtotal, items, userId }) {
 
 const MAX_CUSTOM_INLINE_BYTES = 500 * 1024;
 const ORDER_STATUSES = ['pending', 'packed', 'shipped', 'delivered'];
+const RETURN_REQUEST_STATUSES = ['requested', 'approved', 'rejected', 'picked_up', 'received', 'refunded'];
+
+const ReturnRequestTimelineSchema = new mongoose.Schema(
+  {
+    at: { type: Date, default: Date.now },
+    action: { type: String, required: true },
+    actor: { type: String, default: '' },
+    note: { type: String, default: '' },
+  },
+  { _id: false }
+);
+
+const ReturnRequestLineSchema = new mongoose.Schema(
+  {
+    lineId: { type: String, required: true },
+    quantity: { type: Number, required: true, min: 1 },
+  },
+  { _id: false }
+);
+
+const ReturnReverseShipmentSchema = new mongoose.Schema(
+  {
+    source: { type: String, enum: ['manual', 'shiprocket'], default: 'manual' },
+    awb: { type: String, default: '' },
+    courierName: { type: String, default: '' },
+    shipmentId: { type: Number, default: undefined },
+    provider: { type: String, default: '' },
+    timeline: { type: [Object], default: [] },
+    webhookDedupeKeys: { type: [String], default: [] },
+  },
+  { _id: false }
+);
+
+const ReturnRefundSchema = new mongoose.Schema(
+  {
+    kind: { type: String, enum: ['razorpay', 'manual', 'store_credit'], default: 'manual' },
+    status: { type: String, enum: ['pending', 'processing', 'completed', 'failed'], default: 'pending' },
+    amount: { type: Number, default: undefined },
+    currency: { type: String, default: 'INR' },
+    razorpayRefundId: { type: String, default: '' },
+    razorpayPaymentId: { type: String, default: '' },
+    error: { type: String, default: '' },
+    processedAt: { type: Date, default: undefined },
+  },
+  { _id: false }
+);
+
+const ReturnRequestSchema = new mongoose.Schema(
+  {
+    returnId: { type: String, required: true },
+    status: { type: String, enum: RETURN_REQUEST_STATUSES, default: 'requested' },
+    scope: { type: String, enum: ['full', 'partial'], default: 'full' },
+    lines: { type: [ReturnRequestLineSchema], default: [] },
+    reason: { type: String, default: '' },
+    images: { type: [String], default: [] },
+    requestedAt: { type: Date, default: Date.now },
+    approvedAt: { type: Date, default: undefined },
+    rejectedAt: { type: Date, default: undefined },
+    pickedUpAt: { type: Date, default: undefined },
+    receivedAt: { type: Date, default: undefined },
+    refundedAt: { type: Date, default: undefined },
+    rejectionReason: { type: String, default: '' },
+    adminNotes: { type: String, default: '' },
+    reverseShipment: { type: ReturnReverseShipmentSchema, default: undefined },
+    refund: { type: ReturnRefundSchema, default: undefined },
+    timeline: { type: [ReturnRequestTimelineSchema], default: [] },
+  },
+  { _id: false }
+);
 
 const OrderLineSchema = new mongoose.Schema(
   {
@@ -690,11 +762,22 @@ const OrderSchema = new mongoose.Schema(
     emailError: String,
     /** When inventory was deducted successfully (prevents double-deduction on retries). */
     stockDeductedAt: Date,
+    returnRequests: { type: [ReturnRequestSchema], default: [] },
   },
   { versionKey: false, timestamps: true }
 );
 
 const Order = mongoose.model('Order', OrderSchema);
+
+/** Tracks idempotent DB migrations (one document per migration id). */
+const AppMigrationSchema = new mongoose.Schema(
+  {
+    _id: { type: String, required: true },
+    ranAt: { type: Date, default: Date.now },
+  },
+  { versionKey: false, collection: 'app_migrations' }
+);
+const AppMigration = mongoose.model('AppMigration', AppMigrationSchema);
 
 // --- Payment sessions (online payments) ---
 const PAYMENT_SESSION_STATUSES = ['pending', 'paid', 'failed', 'cancelled', 'expired'];
@@ -771,6 +854,149 @@ function serializeProductDoc(doc) {
   return o;
 }
 
+function isoDate(d) {
+  if (!d) return undefined;
+  if (d instanceof Date) return d.toISOString();
+  try {
+    const x = new Date(d);
+    return Number.isNaN(x.getTime()) ? undefined : x.toISOString();
+  } catch {
+    return undefined;
+  }
+}
+
+function serializeReturnTimelineEntry(e) {
+  if (!e) return e;
+  return { ...e, at: isoDate(e.at) };
+}
+
+function serializeReturnRequest(r) {
+  if (!r) return null;
+  const rev = r.reverseShipment;
+  return {
+    ...r,
+    requestedAt: isoDate(r.requestedAt),
+    approvedAt: isoDate(r.approvedAt),
+    rejectedAt: isoDate(r.rejectedAt),
+    pickedUpAt: isoDate(r.pickedUpAt),
+    receivedAt: isoDate(r.receivedAt),
+    refundedAt: isoDate(r.refundedAt),
+    timeline: Array.isArray(r.timeline) ? r.timeline.map(serializeReturnTimelineEntry) : [],
+    reverseShipment: rev
+      ? {
+          ...rev,
+          timeline: Array.isArray(rev.timeline) ? rev.timeline.map(serializeReturnTimelineEntry) : [],
+        }
+      : undefined,
+    refund: r.refund
+      ? { ...r.refund, processedAt: isoDate(r.refund.processedAt) }
+      : undefined,
+  };
+}
+
+function stableOrderLineId(item, index) {
+  if (item?.lineId != null && String(item.lineId).trim()) return String(item.lineId).trim();
+  return `idx:${index}`;
+}
+
+function hasBlockingReturn(order) {
+  const block = new Set(['requested', 'approved', 'picked_up', 'received']);
+  const list = Array.isArray(order?.returnRequests) ? order.returnRequests : [];
+  return list.some((x) => block.has(String(x?.status || '')));
+}
+
+function getReturnedQtyByLine(order) {
+  const map = new Map();
+  const list = Array.isArray(order?.returnRequests) ? order.returnRequests : [];
+  for (const ret of list) {
+    if (String(ret?.status) === 'rejected') continue;
+    const lines = Array.isArray(ret?.lines) ? ret.lines : [];
+    for (const ln of lines) {
+      const lid = String(ln?.lineId || '');
+      const q = Math.max(0, Math.floor(Number(ln?.quantity) || 0));
+      if (!lid || !q) continue;
+      map.set(lid, (map.get(lid) || 0) + q);
+    }
+  }
+  return map;
+}
+
+function assertReturnEligible(order) {
+  if (order?.hasCustomPrint) {
+    const e = new Error('Returns are not available for custom print orders');
+    e.statusCode = 400;
+    throw e;
+  }
+  if (String(order?.status || '') !== 'delivered') {
+    const e = new Error('Returns are only available after delivery');
+    e.statusCode = 400;
+    throw e;
+  }
+  const deliveredAt = order?.deliveredAt ? new Date(order.deliveredAt) : null;
+  if (!deliveredAt || Number.isNaN(deliveredAt.getTime())) {
+    const e = new Error('Delivery date is not recorded for this order yet');
+    e.statusCode = 400;
+    throw e;
+  }
+  const deadline = deliveredAt.getTime() + RETURN_WINDOW_DAYS * 86400000;
+  if (Date.now() > deadline) {
+    const e = new Error(`Return window expired (${RETURN_WINDOW_DAYS} days from delivery)`);
+    e.statusCode = 400;
+    throw e;
+  }
+  if (hasBlockingReturn(order)) {
+    const e = new Error('A return is already in progress for this order');
+    e.statusCode = 409;
+    throw e;
+  }
+}
+
+function validateReturnLines(order, bodyLines, scope) {
+  const items = Array.isArray(order?.items) ? order.items : [];
+  const byId = items.map((it, i) => ({ it, id: stableOrderLineId(it, i) }));
+  const returned = getReturnedQtyByLine(order);
+
+  if (scope !== 'partial') {
+    for (const { it, id } of byId) {
+      const already = returned.get(id) || 0;
+      if (already > 0) {
+        throw new Error('Some items were already returned; use a partial return for remaining quantities');
+      }
+    }
+    return byId.map(({ it, id }) => ({
+      lineId: id,
+      quantity: Math.max(0, Math.floor(Number(it.quantity) || 0)),
+    }));
+  }
+
+  if (!Array.isArray(bodyLines) || bodyLines.length === 0) {
+    throw new Error('Select at least one item and quantity to return');
+  }
+  const out = [];
+  for (const row of bodyLines) {
+    const lid = String(row?.lineId || '').trim();
+    const qty = Math.max(0, Math.floor(Number(row?.quantity) || 0));
+    const hit = byId.find((x) => x.id === lid);
+    if (!hit) throw new Error(`Invalid line: ${lid}`);
+    const maxQ = (Number(hit.it.quantity) || 0) - (returned.get(lid) || 0);
+    if (qty <= 0 || qty > maxQ) throw new Error(`Invalid quantity for line ${lid}`);
+    out.push({ lineId: lid, quantity: qty });
+  }
+  return out;
+}
+
+function computeReturnGoodsRefund(order, lines) {
+  const items = Array.isArray(order?.items) ? order.items : [];
+  let sum = 0;
+  for (const ln of lines || []) {
+    const idx = items.findIndex((it, i) => stableOrderLineId(it, i) === String(ln.lineId));
+    if (idx < 0) continue;
+    const it = items[idx];
+    sum += (Number(it.price) || 0) * (Number(ln.quantity) || 0);
+  }
+  return Math.max(0, Math.round(sum * 100) / 100);
+}
+
 function serializeOrder(doc) {
   if (!doc) return null;
   const o = doc.toObject ? doc.toObject({ flattenMaps: true, versionKey: false }) : { ...doc };
@@ -779,6 +1005,12 @@ function serializeOrder(doc) {
   const out = { id, ...o };
   if (out.createdAt instanceof Date) out.createdAt = out.createdAt.toISOString();
   if (out.updatedAt instanceof Date) out.updatedAt = out.updatedAt.toISOString();
+  if (out.deliveredAt instanceof Date) out.deliveredAt = out.deliveredAt.toISOString();
+  if (out.shippedAt instanceof Date) out.shippedAt = out.shippedAt.toISOString();
+  if (out.paidAt instanceof Date) out.paidAt = out.paidAt.toISOString();
+  if (Array.isArray(out.returnRequests)) {
+    out.returnRequests = out.returnRequests.map(serializeReturnRequest);
+  }
   return out;
 }
 
@@ -1872,22 +2104,91 @@ app.post('/api/webhooks/shiprocket', async (req, res) => {
       return;
     }
 
-    const q = awb
-      ? { 'shipping.awb': awb }
-      : shipmentId
-        ? { 'shipping.shipmentId': shipmentId }
-        : orderRef
-          ? { _id: orderRef }
-          : null;
+    const qForward =
+      awb
+        ? { 'shipping.awb': awb }
+        : shipmentId
+          ? { 'shipping.shipmentId': shipmentId }
+          : orderRef
+            ? { _id: orderRef }
+            : null;
 
-    if (!q) {
+    if (!qForward && !awb) {
       res.json({ ok: true });
       return;
     }
 
-    const order = await Order.findOne(q).lean();
+    let order = qForward ? await Order.findOne(qForward).lean() : null;
+    let webhookKind = 'forward';
+    let matchedReturnId = null;
+
+    if (!order && awb) {
+      order = await Order.findOne({
+        returnRequests: { $elemMatch: { 'reverseShipment.awb': awb } },
+      }).lean();
+      webhookKind = 'reverse';
+      if (order) {
+        const hit = (order.returnRequests || []).find((r) => String(r?.reverseShipment?.awb || '') === awb);
+        matchedReturnId = hit ? String(hit.returnId) : null;
+      }
+    }
+
     if (!order) {
       logJson('info', 'shiprocket.webhook_no_order', { awb, shipmentId, orderRef, status: statusRaw });
+      res.json({ ok: true });
+      return;
+    }
+
+    const timelineEvent = {
+      at: eventAt,
+      kind: webhookKind === 'reverse' ? 'return_tracking_update' : 'tracking_update',
+      status: statusRaw || undefined,
+      awb: awb || undefined,
+      shipmentId: shipmentId || undefined,
+      raw: body,
+      key: eventKey,
+      source: 'shiprocket-webhook',
+      returnId: matchedReturnId || undefined,
+    };
+
+    if (webhookKind === 'reverse' && matchedReturnId) {
+      const ret = (order.returnRequests || []).find((r) => String(r.returnId) === matchedReturnId);
+      const recentRev = Array.isArray(ret?.reverseShipment?.webhookDedupeKeys) ? ret.reverseShipment.webhookDedupeKeys : [];
+      if (recentRev.includes(eventKey)) {
+        logJson('info', 'shiprocket.webhook_dedupe_hit', { orderId: String(order._id), eventKey, kind: 'reverse' });
+        res.json({ ok: true });
+        return;
+      }
+
+      const revEvent = { ...timelineEvent, at: new Date(eventAt) };
+
+      const updateRev = await Order.updateOne(
+        { _id: String(order._id), 'returnRequests.returnId': matchedReturnId },
+        {
+          $set: { 'returnRequests.$[r].reverseShipment.provider': 'shiprocket' },
+          $push: {
+            'returnRequests.$[r].reverseShipment.timeline': revEvent,
+            'returnRequests.$[r].reverseShipment.webhookDedupeKeys': { $each: [eventKey], $slice: -25 },
+            'returnRequests.$[r].timeline': {
+              at: new Date(),
+              action: 'reverse_tracking',
+              actor: 'shiprocket-webhook',
+              note: String(statusRaw || '').slice(0, 500),
+            },
+          },
+        },
+        { arrayFilters: [{ 'r.returnId': matchedReturnId }] }
+      );
+
+      logJson('info', 'shiprocket.webhook_processed', {
+        orderId: String(order._id),
+        matched: updateRev.matchedCount,
+        modified: updateRev.modifiedCount,
+        awb,
+        kind: 'reverse',
+        returnId: matchedReturnId,
+        status: statusRaw,
+      });
       res.json({ ok: true });
       return;
     }
@@ -1898,17 +2199,6 @@ app.post('/api/webhooks/shiprocket', async (req, res) => {
       res.json({ ok: true });
       return;
     }
-
-    const timelineEvent = {
-      at: eventAt,
-      kind: 'tracking_update',
-      status: statusRaw || undefined,
-      awb: awb || undefined,
-      shipmentId: shipmentId || undefined,
-      raw: body,
-      key: eventKey,
-      source: 'shiprocket-webhook',
-    };
 
     // Minimal storefront status mapping (do not regress).
     let nextStatus = null;
@@ -2290,6 +2580,16 @@ app.post('/api/auth/otp/request', async (req, res) => {
       return;
     }
 
+    const phoneHint = req.body?.phone;
+    if (phoneHint != null && String(phoneHint).trim()) {
+      try {
+        normalizeIndianMobileOrThrow(phoneHint);
+      } catch (e) {
+        res.status(400).json({ error: e instanceof Error ? e.message : 'Invalid phone number' });
+        return;
+      }
+    }
+
     if (!['checkout', 'auth', 'password_reset'].includes(purpose)) {
       res.status(400).json({ error: 'Invalid OTP purpose' });
       return;
@@ -2347,6 +2647,14 @@ app.post('/api/auth/otp/verify', async (req, res) => {
       return;
     }
 
+    let normalizedPhone;
+    try {
+      normalizedPhone = normalizeIndianMobileOptional(req.body?.phone);
+    } catch (e) {
+      res.status(400).json({ error: e instanceof Error ? e.message : 'Invalid phone number' });
+      return;
+    }
+
     const challenge = await OtpChallenge.findOne({ challengeId }).exec();
     if (!challenge) {
       res.status(400).json({ error: 'Invalid or expired OTP' });
@@ -2383,7 +2691,7 @@ app.post('/api/auth/otp/verify', async (req, res) => {
           _id: newId,
           email,
           name: String(req.body?.name || '').trim() || '',
-          phone: String(req.body?.phone || '').trim() || undefined,
+          phone: normalizedPhone,
           mustResetPassword: true,
         });
         userId = created._id;
@@ -2399,14 +2707,12 @@ app.post('/api/auth/otp/verify', async (req, res) => {
     // Safety net: backfill missing profile fields from the verified flow.
     if (userId) {
       const name = String(req.body?.name || '').trim();
-      const phoneRaw = String(req.body?.phone || '').trim();
-      const phone = phoneRaw || undefined;
-      if (name || phone) {
+      if (name || normalizedPhone) {
         const existingUser = await User.findById(userId).lean();
         if (existingUser) {
           const $set = {};
           if (name && !String(existingUser.name || '').trim()) $set.name = name;
-          if (phone && !String(existingUser.phone || '').trim()) $set.phone = phone;
+          if (normalizedPhone && !String(existingUser.phone || '').trim()) $set.phone = normalizedPhone;
           if (Object.keys($set).length > 0) {
             await User.updateOne({ _id: userId }, { $set });
           }
@@ -2463,6 +2769,96 @@ app.get('/api/me/orders/:id', mongoReady, requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/me/returns', mongoReady, requireAuth, async (req, res) => {
+  try {
+    const docs = await Order.find({ userId: req.session.userId }).sort({ createdAt: -1 }).lean();
+    const out = [];
+    for (const o of docs) {
+      const list = Array.isArray(o.returnRequests) ? o.returnRequests : [];
+      for (const r of list) {
+        out.push({
+          orderId: String(o._id),
+          orderTotal: o.total,
+          orderStatus: o.status,
+          returnRequest: serializeReturnRequest(r),
+        });
+      }
+    }
+    out.sort((a, b) => String(b.returnRequest?.requestedAt || '').localeCompare(String(a.returnRequest?.requestedAt || '')));
+    res.json({ returns: out });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to load returns' });
+  }
+});
+
+app.post('/api/returns/request', mongoReady, requireAuth, async (req, res) => {
+  try {
+    const orderId = String(req.body?.orderId || '').trim();
+    const reason = String(req.body?.reason || '').trim();
+    const images = Array.isArray(req.body?.images)
+      ? req.body.images.map((u) => String(u).trim()).filter(Boolean).slice(0, 6)
+      : [];
+    const scope = String(req.body?.scope || 'full').toLowerCase() === 'partial' ? 'partial' : 'full';
+    const bodyLines = Array.isArray(req.body?.lines) ? req.body.lines : null;
+
+    if (!orderId || reason.length < 10) {
+      res.status(400).json({ error: 'orderId and reason (at least 10 characters) are required' });
+      return;
+    }
+
+    const order = await Order.findOne({ _id: orderId, userId: req.session.userId }).lean();
+    if (!order) {
+      res.status(404).json({ error: 'Order not found' });
+      return;
+    }
+
+    try {
+      assertReturnEligible(order);
+    } catch (err) {
+      const code = Number(err.statusCode) || 400;
+      res.status(code).json({ error: err.message || 'Not eligible for return' });
+      return;
+    }
+
+    let normLines;
+    try {
+      normLines = validateReturnLines(order, bodyLines, scope);
+    } catch (err) {
+      res.status(400).json({ error: err.message || 'Invalid return lines' });
+      return;
+    }
+
+    const totalQty = normLines.reduce((a, l) => a + (Number(l.quantity) || 0), 0);
+    if (totalQty <= 0) {
+      res.status(400).json({ error: 'Nothing to return' });
+      return;
+    }
+
+    const isFull = scope !== 'partial';
+
+    const returnId = `RET-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+    const now = new Date();
+    const newRet = {
+      returnId,
+      status: 'requested',
+      scope: isFull ? 'full' : 'partial',
+      lines: normLines,
+      reason,
+      images,
+      requestedAt: now,
+      timeline: [{ at: now, action: 'requested', actor: 'customer', note: '' }],
+    };
+
+    await Order.updateOne({ _id: orderId, userId: req.session.userId }, { $push: { returnRequests: newRet } });
+    const updated = await Order.findById(orderId).lean();
+    res.status(201).json({ order: serializeOrder(updated) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to submit return request' });
+  }
+});
+
 app.get('/api/me/profile', mongoReady, requireAuth, async (req, res) => {
   try {
     const u = await User.findById(req.session.userId).lean();
@@ -2476,12 +2872,26 @@ app.get('/api/me/profile', mongoReady, requireAuth, async (req, res) => {
 app.patch('/api/me/profile', mongoReady, requireAuth, async (req, res) => {
   try {
     const name = req.body?.name != null ? String(req.body.name).trim() : undefined;
-    const phone = req.body?.phone != null ? String(req.body.phone).trim() : undefined;
+    const phoneRaw = req.body?.phone != null ? String(req.body.phone).trim() : undefined;
     const $set = {};
+    const $unset = {};
     if (name !== undefined) $set.name = name;
-    if (phone !== undefined) $set.phone = phone || undefined;
-    if (Object.keys($set).length > 0) {
-      await User.updateOne({ _id: req.session.userId }, { $set });
+    if (phoneRaw !== undefined) {
+      if (!phoneRaw) {
+        $unset.phone = '';
+      } else {
+        try {
+          $set.phone = normalizeIndianMobileOrThrow(phoneRaw);
+        } catch (e) {
+          res.status(400).json({ error: e instanceof Error ? e.message : 'Invalid phone number' });
+          return;
+        }
+      }
+    }
+    const hasSet = Object.keys($set).length > 0;
+    const hasUnset = Object.keys($unset).length > 0;
+    if (hasSet || hasUnset) {
+      await User.updateOne({ _id: req.session.userId }, { ...(hasSet ? { $set } : {}), ...(hasUnset ? { $unset } : {}) });
     }
     const u = await User.findById(req.session.userId).lean();
     res.json({ user: u ? serializeUser(u) : null });
@@ -2687,14 +3097,20 @@ app.post('/api/me/addresses', mongoReady, requireAuth, async (req, res) => {
   try {
     const label = String(req.body?.label || 'Home').trim();
     const recipientName = String(req.body?.recipientName || '').trim();
-    const recipientPhone = String(req.body?.recipientPhone || '').trim();
     const address = String(req.body?.address || '').trim();
     const city = String(req.body?.city || '').trim();
     const state = req.body?.state != null ? String(req.body.state).trim() : '';
     const pincode = String(req.body?.pincode || '').trim();
     const isDefault = !!req.body?.isDefault;
-    if (!recipientName || !recipientPhone) {
+    if (!recipientName) {
       res.status(400).json({ error: 'Recipient name and phone are required' });
+      return;
+    }
+    let recipientPhone;
+    try {
+      recipientPhone = normalizeIndianMobileOrThrow(req.body?.recipientPhone);
+    } catch (e) {
+      res.status(400).json({ error: e instanceof Error ? e.message : 'Invalid phone number' });
       return;
     }
     if (!address || !city || !pincode) {
@@ -2744,13 +3160,21 @@ app.patch('/api/me/addresses/:id', mongoReady, requireAuth, async (req, res) => 
       return;
     }
     const cur = u.addresses[idx];
+    let recipientPhone = cur.recipientPhone;
+    if (req.body?.recipientPhone != null) {
+      try {
+        recipientPhone = normalizeIndianMobileOrThrow(req.body.recipientPhone);
+      } catch (e) {
+        res.status(400).json({ error: e instanceof Error ? e.message : 'Invalid phone number' });
+        return;
+      }
+    }
     const next = {
       ...cur,
       label: req.body?.label != null ? String(req.body.label).trim() : cur.label,
       recipientName:
         req.body?.recipientName != null ? String(req.body.recipientName).trim() : cur.recipientName,
-      recipientPhone:
-        req.body?.recipientPhone != null ? String(req.body.recipientPhone).trim() : cur.recipientPhone,
+      recipientPhone,
       address: req.body?.address != null ? String(req.body.address).trim() : cur.address,
       city: req.body?.city != null ? String(req.body.city).trim() : cur.city,
       state: req.body?.state != null ? String(req.body.state).trim() : cur.state,
@@ -3719,10 +4143,8 @@ function computeAdminFlagsFromOrderLean(o) {
 
   const needsShippingReview = manual || pricingReview || exhausted || quoteFailed || quotePending;
 
-  const method = String(o.paymentMethod || '');
-  const ps = String(o.paymentStatus || '');
-  const paymentPending =
-    balanceDueShip > 0.005 || (method === 'razorpay' && ps === 'paid' && amountDue > 0.005);
+  /** True when money is still owed (COD, prepaid shipping adjustment, etc.). */
+  const paymentPending = balanceDueShip > 0.005 || amountDue > 0.005;
 
   return { needsShippingReview, paymentPending };
 }
@@ -3736,22 +4158,51 @@ async function syncOrderAdminFlags(orderId) {
   await Order.updateOne({ _id: id }, { $set: { needsShippingReview: f.needsShippingReview, paymentPending: f.paymentPending } });
 }
 
+const MIGRATION_FIX_PREPAID_AMOUNT_DUE_ID = 'fix_prepaid_amount_due_v1';
+
+/**
+ * Legacy bug: some Razorpay-paid orders stored amountDue === total (same as amountPaid).
+ * Clear amountDue when the customer already paid at least the current order total; shipping
+ * finalize will reintroduce a positive amountDue if the real total exceeds amountPaid.
+ */
+async function runOneTimeOrderMigrations() {
+  if (mongoose.connection.readyState !== 1) return;
+  try {
+    const already = await AppMigration.findById(MIGRATION_FIX_PREPAID_AMOUNT_DUE_ID).lean();
+    if (already) return;
+
+    const filter = {
+      $expr: {
+        $and: [
+          { $gte: [{ $ifNull: ['$amountPaid', 0] }, '$total'] },
+          { $gt: ['$amountDue', 0.005] },
+        ],
+      },
+    };
+
+    const rows = await Order.find(filter).select('_id').lean();
+    if (rows.length) {
+      await Order.updateMany(filter, { $set: { amountDue: 0 } });
+      logJson('info', 'migration.fix_prepaid_amount_due', { updated: rows.length });
+      for (const row of rows) {
+        await syncOrderAdminFlags(String(row._id));
+      }
+    }
+
+    await AppMigration.create({ _id: MIGRATION_FIX_PREPAID_AMOUNT_DUE_ID, ranAt: new Date() });
+    console.log(`Migration ${MIGRATION_FIX_PREPAID_AMOUNT_DUE_ID}: done (${rows.length} order(s) adjusted)`);
+  } catch (e) {
+    if (e && e.code === 11000) return;
+    console.error('Order migration failed:', e);
+  }
+}
+
 function logIntegrationNotifyPending(fields) {
   logJson('info', 'integration.order.notify_pending', {
     hook: 'sms_email_future',
     channel: 'order_ops',
     ...fields,
   });
-}
-
-function shipQuoteHasValidEta(ship) {
-  if (!ship || ship.ok !== true) return false;
-  const daysOk = ship.estimatedDeliveryDays != null && Number.isFinite(Number(ship.estimatedDeliveryDays));
-  const dateOk =
-    ship.estimatedDeliveryDate &&
-    String(ship.estimatedDeliveryDate).trim() &&
-    !Number.isNaN(new Date(ship.estimatedDeliveryDate).getTime());
-  return daysOk || dateOk;
 }
 
 function cloneShipForStorage(ship) {
@@ -4054,11 +4505,12 @@ async function computeServerCheckoutPricing({ req, body, rawItems, paymentMethod
     goodsAfterDiscount,
   });
 
-  const quoteOk = shipQuoteHasValidEta(ship);
   let shippingPlaceholder = false;
   if (!ALLOW_CHECKOUT_WITHOUT_SHIPPING_QUOTE) {
     assertShippingQuoteReadyForCheckout(ship);
-  } else if (!quoteOk) {
+    // Strict checkout: never charge shipping without a quote we trust end-to-end.
+  } else if (!ship?.ok) {
+    // Relaxed: only drop shipping when we truly have no serviceability quote (not merely a stale ETA field).
     shippingPlaceholder = true;
   }
 
@@ -4095,17 +4547,23 @@ app.post('/api/orders', mongoReady, async (req, res) => {
     const c = body.customer || {};
     const name = String(c.name || '').trim();
     const email = String(c.email || '').trim();
-    const phone = String(c.phone || '').trim();
     const address = String(c.address || '').trim();
     const city = String(c.city || '').trim();
     const state = c.state != null ? String(c.state).trim() : '';
     const pincode = String(c.pincode || '').trim();
-    if (!name || !email || !phone || !address || !city || !pincode) {
+    if (!name || !email || !address || !city || !pincode) {
       res.status(400).json({ error: 'All customer fields including email are required.' });
       return;
     }
     if (!simpleEmailValid(email)) {
       res.status(400).json({ error: 'Invalid email address.' });
+      return;
+    }
+    let phone;
+    try {
+      phone = normalizeIndianMobileOrThrow(c.phone);
+    } catch (e) {
+      res.status(400).json({ error: e instanceof Error ? e.message : 'Invalid phone number' });
       return;
     }
 
@@ -4272,17 +4730,23 @@ app.post('/api/payments/razorpay/session', mongoReady, async (req, res) => {
     const c = body.customer || {};
     const name = String(c.name || '').trim();
     const email = String(c.email || '').trim();
-    const phone = String(c.phone || '').trim();
     const address = String(c.address || '').trim();
     const city = String(c.city || '').trim();
     const state = c.state != null ? String(c.state).trim() : '';
     const pincode = String(c.pincode || '').trim();
-    if (!name || !email || !phone || !address || !city || !pincode) {
+    if (!name || !email || !address || !city || !pincode) {
       res.status(400).json({ error: 'All customer fields including email are required.' });
       return;
     }
     if (!simpleEmailValid(email)) {
       res.status(400).json({ error: 'Invalid email address.' });
+      return;
+    }
+    let phone;
+    try {
+      phone = normalizeIndianMobileOrThrow(c.phone);
+    } catch (e) {
+      res.status(400).json({ error: e instanceof Error ? e.message : 'Invalid phone number' });
       return;
     }
 
@@ -4536,7 +5000,11 @@ app.post('/api/payments/razorpay/verify', mongoReady, async (req, res) => {
 
     // Create the actual Order now (confirmed/paid).
     const orderId = `ORD-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const amountDue = Number(session.total ?? 0);
+    const orderTotal = roundMoney2(Number(session.total ?? 0));
+    /** Use captured gateway amount (rupees); must match orderTotal after checks above. */
+    const amountPaid = roundMoney2(payAmount / 100);
+    /** Prepaid full capture: never mirror total into amountDue (that falsely triggers admin / shipment gates). */
+    const amountDue = 0;
     const ph = !!session.shippingPlaceholder;
     if (ph) {
       logJson('warn', 'checkout.order_relaxed_shipping', {
@@ -4562,12 +5030,12 @@ app.post('/api/payments/razorpay/verify', mongoReady, async (req, res) => {
       goodsTotal: session.goodsTotal != null ? Number(session.goodsTotal) : Math.max(0, Number(session.subtotal ?? 0) - Number(session.discount ?? 0)),
       shippingCharge: Number(session.shippingCharge ?? 0),
       freeShippingApplied: !!session.freeShippingApplied,
-      total: Number(session.total ?? 0),
+      total: orderTotal,
       shipping: shippingDoc,
       paymentMethod: 'razorpay',
       paymentStatus: 'paid',
       amountDue,
-      amountPaid: amountDue,
+      amountPaid,
       paidAt: new Date(),
       paymentFailureReason: null,
       razorpayOrderId,
@@ -4704,6 +5172,387 @@ app.patch('/api/orders/:id', mongoReady, adminKeyRequired, async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Failed to update order' });
+  }
+});
+
+app.get('/api/admin/returns', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    const want = String(req.query?.status || '').trim().toLowerCase();
+    const docs = await Order.find({
+      returnRequests: { $exists: true, $ne: [] },
+    })
+      .sort({ updatedAt: -1 })
+      .limit(200)
+      .lean();
+    const rows = [];
+    for (const o of docs) {
+      for (const r of o.returnRequests || []) {
+        if (want && String(r.status) !== want) continue;
+        rows.push({
+          orderId: String(o._id),
+          customer: o.customer,
+          paymentMethod: o.paymentMethod,
+          order: serializeOrder(o),
+          returnRequest: serializeReturnRequest(r),
+        });
+      }
+    }
+    res.json({ returns: rows });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to list returns' });
+  }
+});
+
+app.post('/api/admin/returns/:orderId/:returnId/approve', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    const orderId = String(req.params.orderId || '').trim();
+    const returnId = String(req.params.returnId || '').trim();
+    const adminNotes = String(req.body?.adminNotes || '').trim().slice(0, 2000);
+    const r = await Order.findOneAndUpdate(
+      { _id: orderId, returnRequests: { $elemMatch: { returnId, status: 'requested' } } },
+      {
+        $set: {
+          'returnRequests.$[r].status': 'approved',
+          'returnRequests.$[r].approvedAt': new Date(),
+          'returnRequests.$[r].adminNotes': adminNotes || undefined,
+        },
+        $push: {
+          'returnRequests.$[r].timeline': {
+            at: new Date(),
+            action: 'approved',
+            actor: 'admin',
+            note: adminNotes,
+          },
+        },
+      },
+      { arrayFilters: [{ 'r.returnId': returnId }], new: true }
+    ).lean();
+    if (!r) {
+      res.status(404).json({ error: 'Return not found or not in requested state' });
+      return;
+    }
+    res.json({ order: serializeOrder(r) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to approve return' });
+  }
+});
+
+app.post('/api/admin/returns/:orderId/:returnId/reject', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    const orderId = String(req.params.orderId || '').trim();
+    const returnId = String(req.params.returnId || '').trim();
+    const rejectionReason = String(req.body?.rejectionReason || '').trim().slice(0, 2000);
+    if (!rejectionReason) {
+      res.status(400).json({ error: 'rejectionReason is required' });
+      return;
+    }
+    const r = await Order.findOneAndUpdate(
+      { _id: orderId, returnRequests: { $elemMatch: { returnId, status: 'requested' } } },
+      {
+        $set: {
+          'returnRequests.$[r].status': 'rejected',
+          'returnRequests.$[r].rejectedAt': new Date(),
+          'returnRequests.$[r].rejectionReason': rejectionReason,
+        },
+        $push: {
+          'returnRequests.$[r].timeline': {
+            at: new Date(),
+            action: 'rejected',
+            actor: 'admin',
+            note: rejectionReason,
+          },
+        },
+      },
+      { arrayFilters: [{ 'r.returnId': returnId }], new: true }
+    ).lean();
+    if (!r) {
+      res.status(404).json({ error: 'Return not found or not in requested state' });
+      return;
+    }
+    res.json({ order: serializeOrder(r) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to reject return' });
+  }
+});
+
+app.post('/api/admin/returns/:orderId/:returnId/reverse-shipment', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    const orderId = String(req.params.orderId || '').trim();
+    const returnId = String(req.params.returnId || '').trim();
+    const awb = String(req.body?.awb || '').trim();
+    const courierName = String(req.body?.courierName || '').trim();
+    const source = String(req.body?.source || 'manual').toLowerCase() === 'shiprocket' ? 'shiprocket' : 'manual';
+    if (!awb) {
+      res.status(400).json({ error: 'awb is required' });
+      return;
+    }
+    const order = await Order.findOne({ _id: orderId, 'returnRequests.returnId': returnId }).lean();
+    if (!order) {
+      res.status(404).json({ error: 'Order or return not found' });
+      return;
+    }
+    const ret = (order.returnRequests || []).find((x) => String(x.returnId) === returnId);
+    if (!ret || !['approved', 'picked_up', 'received'].includes(String(ret.status))) {
+      res.status(400).json({ error: 'Return must be approved before adding reverse shipment details' });
+      return;
+    }
+    const r = await Order.findOneAndUpdate(
+      { _id: orderId, 'returnRequests.returnId': returnId },
+      {
+        $set: {
+          'returnRequests.$[r].reverseShipment': {
+            source,
+            awb,
+            courierName: courierName || undefined,
+            timeline: Array.isArray(ret.reverseShipment?.timeline) ? ret.reverseShipment.timeline : [],
+            webhookDedupeKeys: Array.isArray(ret.reverseShipment?.webhookDedupeKeys)
+              ? ret.reverseShipment.webhookDedupeKeys
+              : [],
+          },
+        },
+        $push: {
+          'returnRequests.$[r].timeline': {
+            at: new Date(),
+            action: 'reverse_shipment_set',
+            actor: 'admin',
+            note: `AWB ${awb}${courierName ? ` · ${courierName}` : ''}`,
+          },
+        },
+      },
+      { arrayFilters: [{ 'r.returnId': returnId }], new: true }
+    ).lean();
+    res.json({ order: serializeOrder(r) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to save reverse shipment' });
+  }
+});
+
+app.post('/api/admin/returns/:orderId/:returnId/mark-picked-up', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    const orderId = String(req.params.orderId || '').trim();
+    const returnId = String(req.params.returnId || '').trim();
+    const r = await Order.findOneAndUpdate(
+      { _id: orderId, returnRequests: { $elemMatch: { returnId, status: 'approved' } } },
+      {
+        $set: {
+          'returnRequests.$[r].status': 'picked_up',
+          'returnRequests.$[r].pickedUpAt': new Date(),
+        },
+        $push: {
+          'returnRequests.$[r].timeline': { at: new Date(), action: 'picked_up', actor: 'admin', note: '' },
+        },
+      },
+      { arrayFilters: [{ 'r.returnId': returnId }], new: true }
+    ).lean();
+    if (!r) {
+      res.status(404).json({ error: 'Return not found or not approved' });
+      return;
+    }
+    res.json({ order: serializeOrder(r) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to update return' });
+  }
+});
+
+app.post('/api/admin/returns/:orderId/:returnId/mark-received', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    const orderId = String(req.params.orderId || '').trim();
+    const returnId = String(req.params.returnId || '').trim();
+    const r = await Order.findOneAndUpdate(
+      {
+        _id: orderId,
+        returnRequests: { $elemMatch: { returnId, status: { $in: ['approved', 'picked_up'] } } },
+      },
+      {
+        $set: {
+          'returnRequests.$[r].status': 'received',
+          'returnRequests.$[r].receivedAt': new Date(),
+        },
+        $push: {
+          'returnRequests.$[r].timeline': { at: new Date(), action: 'received', actor: 'admin', note: '' },
+        },
+      },
+      { arrayFilters: [{ 'r.returnId': returnId }], new: true }
+    ).lean();
+    if (!r) {
+      res.status(404).json({ error: 'Return not found or invalid state for received' });
+      return;
+    }
+    res.json({ order: serializeOrder(r) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to update return' });
+  }
+});
+
+app.post('/api/admin/returns/:orderId/:returnId/refund', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    const orderId = String(req.params.orderId || '').trim();
+    const returnId = String(req.params.returnId || '').trim();
+    const order = await Order.findById(orderId).lean();
+    if (!order) {
+      res.status(404).json({ error: 'Order not found' });
+      return;
+    }
+    const ret = (order.returnRequests || []).find((x) => String(x.returnId) === returnId);
+    if (!ret) {
+      res.status(404).json({ error: 'Return not found' });
+      return;
+    }
+    if (String(ret.status) === 'refunded') {
+      res.status(409).json({ error: 'Return already refunded' });
+      return;
+    }
+    if (String(ret.refund?.status) === 'completed') {
+      res.status(409).json({ error: 'Refund already completed' });
+      return;
+    }
+
+    const isPrepaid =
+      String(order.paymentMethod || '') === 'razorpay' && String(order.paymentStatus || '') === 'paid';
+    const kindBody = String(req.body?.kind || '').toLowerCase();
+    const goodsRefund = computeReturnGoodsRefund(order, ret.lines || []);
+
+    if (String(order.paymentMethod || '') === 'razorpay' && !isPrepaid) {
+      res.status(400).json({ error: 'This order is not paid online; use manual refund only after coordination.' });
+      return;
+    }
+
+    if (isPrepaid) {
+      if (String(ret.status) !== 'received') {
+        res.status(400).json({ error: 'Mark the return as received before refunding prepaid orders' });
+        return;
+      }
+      if (!RAZORPAY_KEY_ID || !RAZORPAY_KEY_SECRET) {
+        res.status(503).json({ error: 'Razorpay is not configured' });
+        return;
+      }
+      const paymentId = String(order.razorpayPaymentId || '').trim();
+      if (!paymentId) {
+        res.status(400).json({ error: 'Order has no Razorpay payment id' });
+        return;
+      }
+      const cap = Math.max(0, Number(order.amountPaid) || Number(order.total) || 0);
+      const refundRupees = Math.min(goodsRefund, cap);
+      const amountPaise = Math.round(refundRupees * 100);
+      if (amountPaise <= 0) {
+        res.status(400).json({ error: 'Refund amount is zero' });
+        return;
+      }
+
+      const razorpay = new Razorpay({ key_id: String(RAZORPAY_KEY_ID), key_secret: String(RAZORPAY_KEY_SECRET) });
+      let rf;
+      try {
+        rf = await razorpay.payments.refund(paymentId, { amount: amountPaise, speed: 'normal' });
+      } catch (err) {
+        logJson('error', 'return.refund_razorpay_failed', {
+          orderId,
+          returnId,
+          message: err instanceof Error ? err.message : String(err),
+        });
+        await Order.updateOne(
+          { _id: orderId },
+          {
+            $set: {
+              'returnRequests.$[r].refund': {
+                kind: 'razorpay',
+                status: 'failed',
+                amount: refundRupees,
+                razorpayPaymentId: paymentId,
+                error: err instanceof Error ? err.message.slice(0, 500) : String(err).slice(0, 500),
+              },
+            },
+            $push: {
+              'returnRequests.$[r].timeline': {
+                at: new Date(),
+                action: 'refund_failed',
+                actor: 'admin',
+                note: 'Razorpay refund failed',
+              },
+            },
+          },
+          { arrayFilters: [{ 'r.returnId': returnId }] }
+        );
+        res.status(502).json({ error: err instanceof Error ? err.message : 'Razorpay refund failed' });
+        return;
+      }
+
+      const rid = rf?.id ? String(rf.id) : '';
+      const r2 = await Order.findOneAndUpdate(
+        { _id: orderId, 'returnRequests.returnId': returnId },
+        {
+          $set: {
+            'returnRequests.$[r].status': 'refunded',
+            'returnRequests.$[r].refundedAt': new Date(),
+            'returnRequests.$[r].refund': {
+              kind: 'razorpay',
+              status: 'completed',
+              amount: refundRupees,
+              currency: 'INR',
+              razorpayRefundId: rid,
+              razorpayPaymentId: paymentId,
+              processedAt: new Date(),
+            },
+          },
+          $push: {
+            'returnRequests.$[r].timeline': {
+              at: new Date(),
+              action: 'refunded',
+              actor: 'admin',
+              note: `Razorpay refund ₹${refundRupees}${rid ? ` (${rid})` : ''}`,
+            },
+          },
+        },
+        { arrayFilters: [{ 'r.returnId': returnId }], new: true }
+      ).lean();
+      res.json({ order: serializeOrder(r2) });
+      return;
+    }
+
+    const kind = kindBody === 'store_credit' ? 'store_credit' : 'manual';
+    if (!['approved', 'picked_up', 'received'].includes(String(ret.status))) {
+      res.status(400).json({ error: 'Return must be approved before recording a COD refund' });
+      return;
+    }
+
+    const r2 = await Order.findOneAndUpdate(
+      { _id: orderId, 'returnRequests.returnId': returnId },
+      {
+        $set: {
+          'returnRequests.$[r].status': 'refunded',
+          'returnRequests.$[r].refundedAt': new Date(),
+          'returnRequests.$[r].refund': {
+            kind,
+            status: 'completed',
+            amount: goodsRefund,
+            currency: 'INR',
+            processedAt: new Date(),
+          },
+        },
+        $push: {
+          'returnRequests.$[r].timeline': {
+            at: new Date(),
+            action: 'refunded',
+            actor: 'admin',
+            note: `${kind === 'store_credit' ? 'Store credit' : 'Manual refund'} recorded · ₹${goodsRefund}`,
+          },
+        },
+      },
+      { arrayFilters: [{ 'r.returnId': returnId }], new: true }
+    ).lean();
+    if (!r2) {
+      res.status(404).json({ error: 'Return not found' });
+      return;
+    }
+    res.json({ order: serializeOrder(r2) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to process refund' });
   }
 });
 
@@ -4861,6 +5710,38 @@ app.post('/api/upload/review-image', mongoReady, requireAuth, (req, res, next) =
   stream.end(req.file.buffer);
 });
 
+app.post('/api/upload/return-image', mongoReady, requireAuth, (req, res, next) => {
+  upload.single('image')(req, res, (err) => {
+    if (err) {
+      res.status(400).json({ error: err.message || 'Upload error' });
+      return;
+    }
+    next();
+  });
+}, (req, res) => {
+  if (!cloudName || !cloudKey || !cloudSecret) {
+    res.status(503).json({ error: 'Cloudinary is not configured on the server (.env)' });
+    return;
+  }
+  if (!req.file?.buffer) {
+    res.status(400).json({ error: 'Missing image file (field name: image)' });
+    return;
+  }
+
+  const stream = cloudinary.uploader.upload_stream(
+    { folder: 'trendnest/returns', resource_type: 'image' },
+    (err, result) => {
+      if (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Cloudinary upload failed' });
+        return;
+      }
+      res.json({ url: result.secure_url, publicId: result.public_id });
+    }
+  );
+  stream.end(req.file.buffer);
+});
+
 function mongoReady(_req, res, next) {
   if (mongoose.connection.readyState !== 1) {
     res.status(503).json({ error: 'MongoDB is not connected. Set MONGODB_URI in .env and restart the API server.' });
@@ -4905,6 +5786,7 @@ async function main() {
       await mongoose.connect(MONGODB_URI);
       console.log('MongoDB connected');
       await seedIfEmpty();
+      await runOneTimeOrderMigrations();
     } catch (e) {
       console.error('MongoDB connection failed:', e.message);
     }

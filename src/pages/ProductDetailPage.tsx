@@ -612,7 +612,9 @@ export default function ProductDetailPage() {
                     <div className="flex items-center gap-2 font-semibold">
                       <Package className="h-4 w-4 text-primary" /> Easy returns
                     </div>
-                    <p className="mt-1 text-muted-foreground">If eligible, return within 7 days of delivery.</p>
+                    <p className="mt-1 text-muted-foreground">
+                      Request a return from Account → My Orders after delivery (typically within 7 days; see Return Policy).
+                    </p>
                   </div>
                 </div>
               </TabsContent>

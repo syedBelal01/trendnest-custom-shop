@@ -108,6 +108,67 @@ export interface User {
 }
 
 /** Persisted line item (API / admin). */
+export type ReturnRequestStatus =
+  | 'requested'
+  | 'approved'
+  | 'rejected'
+  | 'picked_up'
+  | 'received'
+  | 'refunded';
+
+export interface ReturnRequestLine {
+  lineId: string;
+  quantity: number;
+}
+
+export interface ReturnRequestTimelineEntry {
+  at?: string;
+  action: string;
+  actor?: string;
+  note?: string;
+}
+
+export interface OrderReturnRefund {
+  kind?: 'razorpay' | 'manual' | 'store_credit';
+  status?: 'pending' | 'processing' | 'completed' | 'failed';
+  amount?: number;
+  currency?: string;
+  razorpayRefundId?: string;
+  razorpayPaymentId?: string;
+  error?: string;
+  processedAt?: string;
+}
+
+export interface OrderReturnReverseShipment {
+  source?: 'manual' | 'shiprocket';
+  awb?: string;
+  courierName?: string;
+  shipmentId?: number;
+  provider?: string;
+  timeline?: Array<Record<string, unknown> & { at?: string }>;
+  webhookDedupeKeys?: string[];
+}
+
+export interface OrderReturnRequest {
+  returnId: string;
+  status: ReturnRequestStatus;
+  scope: 'full' | 'partial';
+  lines: ReturnRequestLine[];
+  reason: string;
+  images: string[];
+  requestedAt?: string;
+  approvedAt?: string;
+  rejectedAt?: string;
+  pickedUpAt?: string;
+  receivedAt?: string;
+  refundedAt?: string;
+  rejectionReason?: string;
+  adminNotes?: string;
+  reverseShipment?: OrderReturnReverseShipment;
+  refund?: OrderReturnRefund;
+  timeline?: ReturnRequestTimelineEntry[];
+}
+
 export interface OrderLineSnapshot {
   lineId?: string;
   productId: string;
@@ -185,6 +246,8 @@ export interface Order {
     cancelledAt?: string;
     [k: string]: any;
   };
+  /** Customer return / refund requests (embedded on order). */
+  returnRequests?: OrderReturnRequest[];
 }
 
 export interface CustomerInfo {

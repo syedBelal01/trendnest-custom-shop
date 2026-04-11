@@ -162,7 +162,7 @@ export default function AdminOrders() {
                   <p className="text-xs text-muted-foreground">
                     Payment: {o.paymentMethod === 'razorpay' ? 'Online' : o.paymentMethod === 'cod' ? 'COD' : '—'}
                     {o.paymentStatus ? ` · ${o.paymentStatus}` : ''}
-                    {o.amountDue != null ? ` · Due ₹${o.amountDue}` : ''}
+                    {o.amountDue != null && o.amountDue > 0.005 ? ` · Due ₹${o.amountDue}` : ''}
                     {o.amountPaid != null && o.amountPaid > 0 ? ` · Paid ₹${o.amountPaid}` : ''}
                   </p>
                 )}

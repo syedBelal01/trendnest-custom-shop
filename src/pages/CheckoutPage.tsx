@@ -54,7 +54,9 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { usePaymentMethod } from '@/contexts/PaymentMethodContext';
 import { useProducts } from '@/contexts/ProductsContext';
-import { fetchShippingServiceabilityApi, type ShippingServiceabilityResult } from '@/lib/shippingApi';
+import { fetchShippingServiceabilityApi, isShippingServiceabilityError, type ShippingServiceabilityResult } from '@/lib/shippingApi';
+import { IndianPhoneInput } from '@/components/forms/IndianPhoneInput';
+import { clampIndianPhoneInput, isCompleteValidIndianMobile, isIndianPhoneValid, validateIndianPhone } from '@/lib/indianPhone';
 
 function itemSummary(i: CartItem): string {
   const parts: string[] = [];
@@ -156,7 +158,7 @@ export default function CheckoutPage() {
     setForm({
       name: (addr.recipientName && addr.recipientName.trim()) || u.name || '',
       email: u.email || '',
-      phone: (addr.recipientPhone && addr.recipientPhone.trim()) || u.phone || '',
+      phone: clampIndianPhoneInput((addr.recipientPhone && addr.recipientPhone.trim()) || u.phone || ''),
       address: addr.address,
       city: addr.city,
       state: addr.state || '',
@@ -168,7 +170,7 @@ export default function CheckoutPage() {
     setForm({
       name: c.name,
       email: c.email,
-      phone: c.phone,
+      phone: clampIndianPhoneInput(c.phone || ''),
       address: c.address,
       city: c.city,
       state: c.state || '',
@@ -220,7 +222,7 @@ export default function CheckoutPage() {
             ...f,
             name: user.name || '',
             email: user.email || '',
-            phone: user.phone || '',
+            phone: clampIndianPhoneInput(user.phone || ''),
           }));
         }
       } catch {
@@ -229,7 +231,7 @@ export default function CheckoutPage() {
           ...f,
           name: user?.name || '',
           email: user?.email || '',
-          phone: user?.phone || '',
+          phone: clampIndianPhoneInput(user?.phone || ''),
         }));
       } finally {
         setAddressBookLoading(false);
@@ -277,6 +279,11 @@ export default function CheckoutPage() {
       toast.error('Recipient name and phone are required');
       return;
     }
+    const recipientPv = validateIndianPhone(editRecipientPhone);
+    if (!isIndianPhoneValid(recipientPv)) {
+      toast.error(recipientPv.error);
+      return;
+    }
     if (!editAddress.trim() || !editCity.trim() || !editPincode.trim()) {
       toast.error('Address, city, and pincode are required');
       return;
@@ -287,7 +294,7 @@ export default function CheckoutPage() {
         const list = await addAddressApi({
           label: editLabel.trim() || 'Home',
           recipientName: editRecipientName.trim(),
-          recipientPhone: editRecipientPhone.trim(),
+          recipientPhone: recipientPv.digits,
           address: editAddress.trim(),
           city: editCity.trim(),
           state: editState.trim() || undefined,
@@ -305,7 +312,7 @@ export default function CheckoutPage() {
         const list = await addAddressApi({
           label: editLabel.trim() || 'Home',
           recipientName: editRecipientName.trim(),
-          recipientPhone: editRecipientPhone.trim(),
+          recipientPhone: recipientPv.digits,
           address: editAddress.trim(),
           city: editCity.trim(),
           state: editState.trim() || undefined,
@@ -323,7 +330,7 @@ export default function CheckoutPage() {
         const list = await updateAddressApi(editingId, {
           label: editLabel.trim() || 'Home',
           recipientName: editRecipientName.trim(),
-          recipientPhone: editRecipientPhone.trim(),
+          recipientPhone: recipientPv.digits,
           address: editAddress.trim(),
           city: editCity.trim(),
           state: editState.trim() || undefined,
@@ -517,7 +524,7 @@ export default function CheckoutPage() {
       window.clearTimeout(t);
       setShippingQuoteLoading(false);
     };
-  }, [form.pincode, paymentMethod, items, totalsForPaymentMethod]);
+  }, [form.pincode, paymentMethod, items, discount, totalsForPaymentMethod]);
 
   // Background check: if email exists, skip OTP. If new email, auto-send OTP.
   useEffect(() => {
@@ -558,10 +565,11 @@ export default function CheckoutPage() {
           lastOtpEmail.current = email;
           setOtpBusy(true);
           try {
+            const pv = validateIndianPhone(form.phone);
             const { challengeId } = await requestCheckoutOtpApi({
               email,
               name: form.name,
-              phone: form.phone,
+              phone: pv.ok ? pv.digits : undefined,
             });
             setOtpChallengeId(challengeId);
             setOtpVerified(false);
@@ -580,7 +588,16 @@ export default function CheckoutPage() {
   }, [form.email]);
 
   const deliveryValid = useMemo(() => {
-    return !!(form.name && form.email && form.phone && form.address && form.city && form.pincode && simpleEmailValid(form.email));
+    return !!(
+      form.name &&
+      form.email &&
+      form.phone &&
+      isCompleteValidIndianMobile(form.phone) &&
+      form.address &&
+      form.city &&
+      form.pincode &&
+      simpleEmailValid(form.email)
+    );
   }, [form]);
 
   const handleVerifyOtp = async (e: React.FormEvent) => {
@@ -593,13 +610,18 @@ export default function CheckoutPage() {
       toast.error('Enter the OTP code.');
       return;
     }
+    const checkoutPhone = validateIndianPhone(form.phone);
+    if (!isIndianPhoneValid(checkoutPhone)) {
+      toast.error(checkoutPhone.error);
+      return;
+    }
     setOtpBusy(true);
     try {
       await verifyOtpApi({
         challengeId: otpChallengeId,
         code: otpCode,
         name: form.name,
-        phone: form.phone,
+        phone: checkoutPhone.digits,
       });
       setOtpVerified(true);
       setCheckoutPasswordSaved(false);
@@ -650,6 +672,11 @@ export default function CheckoutPage() {
       toast.error('Please fill all required fields');
       return;
     }
+    const phoneCheck = validateIndianPhone(form.phone);
+    if (!isIndianPhoneValid(phoneCheck)) {
+      toast.error(phoneCheck.error);
+      return;
+    }
     if (otpRequired && !otpVerified) {
       toast.error('Please verify the OTP sent to your email');
       return;
@@ -658,13 +685,17 @@ export default function CheckoutPage() {
       toast.error('Wait for shipping cost and delivery estimate before placing your order.');
       return;
     }
+    if (shippingQuoteLoading) {
+      toast.error('Wait for shipping cost and delivery estimate to finish updating.');
+      return;
+    }
     setSubmitting(true);
     try {
       const computed = totalsForPaymentMethod(paymentMethod);
       const shipAdd = shippingQuoteHasEta ? Number(shippingQuote?.shippingCharge) || 0 : 0;
       const payableTotal = computed.total + shipAdd;
       const payload = {
-        customer: { ...form, email: form.email.trim() },
+        customer: { ...form, email: form.email.trim(), phone: phoneCheck.digits },
         items: cartItemsToOrderLines(items).map((l, idx) => ({ ...l, price: unitPriceForItem(items[idx], paymentMethod) })),
         subtotal: computed.subtotal,
         discount,
@@ -697,10 +728,14 @@ export default function CheckoutPage() {
         prefill: {
           name: form.name,
           email: form.email.trim(),
-          contact: form.phone,
+          contact: phoneCheck.digits,
         },
         notes: { sessionId: rp.sessionId },
-        handler: async (resp: any) => {
+        handler: async (resp: {
+          razorpay_order_id: string;
+          razorpay_payment_id: string;
+          razorpay_signature: string;
+        }) => {
           try {
             const verified = await verifyRazorpayPaymentApi({
               sessionId: rp.sessionId,
@@ -725,7 +760,7 @@ export default function CheckoutPage() {
         },
       };
 
-      const RazorpayCtor = (window as any).Razorpay;
+      const RazorpayCtor = window.Razorpay;
       if (!RazorpayCtor) throw new Error('Razorpay is not available');
       const rzp = new RazorpayCtor(options);
       rzp.on?.('payment.failed', () => {
@@ -787,7 +822,15 @@ export default function CheckoutPage() {
             <>
               <Input placeholder="Full Name" value={form.name} onChange={e => set('name', e.target.value)} required className="h-11 sm:h-10" />
               <Input placeholder="Email" type="email" autoComplete="email" value={form.email} onChange={e => set('email', e.target.value)} required className="h-11 sm:h-10" />
-              <Input placeholder="Phone Number" type="tel" value={form.phone} onChange={e => set('phone', e.target.value)} required className="h-11 sm:h-10" />
+              <div className="space-y-1">
+                <IndianPhoneInput
+                  placeholder="10-digit mobile"
+                  value={form.phone}
+                  onChange={v => set('phone', v)}
+                  required
+                  className="h-11 sm:h-10"
+                />
+              </div>
             </>
           ) : (
             <div className="space-y-1.5">
@@ -964,11 +1007,13 @@ export default function CheckoutPage() {
                           <div
                             role="button"
                             tabIndex={0}
-                            onClick={() => user && selectDeliveryOption(key, savedAddresses, lastOrderCustomer, user)}
+                            onClick={() => {
+                              if (user) selectDeliveryOption(key, savedAddresses, lastOrderCustomer, user);
+                            }}
                             onKeyDown={e => {
                               if (e.key === 'Enter' || e.key === ' ') {
                                 e.preventDefault();
-                                user && selectDeliveryOption(key, savedAddresses, lastOrderCustomer, user);
+                                if (user) selectDeliveryOption(key, savedAddresses, lastOrderCustomer, user);
                               }
                             }}
                             className={`w-full text-left px-4 py-3.5 cursor-pointer transition-colors ${
@@ -1252,7 +1297,7 @@ export default function CheckoutPage() {
                     ? `Place Order — ₹${payableGrandTotal}`
                     : shippingQuoteLoading
                       ? 'Calculating shipping…'
-                      : shippingQuote && !shippingQuote.ok
+                      : isShippingServiceabilityError(shippingQuote)
                         ? shippingQuote.reason === 'not_serviceable'
                           ? 'Delivery not available'
                           : 'Shipping unavailable'
@@ -1264,7 +1309,7 @@ export default function CheckoutPage() {
             <p className="text-xs text-muted-foreground mt-2 text-center">
               {shippingQuoteLoading
                 ? 'Calculating shipping and delivery estimate…'
-                : shippingQuote && !shippingQuote.ok
+                : isShippingServiceabilityError(shippingQuote)
                   ? shippingQuote.reason === 'not_serviceable'
                     ? 'We cannot deliver to this pincode. Try a different address.'
                     : 'Could not load shipping rates. Check the pincode or try again shortly.'
@@ -1311,7 +1356,7 @@ export default function CheckoutPage() {
                         : `₹${shippingQuote.shippingCharge}`
                       : allowRelaxedShipping === true
                         ? '—'
-                        : shippingQuote?.reason === 'not_serviceable'
+                        : isShippingServiceabilityError(shippingQuote) && shippingQuote.reason === 'not_serviceable'
                           ? 'N/A'
                           : '—'}
                 </span>
@@ -1390,13 +1435,7 @@ export default function CheckoutPage() {
               <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Phone number
               </label>
-              <Input
-                value={editRecipientPhone}
-                onChange={e => setEditRecipientPhone(e.target.value)}
-                placeholder="Phone"
-                type="tel"
-                className="h-10"
-              />
+              <IndianPhoneInput value={editRecipientPhone} onChange={setEditRecipientPhone} className="h-10" />
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Street / area</label>

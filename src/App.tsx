@@ -21,6 +21,7 @@ import AdminProducts from "@/pages/admin/AdminProducts";
 import AdminProductDraftsPage from "@/pages/admin/AdminProductDraftsPage";
 import AdminProductWizardPage from "@/pages/admin/AdminProductWizardPage";
 import AdminOrders from "@/pages/admin/AdminOrders";
+import AdminReturns from "@/pages/admin/AdminReturns";
 import AdminCoupons from "@/pages/admin/AdminCoupons";
 import AdminCustomPrints from "@/pages/admin/AdminCustomPrints";
 import AdminCustomers from "@/pages/admin/AdminCustomers";
@@ -116,6 +117,7 @@ const App = () => (
                   <Route path="products/drafts" element={<AdminProductDraftsPage />} />
                   <Route path="products/draft/:draftId/step/:step" element={<AdminProductWizardPage />} />
                   <Route path="orders" element={<AdminOrders />} />
+                  <Route path="returns" element={<AdminReturns />} />
                   <Route path="coupons" element={<AdminCoupons />} />
                   <Route path="custom-prints" element={<AdminCustomPrints />} />
                   <Route path="customers" element={<AdminCustomers />} />

@@ -25,6 +25,12 @@ export type ShippingServiceabilityResult =
       courierSuggestions?: Array<unknown>;
     };
 
+export function isShippingServiceabilityError(
+  q: ShippingServiceabilityResult | null | undefined
+): q is Extract<ShippingServiceabilityResult, { ok: false }> {
+  return q != null && q.ok === false;
+}
+
 function cartItemsToServiceabilityItems(items: CartItem[]) {
   return items.map(i => ({
     productId: i.product.id,
