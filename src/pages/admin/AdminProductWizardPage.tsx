@@ -326,6 +326,15 @@ function WizardInner({ step }: { step: number }) {
                 onChange={e => updateDraftLocal({ details: { ...details, description: e.target.value } })}
               />
 
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={!!details.isTrending}
+                  onChange={e => updateDraftLocal({ details: { ...details, isTrending: e.target.checked } })}
+                />
+                Trending (shown on Trending category page)
+              </label>
+
               <QuickPrimaryImageUpload />
 
               <ImagesInlineUploader />
@@ -1094,6 +1103,7 @@ function ReviewPublishStep() {
             <div><strong>Stock:</strong> {details.stock != null ? String(details.stock) : '—'}</div>
             <div><strong>Online price:</strong> {details.onlinePrice != null ? `₹${details.onlinePrice}` : '—'}</div>
             <div><strong>COD price:</strong> {details.price != null ? `₹${details.price}` : '—'}</div>
+            <div><strong>Trending:</strong> {details.isTrending ? 'Yes' : 'No'}</div>
           </div>
         </div>
 

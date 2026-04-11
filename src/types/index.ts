@@ -148,8 +148,19 @@ export interface Order {
   updatedAt?: string;
   hasCustomPrint: boolean;
   emailError?: string;
+  /** Admin: shipping/manual/retry/quote attention needed. */
+  needsShippingReview?: boolean;
+  /** Admin: shipping balance or prepaid top-up due. */
+  paymentPending?: boolean;
   shipping?: {
     provider?: string;
+    /** Relaxed checkout: shipping row not yet confirmed against Shiprocket. */
+    estimated?: boolean;
+    finalized?: boolean;
+    quoteRecalcAt?: string;
+    quoteRecalcError?: string;
+    pricingPendingReview?: boolean;
+    balanceDueShipping?: number;
     shiprocketOrderId?: string;
     shipmentId?: number;
     awb?: string;

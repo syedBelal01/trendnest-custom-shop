@@ -12,6 +12,44 @@ export function apiUrl(path: string): string {
   return `${base}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
+export type PublicHealthResponse = {
+  ok?: boolean;
+  mongo?: boolean;
+  cloudinary?: boolean;
+  allowCheckoutWithoutShippingQuote?: boolean;
+};
+
+const PUBLIC_HEALTH_TTL_MS = 60_000;
+let publicHealthCache: { expiresAt: number; data: PublicHealthResponse } | null = null;
+
+const STRICT_HEALTH_FALLBACK: PublicHealthResponse = {
+  ok: false,
+  allowCheckoutWithoutShippingQuote: false,
+};
+
+/**
+ * Unauthenticated; used for checkout relaxed-mode gating. Cached briefly; any fetch failure defaults to strict (no relaxed checkout).
+ */
+export async function fetchPublicHealthApi(): Promise<PublicHealthResponse> {
+  const now = Date.now();
+  if (publicHealthCache && publicHealthCache.expiresAt > now) {
+    return publicHealthCache.data;
+  }
+  try {
+    const res = await fetch(apiUrl('/api/health'));
+    const raw = (await res.json().catch(() => ({}))) as PublicHealthResponse;
+    const data: PublicHealthResponse = {
+      ...raw,
+      allowCheckoutWithoutShippingQuote: !!raw.allowCheckoutWithoutShippingQuote,
+    };
+    publicHealthCache = { expiresAt: now + PUBLIC_HEALTH_TTL_MS, data };
+    return data;
+  } catch {
+    publicHealthCache = { expiresAt: now + PUBLIC_HEALTH_TTL_MS, data: STRICT_HEALTH_FALLBACK };
+    return STRICT_HEALTH_FALLBACK;
+  }
+}
+
 export async function uploadProductImage(fileOrBlob: Blob, filename = 'product.jpg'): Promise<string> {
   const fd = new FormData();
   fd.append('image', fileOrBlob, filename);

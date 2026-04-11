@@ -179,11 +179,43 @@ function normalizeProductForEditing(p: Product): Partial<Product> {
 function optionsSummary(p: Product): string {
   const bits: string[] = [];
   if (p.sizes?.length) bits.push(`${p.sizes.length} sizes`);
-  const vCount = p.variantOptions?.length ?? p.variants?.length ?? 0;
-  if (vCount) bits.push(`${vCount} variants`);
+  const vm = p.variantModel;
+  if (vm?.items?.length) {
+    bits.push(`${vm.items.length} SKUs`);
+  } else {
+    const vCount = p.variantOptions?.length ?? p.variants?.length ?? 0;
+    if (vCount) bits.push(`${vCount} variants`);
+  }
   if (p.sleeveTypes?.length) bits.push(`${p.sleeveTypes.length} sleeve`);
   if (p.isCustomPrint) bits.push('custom');
   return bits.join(', ') || '—';
+}
+
+/** One-line variant info for the admin table (variant matrix, option names, or legacy variants). */
+function variantsDisplayText(p: Product): string {
+  const vm = p.variantModel;
+  if (vm && Array.isArray(vm.types) && vm.types.length && Array.isArray(vm.items) && vm.items.length) {
+    const dims = vm.types
+      .map(t => {
+        const n = Array.isArray(t.values) ? t.values.length : 0;
+        return `${t.name} (${n})`;
+      })
+      .join(' · ');
+    return `${dims} — ${vm.items.length} SKU${vm.items.length === 1 ? '' : 's'}`;
+  }
+  const vo = p.variantOptions?.filter(v => (v.name ?? '').trim()) ?? [];
+  if (vo.length) {
+    const names = vo.map(v => v.name).slice(0, 8);
+    const more = vo.length > 8 ? ` +${vo.length - 8}` : '';
+    return names.join(', ') + more;
+  }
+  if (p.variants?.length) {
+    const names = p.variants.slice(0, 8);
+    const more = p.variants.length > 8 ? ` +${p.variants.length - 8}` : '';
+    return names.join(', ') + more;
+  }
+  if (p.sizes?.length) return `${p.sizes.length} sizes (no color/finish options)`;
+  return '—';
 }
 
 // VariantThumbImg moved into VariantOptionsCard (keeps UI consistent across admin flows).
@@ -497,7 +529,8 @@ export default function AdminProducts() {
 
       if (editing.id) {
         const forcedCod = Number(snap.price);
-        await updateProduct(editing.id, {
+        const hasVariantMatrix = !!(snap.variantModel?.items?.length);
+        const patch: Partial<Product> = {
           name: snap.name,
           description: snap.description ?? '',
           price: Number(snap.price),
@@ -508,17 +541,24 @@ export default function AdminProducts() {
           category: snap.category || 'fashion',
           subcategory: snap.subcategory,
           sizes: snap.sizes?.length ? snap.sizes : undefined,
-          variants: variantsList.length ? variantsList : undefined,
-          variantOptions: persistVariantOptions ? variantOptionsIn : [],
           sleeveTypes: sleeveTypes?.length ? sleeveTypes : undefined,
-          stock: Number(snap.stock) || 0,
           rating: Number(snap.rating) || 4,
           reviews: snap.reviews || [],
           isCustomPrint: snap.isCustomPrint,
           isTrending: snap.isTrending,
           tags: snap.tags?.length ? snap.tags : undefined,
           specifications,
-        });
+        };
+        if (hasVariantMatrix) {
+          patch.variantModel = snap.variantModel;
+          patch.sku = snap.sku != null ? String(snap.sku).trim() : '';
+        } else {
+          patch.stock = Number(snap.stock) || 0;
+          patch.sku = snap.sku != null ? String(snap.sku).trim() : '';
+          if (persistVariantOptions) patch.variantOptions = variantOptionsIn;
+          if (variantsList.length) patch.variants = variantsList;
+        }
+        await updateProduct(editing.id, patch);
         toast.success('Product saved to MongoDB');
       } else {
         const forcedCod = Number(snap.price);
@@ -731,7 +771,7 @@ export default function AdminProducts() {
           <thead className="bg-muted text-muted-foreground">
             <tr>
               <th className="text-left p-3">Product</th>
-              <th className="text-left p-3">SKU</th>
+              <th className="text-left p-3 min-w-[140px]">Variants</th>
               <th className="text-left p-3">Category</th>
               <th className="text-left p-3">Price</th>
               <th className="text-left p-3">Stock</th>
@@ -740,18 +780,31 @@ export default function AdminProducts() {
           </thead>
           <tbody>
             {filtered.map(p => {
+              const sum = optionsSummary(p);
+              const subtitle = [p.subcategory, sum !== '—' ? sum : null].filter(Boolean).join(' · ') || '—';
               return (
               <tr key={p.id} className="border-t">
                 <td className="p-3 flex items-center gap-2">
                   <img src={productPrimaryImage(p)} alt="" className="w-8 h-8 rounded object-cover" />
                   <div className="min-w-0">
-                    <div className="truncate max-w-[260px] font-medium">{p.name}</div>
+                    <div className="flex items-center gap-2 min-w-0 max-w-[260px]">
+                      <span className="truncate font-medium">{p.name}</span>
+                      {p.isTrending ? (
+                        <span className="shrink-0 rounded-md bg-primary/10 text-primary text-[10px] px-1.5 py-0.5 font-semibold">
+                          Trending
+                        </span>
+                      ) : null}
+                    </div>
                     <div className="text-[11px] text-muted-foreground truncate max-w-[260px]">
-                      {p.subcategory ? p.subcategory : optionsSummary(p)}
+                      {subtitle}
                     </div>
                   </div>
                 </td>
-                <td className="p-3 font-mono text-xs">{p.sku || (p.variantModel?.items?.find((x: any) => x?.isDefault)?.sku ?? '—')}</td>
+                <td className="p-3 text-xs text-muted-foreground max-w-[220px] align-top">
+                  <span className="line-clamp-3" title={variantsDisplayText(p)}>
+                    {variantsDisplayText(p)}
+                  </span>
+                </td>
                 <td className="p-3 capitalize">
                   <div className="capitalize">{p.category}</div>
                   {p.subcategory ? <div className="text-[11px] text-muted-foreground">{p.subcategory}</div> : null}

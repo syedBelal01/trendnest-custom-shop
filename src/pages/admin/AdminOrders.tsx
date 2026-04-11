@@ -97,6 +97,16 @@ export default function AdminOrders() {
                       Email issue
                     </span>
                   )}
+                  {o.needsShippingReview && (
+                    <span className="text-xs bg-orange-100 text-orange-900 dark:bg-orange-950/50 dark:text-orange-200 px-2 py-0.5 rounded-full font-medium">
+                      Shipping review
+                    </span>
+                  )}
+                  {o.paymentPending && (
+                    <span className="text-xs bg-rose-100 text-rose-900 dark:bg-rose-950/50 dark:text-rose-200 px-2 py-0.5 rounded-full font-medium">
+                      Payment pending
+                    </span>
+                  )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <Button

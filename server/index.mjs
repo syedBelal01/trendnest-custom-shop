@@ -37,6 +37,28 @@ const SHIPROCKET_DEFAULT_WEIGHT_KG = Number(process.env.SHIPROCKET_DEFAULT_WEIGH
 const SHIPROCKET_DEFAULT_LENGTH_CM = Number(process.env.SHIPROCKET_DEFAULT_LENGTH_CM || 25);
 const SHIPROCKET_DEFAULT_BREADTH_CM = Number(process.env.SHIPROCKET_DEFAULT_BREADTH_CM || 20);
 const SHIPROCKET_DEFAULT_HEIGHT_CM = Number(process.env.SHIPROCKET_DEFAULT_HEIGHT_CM || 5);
+/** After a failed Shiprocket login, skip new auth attempts for this long (reduces load on bad credentials). */
+const SHIPROCKET_AUTH_FAILURE_COOLDOWN_MS = Math.max(
+  10_000,
+  Math.floor(Number(process.env.SHIPROCKET_AUTH_FAILURE_COOLDOWN_MS || 90_000))
+);
+/** Max automated shipment creation attempts (first try + retries) before manualRequired. */
+const SHIPROCKET_SHIPMENT_MAX_ATTEMPTS = Math.max(1, Math.floor(Number(process.env.SHIPROCKET_SHIPMENT_MAX_ATTEMPTS || 4)));
+/** Base delay for exponential backoff between shipment retries (ms). */
+const SHIPROCKET_SHIPMENT_RETRY_BASE_MS = Math.max(500, Math.floor(Number(process.env.SHIPROCKET_SHIPMENT_RETRY_BASE_MS || 2000)));
+/** Cap for shipment retry delay (ms). */
+const SHIPROCKET_SHIPMENT_RETRY_MAX_MS = Math.max(
+  SHIPROCKET_SHIPMENT_RETRY_BASE_MS,
+  Math.floor(Number(process.env.SHIPROCKET_SHIPMENT_RETRY_MAX_MS || 120_000))
+);
+/** When Shiprocket omits a parseable ETD, use this for ETA (days) so checkout can require a complete quote. */
+const SHIPROCKET_FALLBACK_ETA_DAYS = Math.max(1, Math.floor(Number(process.env.SHIPROCKET_FALLBACK_ETA_DAYS || 5)));
+/**
+ * Dev / emergency only: allow COD & Razorpay checkout with ₹0 shipping when Shiprocket is down or not configured.
+ * Production must leave this unset/false so totals always include a real quote.
+ */
+const ALLOW_CHECKOUT_WITHOUT_SHIPPING_QUOTE =
+  (process.env.ALLOW_CHECKOUT_WITHOUT_SHIPPING_QUOTE || '').trim().toLowerCase() === 'true';
 
 const SHIPROCKET_BASE_URL = 'https://apiv2.shiprocket.in/v1/external';
 
@@ -47,6 +69,29 @@ const shiprocketTokenCache = {
   // token is typically valid for ~10 days, but we refresh conservatively.
   expiresAtMs: 0,
 };
+
+/** Recent auth failures — avoid hammering Shiprocket with invalid credentials or network errors. */
+const shiprocketAuthFailureCache = {
+  untilMs: 0,
+  reason: /** @type {string} */ (''),
+};
+
+function recordShiprocketAuthFailure(reason) {
+  const until = Date.now() + SHIPROCKET_AUTH_FAILURE_COOLDOWN_MS;
+  shiprocketAuthFailureCache.untilMs = until;
+  shiprocketAuthFailureCache.reason = String(reason || 'auth_error').slice(0, 300);
+  logJson('warn', 'shiprocket.auth_cooldown_armed', {
+    untilMs: until,
+    cooldownMs: SHIPROCKET_AUTH_FAILURE_COOLDOWN_MS,
+    reason: shiprocketAuthFailureCache.reason,
+    trace: 'credentials_invalid_or_network',
+  });
+}
+
+function clearShiprocketAuthFailure() {
+  shiprocketAuthFailureCache.untilMs = 0;
+  shiprocketAuthFailureCache.reason = '';
+}
 
 function logJson(level, event, fields) {
   const base = {
@@ -79,7 +124,18 @@ function clampNum(n, { min = 0, max = Number.POSITIVE_INFINITY } = {}) {
 }
 
 async function shiprocketLogin() {
+  const now = Date.now();
+  if (shiprocketAuthFailureCache.untilMs > now) {
+    const err = new Error(
+      shiprocketAuthFailureCache.reason || `Shiprocket auth paused until ${new Date(shiprocketAuthFailureCache.untilMs).toISOString()}`
+    );
+    err.code = 'SHIPROCKET_AUTH_COOLDOWN';
+    err.untilMs = shiprocketAuthFailureCache.untilMs;
+    logJson('warn', 'shiprocket.auth_skip_cooldown', { untilMs: shiprocketAuthFailureCache.untilMs });
+    throw err;
+  }
   if (!SHIPROCKET_EMAIL || !SHIPROCKET_PASSWORD) {
+    logJson('warn', 'shiprocket.login_skipped_no_credentials', { trace: 'set_SHIPROCKET_EMAIL_and_PASSWORD' });
     throw new Error('Shiprocket is not configured (missing SHIPROCKET_EMAIL / SHIPROCKET_PASSWORD).');
   }
   const controller = new AbortController();
@@ -95,22 +151,32 @@ async function shiprocketLogin() {
     if (!res.ok) {
       const msg = typeof data?.message === 'string' ? data.message : 'Shiprocket auth failed';
       logJson('error', 'shiprocket.auth_failed', { status: res.status, message: msg });
+      recordShiprocketAuthFailure(msg);
       throw new Error(msg);
     }
     const token = String(data?.token || '').trim();
-    if (!token) throw new Error('Shiprocket auth returned no token');
-    const now = Date.now();
+    if (!token) {
+      recordShiprocketAuthFailure('Shiprocket auth returned no token');
+      throw new Error('Shiprocket auth returned no token');
+    }
+    clearShiprocketAuthFailure();
     shiprocketTokenCache.token = token;
-    shiprocketTokenCache.obtainedAtMs = now;
+    shiprocketTokenCache.obtainedAtMs = Date.now();
     // Prefer API-provided expiry if present; otherwise refresh after 9 days (token typically 10 days).
     const expiresInSec = Number(data?.expires_in ?? data?.expiresIn ?? NaN);
     if (Number.isFinite(expiresInSec) && expiresInSec > 60) {
-      shiprocketTokenCache.expiresAtMs = now + expiresInSec * 1000;
+      shiprocketTokenCache.expiresAtMs = Date.now() + expiresInSec * 1000;
     } else {
-      shiprocketTokenCache.expiresAtMs = now + 9 * 24 * 60 * 60_000;
+      shiprocketTokenCache.expiresAtMs = Date.now() + 9 * 24 * 60 * 60_000;
     }
     logJson('info', 'shiprocket.auth_ok', { expiresAtMs: shiprocketTokenCache.expiresAtMs });
     return token;
+  } catch (e) {
+    if (e?.code === 'SHIPROCKET_AUTH_COOLDOWN') throw e;
+    if (Date.now() < shiprocketAuthFailureCache.untilMs) throw e;
+    const msg = e instanceof Error ? e.message : String(e);
+    recordShiprocketAuthFailure(msg);
+    throw e;
   } finally {
     clearTimeout(t);
   }
@@ -591,9 +657,25 @@ const OrderSchema = new mongoose.Schema(
         courierSelection: { type: Object, default: undefined },
         rto: { type: Object, default: undefined },
         cancelledAt: { type: Date, default: undefined },
+        /** True when shippingCharge/total used ₹0 placeholder (relaxed checkout); cleared after recalc. */
+        estimated: { type: Boolean, default: undefined },
+        /** True when serviceability-based shipping amount is locked in (checkout quote or post-recalc). */
+        finalized: { type: Boolean, default: undefined },
+        quoteRecalcAt: { type: Date, default: undefined },
+        quoteRecalcError: { type: String, default: undefined },
+        /** Set when final shipping exceeds what was collected (esp. prepaid relaxed orders). */
+        pricingPendingReview: { type: Boolean, default: undefined },
+        balanceDueShipping: { type: Number, default: undefined },
+        shipmentAttemptCount: { type: Number, default: 0 },
+        shipmentLastFailureAt: { type: Date, default: undefined },
+        lastUpdatedAt: { type: Date, default: undefined },
       },
       default: undefined,
     },
+    /** Admin queue: shipping/manual/retry/quote issues. */
+    needsShippingReview: { type: Boolean, default: false },
+    /** Admin queue: unpaid shipping balance or prepaid amount due after adjustment. */
+    paymentPending: { type: Boolean, default: false },
     hasCustomPrint: { type: Boolean, default: false },
     status: {
       type: String,
@@ -639,6 +721,10 @@ const PaymentSessionSchema = new mongoose.Schema(
     paidAt: Date,
     orderId: String, // created Order._id after payment success
     error: String,
+    /** Relaxed checkout: order created with provisional ₹0 shipping until Shiprocket recalc. */
+    shippingPlaceholder: { type: Boolean, default: false },
+    /** Snapshot of `resolveShippingChargeForPricing` result when checkout had a real quote (for Order shipping doc). */
+    shippingQuoteSnapshot: { type: Object, default: undefined },
   },
   { versionKey: false, timestamps: true }
 );
@@ -969,6 +1055,35 @@ async function ensureShiprocketShipmentForOrderId(orderId, source = 'system') {
   const id = String(orderId || '').trim();
   if (!id) return;
 
+  if (!shiprocketConfigured()) {
+    logJson('warn', 'shiprocket.shipment_skipped_no_config', {
+      orderId: id,
+      source,
+      trace: 'missing_credentials_or_pickup',
+    });
+    return;
+  }
+
+  const preCheck = await Order.findById(id).lean();
+  if (!preCheck) return;
+  if (preCheck?.shipping?.shipmentCreatedAt || preCheck?.shipping?.shipmentId) return;
+
+  const blockPre = shipmentBlockedByPaymentOrQuote(preCheck);
+  if (blockPre.blocked) {
+    logJson('warn', 'shiprocket.shipment_blocked', {
+      orderId: id,
+      source,
+      reason: blockPre.reason,
+      trace: 'payment_or_quote_gate',
+    });
+    logIntegrationNotifyPending({
+      event: 'shipment_deferred',
+      orderId: id,
+      deferReason: blockPre.reason,
+    });
+    return;
+  }
+
   // Atomic claim: only one actor can request shipment creation.
   const claimed = await Order.findOneAndUpdate(
     {
@@ -1000,11 +1115,42 @@ async function ensureShiprocketShipmentForOrderId(orderId, source = 'system') {
   if (!claimed) return;
 
   try {
-    logJson('info', 'shiprocket.shipment_start', { orderId: id, source });
     const orderLean = await Order.findById(id).lean();
     if (!orderLean) return;
     if (orderLean?.shipping?.shipmentCreatedAt || orderLean?.shipping?.shipmentId) return;
 
+    const blockPost = shipmentBlockedByPaymentOrQuote(orderLean);
+    if (blockPost.blocked) {
+      logJson('warn', 'shiprocket.shipment_blocked_after_claim', {
+        orderId: id,
+        source,
+        reason: blockPost.reason,
+      });
+      logIntegrationNotifyPending({
+        event: 'shipment_deferred',
+        orderId: id,
+        deferReason: blockPost.reason,
+      });
+      await Order.updateOne(
+        { _id: id },
+        {
+          $unset: { 'shipping.shipmentRequestedAt': 1 },
+          $set: { 'shipping.lastUpdatedAt': new Date() },
+          $push: {
+            'shipping.timeline': {
+              at: new Date().toISOString(),
+              kind: 'shipment_blocked',
+              source,
+              status: blockPost.reason,
+            },
+          },
+        }
+      );
+      await syncOrderAdminFlags(id);
+      return;
+    }
+
+    logJson('info', 'shiprocket.shipment_start', { orderId: id, source });
     const created = await createShiprocketShipmentForOrderDoc({ ...orderLean, _id: id });
     const $set = {
       'shipping.provider': 'shiprocket',
@@ -1020,6 +1166,8 @@ async function ensureShiprocketShipmentForOrderId(orderId, source = 'system') {
       'shipping.manualRequired': false,
       'shipping.manualReason': undefined,
       'shipping.error': undefined,
+      'shipping.shipmentAttemptCount': 0,
+      'shipping.shipmentLastFailureAt': undefined,
     };
     await Order.updateOne(
       { _id: id, 'shipping.shipmentCreatedAt': { $exists: false } },
@@ -1037,7 +1185,6 @@ async function ensureShiprocketShipmentForOrderId(orderId, source = 'system') {
       }
     );
 
-    // Optional: move order to 'packed' when shipment exists (do not regress).
     await Order.updateOne(
       { _id: id, status: 'pending' },
       { $set: { status: 'packed' } }
@@ -1049,31 +1196,91 @@ async function ensureShiprocketShipmentForOrderId(orderId, source = 'system') {
       courierName: created.courierName,
       source,
     });
+    await syncOrderAdminFlags(id);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    logJson('error', 'shiprocket.shipment_failed', { orderId: id, source, message: msg });
-    await Order.updateOne(
-      { _id: id },
-      {
-        $set: {
-          'shipping.manualRequired': true,
-          'shipping.manualReason': msg,
-          'shipping.error': msg,
-          'shipping.lastUpdatedAt': new Date(),
-        },
-        $unset: {
-          'shipping.shipmentRequestedAt': 1,
-        },
-        $push: {
-          'shipping.timeline': {
-            at: new Date().toISOString(),
-            kind: 'shipment_failed',
-            error: msg,
-            source,
+    const orderAfter = await Order.findById(id).lean();
+    const prevAttempts = Math.max(0, Math.floor(Number(orderAfter?.shipping?.shipmentAttemptCount) || 0));
+    const nextAttempt = prevAttempts + 1;
+    const exhausted = nextAttempt >= SHIPROCKET_SHIPMENT_MAX_ATTEMPTS;
+
+    logJson('error', 'shiprocket.shipment_failed', {
+      orderId: id,
+      source,
+      message: msg,
+      attempt: nextAttempt,
+      maxAttempts: SHIPROCKET_SHIPMENT_MAX_ATTEMPTS,
+      exhausted,
+    });
+
+    if (exhausted) {
+      await Order.updateOne(
+        { _id: id },
+        {
+          $set: {
+            'shipping.manualRequired': true,
+            'shipping.manualReason': `Shipment failed after ${SHIPROCKET_SHIPMENT_MAX_ATTEMPTS} attempts: ${msg}`,
+            'shipping.error': msg,
+            'shipping.shipmentAttemptCount': nextAttempt,
+            'shipping.shipmentLastFailureAt': new Date(),
+            'shipping.lastUpdatedAt': new Date(),
           },
-        },
-      }
-    );
+          $unset: {
+            'shipping.shipmentRequestedAt': 1,
+          },
+          $push: {
+            'shipping.timeline': {
+              at: new Date().toISOString(),
+              kind: 'shipment_failed_exhausted',
+              error: msg,
+              source,
+              attempt: nextAttempt,
+            },
+          },
+        }
+      );
+      logJson('error', 'shiprocket.shipment_retries_exhausted', { orderId: id, attempts: nextAttempt });
+    } else {
+      const delayMs = Math.min(
+        SHIPROCKET_SHIPMENT_RETRY_MAX_MS,
+        SHIPROCKET_SHIPMENT_RETRY_BASE_MS * 2 ** (nextAttempt - 1)
+      );
+      await Order.updateOne(
+        { _id: id },
+        {
+          $set: {
+            'shipping.shipmentAttemptCount': nextAttempt,
+            'shipping.shipmentLastFailureAt': new Date(),
+            'shipping.error': msg,
+            'shipping.manualRequired': false,
+            'shipping.lastUpdatedAt': new Date(),
+          },
+          $unset: {
+            'shipping.shipmentRequestedAt': 1,
+          },
+          $push: {
+            'shipping.timeline': {
+              at: new Date().toISOString(),
+              kind: 'shipment_failed_retry_scheduled',
+              error: msg,
+              source,
+              attempt: nextAttempt,
+              retryInMs: delayMs,
+            },
+          },
+        }
+      );
+      logJson('warn', 'shiprocket.shipment_retry_scheduled', {
+        orderId: id,
+        attempt: nextAttempt,
+        delayMs,
+        source,
+      });
+      setTimeout(() => {
+        void ensureShiprocketShipmentForOrderId(id, `${source}-retry-${nextAttempt}`);
+      }, delayMs);
+    }
+    await syncOrderAdminFlags(id);
   }
 }
 
@@ -1441,6 +1648,8 @@ app.get('/api/health', (_req, res) => {
     ok: true,
     mongo: mongoose.connection.readyState === 1,
     cloudinary: !!(cloudName && cloudKey && cloudSecret),
+    /** When true, storefront may complete checkout without a Shiprocket quote (see ALLOW_CHECKOUT_WITHOUT_SHIPPING_QUOTE). */
+    allowCheckoutWithoutShippingQuote: ALLOW_CHECKOUT_WITHOUT_SHIPPING_QUOTE,
   });
 });
 
@@ -1549,9 +1758,13 @@ async function resolveShippingChargeForPricing({ pincode, cod, pricedLines, good
     const etdStr = cheapest?.etd || '';
     const m = etdStr.match(/(\d+)\s*-\s*(\d+)/) || etdStr.match(/(\d+)/);
     const minDays = m ? Math.max(0, Number(m[1]) || 0) : null;
-    const estimatedDeliveryDays = minDays != null ? minDays : null;
-    const estimatedDeliveryDate =
+    let estimatedDeliveryDays = minDays != null ? minDays : null;
+    let estimatedDeliveryDate =
       estimatedDeliveryDays != null ? new Date(Date.now() + estimatedDeliveryDays * 24 * 60 * 60_000).toISOString() : null;
+    if (estimatedDeliveryDays == null) {
+      estimatedDeliveryDays = SHIPROCKET_FALLBACK_ETA_DAYS;
+      estimatedDeliveryDate = new Date(Date.now() + estimatedDeliveryDays * 24 * 60 * 60_000).toISOString();
+    }
 
     const out = {
       ok: true,
@@ -3434,6 +3647,311 @@ function assertDeclaredMoneyMatches(label, bodyFieldNames, body, serverRupee) {
 }
 
 /**
+ * Blocks COD / prepaid checkout unless Shiprocket returned a serviceable quote with ETA,
+ * unless ALLOW_CHECKOUT_WITHOUT_SHIPPING_QUOTE=true (dev / emergency).
+ */
+function assertShippingQuoteReadyForCheckout(ship) {
+  if (ALLOW_CHECKOUT_WITHOUT_SHIPPING_QUOTE) return;
+  if (!ship || ship.ok !== true) {
+    const reason = ship?.reason;
+    const msg =
+      reason === 'not_serviceable'
+        ? 'Delivery is not available for this pincode. Please check your postal code or contact support.'
+        : reason === 'bad_pincode'
+          ? 'Enter a valid 6-digit delivery pincode before placing your order.'
+          : 'Shipping could not be calculated. Please try again in a moment.';
+    const err = new Error(msg);
+    err.statusCode = 400;
+    throw err;
+  }
+  const daysOk = ship.estimatedDeliveryDays != null && Number.isFinite(Number(ship.estimatedDeliveryDays));
+  const dateOk =
+    ship.estimatedDeliveryDate &&
+    String(ship.estimatedDeliveryDate).trim() &&
+    !Number.isNaN(new Date(ship.estimatedDeliveryDate).getTime());
+  if (!daysOk && !dateOk) {
+    const err = new Error('Shipping estimate is incomplete. Please refresh checkout and try again.');
+    err.statusCode = 400;
+    throw err;
+  }
+}
+
+function roundMoney2(n) {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return 0;
+  return Math.round(x * 100) / 100;
+}
+
+/** Block Shiprocket shipment until payment/shipping adjustments are resolved (strict fulfillment rule). */
+function shipmentBlockedByPaymentOrQuote(orderLean) {
+  const sh = orderLean?.shipping || {};
+  if (sh.pricingPendingReview === true) {
+    return { blocked: true, reason: 'pricing_pending_review' };
+  }
+  const bal = roundMoney2(Number(sh.balanceDueShipping) || 0);
+  if (bal > 0.005) {
+    return { blocked: true, reason: 'balance_due_shipping' };
+  }
+  const method = String(orderLean?.paymentMethod || '');
+  const ps = String(orderLean?.paymentStatus || '');
+  const due = roundMoney2(Number(orderLean?.amountDue) || 0);
+  if (method === 'razorpay' && ps === 'paid' && due > 0.005) {
+    return { blocked: true, reason: 'prepaid_payment_adjustment_unresolved' };
+  }
+  if (sh.estimated === true && sh.finalized !== true) {
+    return { blocked: true, reason: 'shipping_quote_not_finalized' };
+  }
+  return { blocked: false, reason: null };
+}
+
+function computeAdminFlagsFromOrderLean(o) {
+  if (!o) return { needsShippingReview: false, paymentPending: false };
+  const sh = o.shipping || {};
+  const balanceDueShip = roundMoney2(Number(sh.balanceDueShipping) || 0);
+  const amountDue = roundMoney2(Number(o.amountDue) || 0);
+  const pricingReview = !!sh.pricingPendingReview;
+  const manual = !!sh.manualRequired;
+  const attempts = Math.max(0, Math.floor(Number(sh.shipmentAttemptCount) || 0));
+  const exhausted =
+    attempts >= SHIPROCKET_SHIPMENT_MAX_ATTEMPTS && !sh.shipmentCreatedAt && !sh.shipmentId;
+  const quotePending = sh.estimated === true && sh.finalized !== true;
+  const quoteFailed = !!(sh.quoteRecalcError && quotePending);
+
+  const needsShippingReview = manual || pricingReview || exhausted || quoteFailed || quotePending;
+
+  const method = String(o.paymentMethod || '');
+  const ps = String(o.paymentStatus || '');
+  const paymentPending =
+    balanceDueShip > 0.005 || (method === 'razorpay' && ps === 'paid' && amountDue > 0.005);
+
+  return { needsShippingReview, paymentPending };
+}
+
+async function syncOrderAdminFlags(orderId) {
+  const id = String(orderId || '').trim();
+  if (!id) return;
+  const o = await Order.findById(id).lean();
+  if (!o) return;
+  const f = computeAdminFlagsFromOrderLean(o);
+  await Order.updateOne({ _id: id }, { $set: { needsShippingReview: f.needsShippingReview, paymentPending: f.paymentPending } });
+}
+
+function logIntegrationNotifyPending(fields) {
+  logJson('info', 'integration.order.notify_pending', {
+    hook: 'sms_email_future',
+    channel: 'order_ops',
+    ...fields,
+  });
+}
+
+function shipQuoteHasValidEta(ship) {
+  if (!ship || ship.ok !== true) return false;
+  const daysOk = ship.estimatedDeliveryDays != null && Number.isFinite(Number(ship.estimatedDeliveryDays));
+  const dateOk =
+    ship.estimatedDeliveryDate &&
+    String(ship.estimatedDeliveryDate).trim() &&
+    !Number.isNaN(new Date(ship.estimatedDeliveryDate).getTime());
+  return daysOk || dateOk;
+}
+
+function cloneShipForStorage(ship) {
+  if (!ship || typeof ship !== 'object') return {};
+  try {
+    return JSON.parse(JSON.stringify(ship));
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Initial `order.shipping` from checkout: either finalized quote or relaxed placeholder (estimated, not finalized).
+ */
+function buildOrderShippingFromCheckout({ shippingPlaceholder, ship }) {
+  const base = { provider: 'shiprocket' };
+  if (shippingPlaceholder) {
+    return {
+      ...base,
+      estimated: true,
+      finalized: false,
+      serviceability: {
+        ok: false,
+        relaxedCheckout: true,
+        reason: ship?.reason || 'no_quote',
+        error: ship?.error || undefined,
+      },
+    };
+  }
+  const s = ship && typeof ship === 'object' ? ship : {};
+  const edd =
+    s.estimatedDeliveryDate && !Number.isNaN(new Date(s.estimatedDeliveryDate).getTime())
+      ? new Date(s.estimatedDeliveryDate)
+      : undefined;
+  const cheapest = Array.isArray(s.courierSuggestions) && s.courierSuggestions[0];
+  return {
+    ...base,
+    estimated: false,
+    finalized: true,
+    serviceability: {
+      ok: true,
+      atCheckout: true,
+      freeShippingApplied: !!s.freeShippingApplied,
+      quoteId: s.quoteId,
+      courierSuggestions: (s.courierSuggestions || []).slice(0, 5),
+    },
+    estimatedDeliveryDate: edd || undefined,
+    courierName: cheapest?.courierName || undefined,
+  };
+}
+
+/**
+ * Background: replace provisional ₹0 shipping (relaxed mode) with Shiprocket quote; update totals and flags.
+ */
+async function finalizePendingOrderShipping(orderId) {
+  const id = String(orderId || '').trim();
+  if (!id) return;
+  try {
+    const order = await Order.findById(id).lean();
+    if (!order) return;
+    const sh = order.shipping || {};
+    if (sh.finalized === true) return;
+    if (sh.estimated !== true) return;
+
+    const pincode = order.customer?.pincode;
+    const cod = order.paymentMethod === 'cod';
+    const goodsAfterDiscount = roundMoney2(
+      order.goodsTotal != null ? Number(order.goodsTotal) : Math.max(0, Number(order.subtotal || 0) - Number(order.discount || 0))
+    );
+
+    const ship = await resolveShippingChargeForPricing({
+      pincode,
+      cod,
+      pricedLines: order.items || [],
+      goodsAfterDiscount,
+    });
+
+    if (!ship.ok) {
+      await Order.updateOne(
+        { _id: id },
+        {
+          $set: {
+            'shipping.quoteRecalcAt': new Date(),
+            'shipping.quoteRecalcError': String(ship.error || ship.reason || 'unavailable'),
+          },
+        }
+      );
+      logJson('warn', 'order.shipping_recalc_failed', { orderId: id, reason: ship.reason });
+      await syncOrderAdminFlags(id);
+      return;
+    }
+
+    const newCharge = roundMoney2(ship.shippingCharge);
+    const oldCharge = roundMoney2(order.shippingCharge);
+    const newTotal = roundMoney2(goodsAfterDiscount + newCharge);
+    const paid = roundMoney2(order.amountPaid || 0);
+
+    const edd =
+      ship.estimatedDeliveryDate && !Number.isNaN(new Date(ship.estimatedDeliveryDate).getTime())
+        ? new Date(ship.estimatedDeliveryDate)
+        : undefined;
+    const cheapest = Array.isArray(ship.courierSuggestions) && ship.courierSuggestions[0];
+
+    const balance = roundMoney2(newTotal - paid);
+    const prepaidImbalance =
+      String(order.paymentMethod || '') === 'razorpay' && String(order.paymentStatus || '') === 'paid' && balance > 0.005;
+    const codChargeAppeared =
+      String(order.paymentMethod || '') === 'cod' &&
+      newCharge > 0.005 &&
+      oldCharge < 0.005 &&
+      sh.estimated === true;
+
+    const $set = {
+      shippingCharge: newCharge,
+      freeShippingApplied: !!ship.freeShippingApplied,
+      total: newTotal,
+      'shipping.estimated': false,
+      'shipping.finalized': true,
+      'shipping.quoteRecalcAt': new Date(),
+      'shipping.quoteRecalcError': null,
+      'shipping.serviceability': {
+        ok: true,
+        recalculatedAt: new Date().toISOString(),
+        freeShippingApplied: !!ship.freeShippingApplied,
+        quoteId: ship.quoteId,
+        courierSuggestions: (ship.courierSuggestions || []).slice(0, 5),
+      },
+      'shipping.estimatedDeliveryDate': edd || undefined,
+      'shipping.courierName': cheapest?.courierName || undefined,
+      'shipping.pricingPendingReview': prepaidImbalance || codChargeAppeared,
+    };
+
+    if (String(order.paymentMethod || '') === 'cod' && String(order.paymentStatus || '') !== 'paid') {
+      $set.amountDue = newTotal;
+    }
+
+    if (String(order.paymentMethod || '') === 'razorpay' && String(order.paymentStatus || '') === 'paid') {
+      if (balance > 0.005) {
+        $set.amountDue = balance;
+        $set['shipping.balanceDueShipping'] = balance;
+      } else {
+        $set.amountDue = 0;
+      }
+    }
+
+    const update = { $set };
+    if (!(String(order.paymentMethod || '') === 'razorpay' && balance > 0.005)) {
+      update.$unset = { 'shipping.balanceDueShipping': '' };
+    }
+    await Order.updateOne({ _id: id }, update);
+
+    await Order.updateOne(
+      { _id: id },
+      {
+        $push: {
+          'shipping.timeline': {
+            at: new Date().toISOString(),
+            kind: 'shipping_quote_finalized',
+            source: 'system',
+            status:
+              newCharge < 0.005
+                ? 'Final shipping: free'
+                : `Final shipping: ₹${newCharge}${prepaidImbalance ? ' (balance may be due)' : ''}`,
+          },
+        },
+      }
+    );
+
+    logJson('info', 'order.shipping_finalized', {
+      orderId: id,
+      newCharge,
+      oldCharge,
+      newTotal,
+      prepaidImbalance,
+      codChargeAppeared,
+    });
+
+    if (prepaidImbalance || codChargeAppeared) {
+      logIntegrationNotifyPending({
+        event: 'shipping_pricing_adjustment',
+        orderId: id,
+        pricingPendingReview: true,
+        balanceDueShipping: balance > 0.005 ? balance : undefined,
+        amountDue: $set.amountDue,
+        newTotal,
+        amountPaidSnapshot: paid,
+        notifyChannelsPlanned: ['sms', 'email', 'admin_dashboard'],
+      });
+    }
+
+    await syncOrderAdminFlags(id);
+  } catch (e) {
+    logJson('error', 'order.shipping_recalc_error', {
+      orderId: id,
+      message: e instanceof Error ? e.message : String(e),
+    });
+  }
+}
+
+/**
  * Single source of truth for checkout: line prices from DB, coupon from server rules,
  * shipping from Shiprocket rules, total = goodsAfterDiscount + shippingCharge.
  */
@@ -3472,6 +3990,8 @@ async function computeServerCheckoutPricing({ req, body, rawItems, paymentMethod
 
   let discount = 0;
   let couponCode = body.couponCode ? normalizeCouponCode(body.couponCode) : undefined;
+  /** Set when a coupon applies; usage is incremented only after shipping quote succeeds. */
+  let couponIdForUsage = null;
 
   if (couponCode) {
     const itemsForValidate = rawItems.map((l) => ({ productId: l.productId, quantity: l.quantity }));
@@ -3519,13 +4039,7 @@ async function computeServerCheckoutPricing({ req, body, rawItems, paymentMethod
     }
     discount = validation.discount;
     couponCode = validation.couponCode;
-    if (incrementCouponUsage) {
-      await CouponUsage.findOneAndUpdate(
-        { couponId, userId },
-        { $inc: { count: 1 }, $set: { lastUsedAt: new Date() } },
-        { upsert: true, new: false }
-      );
-    }
+    couponIdForUsage = couponId;
   } else {
     discount = 0;
     couponCode = undefined;
@@ -3540,9 +4054,26 @@ async function computeServerCheckoutPricing({ req, body, rawItems, paymentMethod
     goodsAfterDiscount,
   });
 
-  const shippingCharge = Number(ship.shippingCharge) || 0;
-  const freeShippingApplied = !!ship.freeShippingApplied;
-  const total = goodsAfterDiscount + shippingCharge;
+  const quoteOk = shipQuoteHasValidEta(ship);
+  let shippingPlaceholder = false;
+  if (!ALLOW_CHECKOUT_WITHOUT_SHIPPING_QUOTE) {
+    assertShippingQuoteReadyForCheckout(ship);
+  } else if (!quoteOk) {
+    shippingPlaceholder = true;
+  }
+
+  if (incrementCouponUsage && couponIdForUsage && req.session?.userId) {
+    const uid = String(req.session.userId);
+    await CouponUsage.findOneAndUpdate(
+      { couponId: couponIdForUsage, userId: uid },
+      { $inc: { count: 1 }, $set: { lastUsedAt: new Date() } },
+      { upsert: true, new: false }
+    );
+  }
+
+  const shippingCharge = shippingPlaceholder ? 0 : roundMoney2(ship.shippingCharge);
+  const freeShippingApplied = shippingPlaceholder ? false : !!ship.freeShippingApplied;
+  const total = roundMoney2(goodsAfterDiscount + shippingCharge);
 
   return {
     pricedItems,
@@ -3553,6 +4084,8 @@ async function computeServerCheckoutPricing({ req, body, rawItems, paymentMethod
     shippingCharge,
     freeShippingApplied,
     total,
+    shippingPlaceholder,
+    ship,
   };
 }
 
@@ -3614,12 +4147,21 @@ app.post('/api/orders', mongoReady, async (req, res) => {
     assertDeclaredMoneyMatches('Payable total', ['declaredTotal', 'total'], body, pricing.total);
 
     const pricedItems = pricing.pricedItems;
-    const { subtotal, discount, couponCode, goodsAfterDiscount, shippingCharge, freeShippingApplied, total } = pricing;
+    const { subtotal, discount, couponCode, goodsAfterDiscount, shippingCharge, freeShippingApplied, total, shippingPlaceholder, ship } =
+      pricing;
 
     const orderId = `ORD-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
     // Deduct inventory immediately for COD orders.
     await decrementInventoryForOrderLines(pricedItems, paymentMethod);
+
+    if (shippingPlaceholder) {
+      logJson('warn', 'checkout.order_relaxed_shipping', {
+        channel: 'cod',
+        orderId,
+        pincode: normalizePincode(pincode),
+      });
+    }
 
     await Order.create({
       _id: orderId,
@@ -3633,6 +4175,7 @@ app.post('/api/orders', mongoReady, async (req, res) => {
       shippingCharge,
       freeShippingApplied,
       total,
+      shipping: buildOrderShippingFromCheckout({ shippingPlaceholder, ship }),
       paymentMethod,
       paymentStatus: 'unpaid',
       amountDue: total,
@@ -3641,13 +4184,15 @@ app.post('/api/orders', mongoReady, async (req, res) => {
       status: 'pending',
       stockDeductedAt: new Date(),
     });
+    await syncOrderAdminFlags(orderId);
     const fresh = await Order.findById(orderId).lean();
     res.status(201).json(serializeOrder(fresh));
 
     setImmediate(() => {
       void (async () => {
-        const leanForMail = (await Order.findById(orderId).lean()) || {};
         try {
+          await finalizePendingOrderShipping(orderId);
+          const leanForMail = (await Order.findById(orderId).lean()) || {};
           await Promise.all([
             (async () => {
               await sendOrderEmails({ ...leanForMail, _id: orderId });
@@ -3803,7 +4348,18 @@ app.post('/api/payments/razorpay/session', mongoReady, async (req, res) => {
       return;
     }
 
-    const { pricedItems, subtotal, discount, couponCode, goodsAfterDiscount, shippingCharge, freeShippingApplied, total } = pricing;
+    const {
+      pricedItems,
+      subtotal,
+      discount,
+      couponCode,
+      goodsAfterDiscount,
+      shippingCharge,
+      freeShippingApplied,
+      total,
+      shippingPlaceholder,
+      ship,
+    } = pricing;
 
     const sessionId = `PS-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
@@ -3832,6 +4388,8 @@ app.post('/api/payments/razorpay/session', mongoReady, async (req, res) => {
       total,
       hasCustomPrint: !!body.hasCustomPrint,
       razorpayOrderId: String(rpOrder.id),
+      shippingPlaceholder: !!shippingPlaceholder,
+      shippingQuoteSnapshot: shippingPlaceholder ? undefined : cloneShipForStorage(ship),
     });
 
     res.status(201).json({
@@ -3842,6 +4400,14 @@ app.post('/api/payments/razorpay/session', mongoReady, async (req, res) => {
       currency: String(rpOrder.currency || 'INR'),
     });
   } catch (e) {
+    const status = Number(e?.statusCode) || 500;
+    if (status === 400) {
+      res.status(400).json({
+        error: e instanceof Error ? e.message : 'Bad request',
+        serverTotal: e?.serverTotal,
+      });
+      return;
+    }
     console.error(e);
     res.status(500).json({ error: 'Failed to start payment session' });
   }
@@ -3971,6 +4537,20 @@ app.post('/api/payments/razorpay/verify', mongoReady, async (req, res) => {
     // Create the actual Order now (confirmed/paid).
     const orderId = `ORD-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const amountDue = Number(session.total ?? 0);
+    const ph = !!session.shippingPlaceholder;
+    if (ph) {
+      logJson('warn', 'checkout.order_relaxed_shipping', {
+        channel: 'razorpay',
+        orderId,
+        pincode: normalizePincode(session.customer?.pincode),
+      });
+    }
+    const shippingDoc = ph
+      ? buildOrderShippingFromCheckout({ shippingPlaceholder: true, ship: { reason: 'relaxed_checkout' } })
+      : buildOrderShippingFromCheckout({
+          shippingPlaceholder: false,
+          ship: session.shippingQuoteSnapshot || {},
+        });
     await Order.create({
       _id: orderId,
       customer: session.customer || {},
@@ -3983,6 +4563,7 @@ app.post('/api/payments/razorpay/verify', mongoReady, async (req, res) => {
       shippingCharge: Number(session.shippingCharge ?? 0),
       freeShippingApplied: !!session.freeShippingApplied,
       total: Number(session.total ?? 0),
+      shipping: shippingDoc,
       paymentMethod: 'razorpay',
       paymentStatus: 'paid',
       amountDue,
@@ -3996,6 +4577,7 @@ app.post('/api/payments/razorpay/verify', mongoReady, async (req, res) => {
       status: 'pending',
       stockDeductedAt: new Date(),
     });
+    await syncOrderAdminFlags(orderId);
 
     await PaymentSession.updateOne(
       { _id: sessionId },
@@ -4017,6 +4599,7 @@ app.post('/api/payments/razorpay/verify', mongoReady, async (req, res) => {
     setImmediate(() => {
       void (async () => {
         try {
+          await finalizePendingOrderShipping(orderId);
           const leanForMail = (await Order.findById(orderId).lean()) || {};
           await Promise.all([
             (async () => {
@@ -4101,6 +4684,7 @@ app.patch('/api/orders/:id', mongoReady, adminKeyRequired, async (req, res) => {
       res.status(404).json({ error: 'Order not found' });
       return;
     }
+    await syncOrderAdminFlags(id);
 
     // Send post-order notifications (idempotent)
     try {
@@ -4137,6 +4721,15 @@ app.post('/api/admin/orders/:id/shipping/retry', mongoReady, adminKeyRequired, a
       return;
     }
 
+    const block = shipmentBlockedByPaymentOrQuote(before);
+    if (block.blocked) {
+      logJson('warn', 'admin.shipment_retry_blocked', { orderId: id, reason: block.reason });
+      res.status(409).json({
+        error: `Cannot create shipment while blocked: ${block.reason}. Resolve payment or shipping quote first.`,
+      });
+      return;
+    }
+
     await Order.updateOne(
       { _id: id },
       {
@@ -4147,6 +4740,7 @@ app.post('/api/admin/orders/:id/shipping/retry', mongoReady, adminKeyRequired, a
         },
         $set: {
           'shipping.manualRequired': false,
+          'shipping.shipmentAttemptCount': 0,
           'shipping.lastUpdatedAt': new Date(),
         },
         $push: {
@@ -4154,6 +4748,7 @@ app.post('/api/admin/orders/:id/shipping/retry', mongoReady, adminKeyRequired, a
         },
       }
     );
+    await syncOrderAdminFlags(id);
 
     setImmediate(() => {
       void ensureShiprocketShipmentForOrderId(id, 'admin-retry');
@@ -4315,6 +4910,18 @@ async function main() {
     }
   } else {
     console.warn('MONGODB_URI is not set — product APIs return 503 until configured.');
+  }
+
+  if (!SHIPROCKET_EMAIL || !SHIPROCKET_PASSWORD) {
+    logJson('warn', 'shiprocket.credentials_missing', {
+      message:
+        'SHIPROCKET_EMAIL / SHIPROCKET_PASSWORD not set — live rates and shipments are unavailable. Configure credentials via environment variables only. Checkout can use ALLOW_CHECKOUT_WITHOUT_SHIPPING_QUOTE for fallback.',
+    });
+  } else if (!SHIPROCKET_PICKUP_LOCATION_NAME || !SHIPROCKET_PICKUP_PINCODE) {
+    logJson('warn', 'shiprocket.pickup_incomplete', {
+      message:
+        'SHIPROCKET_PICKUP_LOCATION_NAME and SHIPROCKET_PICKUP_PINCODE are required for Shiprocket order creation. Serviceability may still fail until pickup is configured.',
+    });
   }
 
   app.listen(PORT, () => {

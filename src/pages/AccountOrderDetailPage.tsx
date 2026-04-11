@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { fetchMyOrderByIdApi } from '@/lib/authApi';
 import type { Order } from '@/types';
-import { ArrowLeft, Truck, MapPin, Package, Clock } from 'lucide-react';
+import { ArrowLeft, Truck, MapPin, Package, Clock, RefreshCw } from 'lucide-react';
 
 function fmtDate(d: string | undefined | null) {
   if (!d) return '—';
@@ -17,21 +17,29 @@ export default function AccountOrderDetailPage() {
   const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    let mounted = true;
+  const loadOrder = useCallback(async (opts?: { silent?: boolean }) => {
     if (!id) return;
-    (async () => {
-      try {
-        const o = await fetchMyOrderByIdApi(id);
-        if (mounted) setOrder(o);
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : 'Could not load order');
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    })();
-    return () => { mounted = false; };
+    try {
+      const o = await fetchMyOrderByIdApi(id);
+      setOrder(o);
+    } catch (e) {
+      if (!opts?.silent) toast.error(e instanceof Error ? e.message : 'Could not load order');
+    } finally {
+      if (!opts?.silent) setLoading(false);
+    }
   }, [id]);
+
+  useEffect(() => {
+    void loadOrder();
+  }, [loadOrder]);
+
+  const pendingShippingFinalize = order?.shipping?.estimated === true && order?.shipping?.finalized !== true;
+
+  useEffect(() => {
+    if (!pendingShippingFinalize || !id) return;
+    const t = window.setInterval(() => void loadOrder({ silent: true }), 12_000);
+    return () => window.clearInterval(t);
+  }, [pendingShippingFinalize, id, loadOrder]);
 
   const timeline = useMemo(() => {
     const t = order?.shipping?.timeline;
@@ -77,10 +85,18 @@ export default function AccountOrderDetailPage() {
         <Link to="/account/orders" className="h-9 w-9 rounded-xl border flex items-center justify-center hover:bg-muted/50 transition-colors">
           <ArrowLeft className="h-4 w-4" />
         </Link>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="text-[10px] sm:text-xs font-mono text-muted-foreground truncate">{order.id}</div>
           <div className="text-lg sm:text-xl font-bold">Order Tracking</div>
         </div>
+        <button
+          type="button"
+          onClick={() => void loadOrder()}
+          className="h-9 w-9 rounded-xl border flex items-center justify-center hover:bg-muted/50 transition-colors shrink-0"
+          title="Refresh order"
+        >
+          <RefreshCw className="h-4 w-4" />
+        </button>
       </div>
 
       <div className="rounded-2xl border bg-card shadow-sm p-4 space-y-3">
@@ -97,16 +113,66 @@ export default function AccountOrderDetailPage() {
           </div>
           <div className="text-right text-xs text-muted-foreground">
             Total
-            <div className="text-sm font-bold text-foreground">₹{order.total}</div>
+            <div className="text-sm font-bold text-foreground tabular-nums">₹{order.total}</div>
           </div>
         </div>
+
+        {(order.goodsTotal != null || order.shippingCharge != null) && (
+          <div className="rounded-xl border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground space-y-1">
+            {order.goodsTotal != null && (
+              <div className="flex justify-between gap-2">
+                <span>Items (after discount)</span>
+                <span className="tabular-nums text-foreground">₹{order.goodsTotal}</span>
+              </div>
+            )}
+            {order.shippingCharge != null && (
+              <div className="flex justify-between gap-2">
+                <span>Shipping</span>
+                <span className="tabular-nums text-foreground">
+                  {order.shippingCharge < 0.005 ? 'Free' : `₹${order.shippingCharge}`}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {pendingShippingFinalize && (
+          <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-950 dark:text-amber-100 px-3 py-2 text-xs flex items-start gap-2">
+            <RefreshCw className="h-3.5 w-3.5 shrink-0 mt-0.5 animate-spin" />
+            <span>
+              <span className="font-semibold">Finalizing shipping.</span> Your order used an estimated ₹0 shipping row; we are
+              fetching the live courier rate. This page refreshes automatically every few seconds.
+            </span>
+          </div>
+        )}
+
+        {shipping?.quoteRecalcError && !pendingShippingFinalize && (
+          <div className="rounded-xl border border-destructive/30 bg-destructive/5 text-destructive px-3 py-2 text-xs">
+            Could not load final shipping quote: {shipping.quoteRecalcError}. Our team may update this order manually.
+          </div>
+        )}
+
+        {(shipping?.pricingPendingReview || (shipping?.balanceDueShipping != null && shipping.balanceDueShipping > 0.004)) && (
+          <div className="rounded-xl border border-amber-500/50 bg-amber-500/10 text-amber-950 dark:text-amber-100 px-3 py-2 text-xs space-y-1">
+            <div className="font-semibold">Shipping adjustment</div>
+            {shipping?.balanceDueShipping != null && shipping.balanceDueShipping > 0.004 && (
+              <p>
+                Additional shipping due: <span className="font-mono font-semibold">₹{shipping.balanceDueShipping}</span>
+                {order.paymentMethod === 'razorpay' ? ' (prepaid order — our team may contact you).' : null}
+              </p>
+            )}
+            {shipping?.pricingPendingReview && (
+              <p className="text-[11px] opacity-90">This order is flagged for review after the courier rate was applied.</p>
+            )}
+          </div>
+        )}
 
         {shipping?.manualRequired ? (
           <div className="rounded-xl border bg-amber-50 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200 px-3 py-2 text-xs">
             <span className="font-semibold">Processing manually.</span>{' '}
             {shipping.manualReason ? `Shipment delayed: ${shipping.manualReason}` : 'Shipment is delayed; our team is working on it.'}
           </div>
-        ) : !trackingReady ? (
+        ) : !trackingReady && !pendingShippingFinalize ? (
           <div className="rounded-xl border bg-muted/40 text-muted-foreground px-3 py-2 text-xs">
             <span className="font-semibold text-foreground">Tracking will be available soon.</span> We’ll update this page once your shipment is created.
           </div>
@@ -158,4 +224,3 @@ export default function AccountOrderDetailPage() {
     </div>
   );
 }
-

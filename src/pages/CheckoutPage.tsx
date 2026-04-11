@@ -34,6 +34,7 @@ import {
 } from '@/lib/authApi';
 import { useAuth } from '@/contexts/AuthContext';
 import { InputOTP, InputOTPGroup, InputOTPSlot } from '@/components/ui/input-otp';
+import { fetchPublicHealthApi } from '@/lib/api';
 import { lookupIndianPincode } from '@/lib/pincodeLookup';
 import { reverseGeocodeLatLng } from '@/lib/reverseGeocode';
 import {
@@ -146,6 +147,8 @@ export default function CheckoutPage() {
 
   const [shippingQuote, setShippingQuote] = useState<ShippingServiceabilityResult | null>(null);
   const [shippingQuoteLoading, setShippingQuoteLoading] = useState(false);
+  /** Mirrors server ALLOW_CHECKOUT_WITHOUT_SHIPPING_QUOTE (null until /api/health loads). */
+  const [allowRelaxedShipping, setAllowRelaxedShipping] = useState<boolean | null>(null);
 
   const set = (key: keyof CustomerInfo, val: string) => setForm(p => ({ ...p, [key]: val }));
 
@@ -438,28 +441,59 @@ export default function CheckoutPage() {
     return () => window.clearTimeout(t);
   }, [form.pincode]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const h = await fetchPublicHealthApi();
+        if (!cancelled) setAllowRelaxedShipping(!!h.allowCheckoutWithoutShippingQuote);
+      } catch {
+        if (!cancelled) setAllowRelaxedShipping(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const checkoutMerchandise = useMemo(
     () => totalsForPaymentMethod(paymentMethod),
     [paymentMethod, totalsForPaymentMethod]
   );
-  const shippingChargeForTotal = shippingQuote?.ok ? shippingQuote.shippingCharge : 0;
+
+  const deliveryPinValid = form.pincode.replace(/\D/g, '').length === 6;
+  const healthShippingLoaded = allowRelaxedShipping !== null;
+  /** Successful serviceability response including a delivery estimate (required before checkout when not relaxed). */
+  const shippingQuoteHasEta =
+    shippingQuote?.ok === true &&
+    ((shippingQuote.estimatedDeliveryDays != null && Number.isFinite(Number(shippingQuote.estimatedDeliveryDays))) ||
+      (!!shippingQuote.estimatedDeliveryDate && !Number.isNaN(new Date(shippingQuote.estimatedDeliveryDate).getTime())));
+  const shippingGateReady =
+    deliveryPinValid &&
+    healthShippingLoaded &&
+    (allowRelaxedShipping === true || (!shippingQuoteLoading && shippingQuoteHasEta));
+
+  const shippingChargeForTotal = shippingQuoteHasEta ? Number(shippingQuote?.shippingCharge) || 0 : allowRelaxedShipping === true ? 0 : 0;
   const payableGrandTotal = checkoutMerchandise.total + shippingChargeForTotal;
 
-  // Shiprocket serviceability (best-effort)
+  // Shiprocket serviceability — clear stale quotes while pin / cart / payment changes, then refetch.
   useEffect(() => {
     const pin = form.pincode.replace(/[^\d]/g, '').slice(0, 6);
     if (pin.length !== 6) {
       setShippingQuote(null);
+      setShippingQuoteLoading(false);
       return;
     }
     if (items.length === 0) {
       setShippingQuote(null);
+      setShippingQuoteLoading(false);
       return;
     }
+    setShippingQuote(null);
+    setShippingQuoteLoading(true);
     let cancelled = false;
     const t = window.setTimeout(() => {
       void (async () => {
-        setShippingQuoteLoading(true);
         try {
           const computed = totalsForPaymentMethod(paymentMethod);
           const q = await fetchShippingServiceabilityApi({
@@ -481,6 +515,7 @@ export default function CheckoutPage() {
     return () => {
       cancelled = true;
       window.clearTimeout(t);
+      setShippingQuoteLoading(false);
     };
   }, [form.pincode, paymentMethod, items, totalsForPaymentMethod]);
 
@@ -619,10 +654,14 @@ export default function CheckoutPage() {
       toast.error('Please verify the OTP sent to your email');
       return;
     }
+    if (!shippingGateReady) {
+      toast.error('Wait for shipping cost and delivery estimate before placing your order.');
+      return;
+    }
     setSubmitting(true);
     try {
       const computed = totalsForPaymentMethod(paymentMethod);
-      const shipAdd = shippingQuote?.ok ? shippingQuote.shippingCharge : 0;
+      const shipAdd = shippingQuoteHasEta ? Number(shippingQuote?.shippingCharge) || 0 : 0;
       const payableTotal = computed.total + shipAdd;
       const payload = {
         customer: { ...form, email: form.email.trim() },
@@ -725,6 +764,17 @@ export default function CheckoutPage() {
   return (
     <div className="max-w-3xl mx-auto px-3 sm:px-4 py-6 sm:py-8">
       <h1 className="text-2xl sm:text-3xl font-bold mb-4 sm:mb-6">Checkout</h1>
+      {allowRelaxedShipping === true && (
+        <div
+          role="status"
+          className="mb-4 rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-950 dark:text-amber-100"
+        >
+          <strong className="font-semibold">Relaxed checkout (non-production).</strong> ALLOW_CHECKOUT_WITHOUT_SHIPPING_QUOTE
+          is enabled on the API. Payable totals use ₹0 shipping until a real Shiprocket quote exists; the backend finalizes
+          charges after order creation. Keep this flag <strong className="font-semibold">false</strong> in production unless
+          you explicitly need a fallback.
+        </div>
+      )}
       <div className="flex flex-col md:grid md:grid-cols-5 gap-6 sm:gap-8">
         <form onSubmit={e => void handleVerifyOtp(e)} className="md:col-span-3 space-y-3 sm:space-y-4">
           <h2 className="font-semibold text-base">Delivery Details</h2>
@@ -1187,11 +1237,40 @@ export default function CheckoutPage() {
             type="button"
             size="lg"
             className="w-full h-12 sm:h-11 text-sm sm:text-base font-semibold"
-            disabled={submitting || !deliveryValid || (otpRequired && !otpVerified)}
+            disabled={
+              submitting || !deliveryValid || (otpRequired && !otpVerified) || !shippingGateReady || !healthShippingLoaded
+            }
             onClick={() => void handlePlaceOrder()}
           >
-            {submitting ? 'Placing order…' : `Place Order — ₹${payableGrandTotal}`}
+            {submitting
+              ? 'Placing order…'
+              : !healthShippingLoaded
+                ? 'Loading checkout…'
+                : !deliveryPinValid
+                  ? 'Enter 6-digit pincode'
+                  : allowRelaxedShipping === true
+                    ? `Place Order — ₹${payableGrandTotal}`
+                    : shippingQuoteLoading
+                      ? 'Calculating shipping…'
+                      : shippingQuote && !shippingQuote.ok
+                        ? shippingQuote.reason === 'not_serviceable'
+                          ? 'Delivery not available'
+                          : 'Shipping unavailable'
+                        : !shippingGateReady
+                          ? 'Waiting for delivery estimate…'
+                          : `Place Order — ₹${payableGrandTotal}`}
           </Button>
+          {deliveryValid && deliveryPinValid && healthShippingLoaded && !shippingGateReady && !submitting && (
+            <p className="text-xs text-muted-foreground mt-2 text-center">
+              {shippingQuoteLoading
+                ? 'Calculating shipping and delivery estimate…'
+                : shippingQuote && !shippingQuote.ok
+                  ? shippingQuote.reason === 'not_serviceable'
+                    ? 'We cannot deliver to this pincode. Try a different address.'
+                    : 'Could not load shipping rates. Check the pincode or try again shortly.'
+                  : 'Confirming delivery timeline…'}
+            </p>
+          )}
         </form>
 
         <div className="md:col-span-2 border rounded-lg p-4 h-fit order-first md:order-none">
@@ -1221,16 +1300,20 @@ export default function CheckoutPage() {
               )}
               <div className="flex justify-between text-muted-foreground">
                 <span>
-                  Shipping {shippingQuoteLoading ? '(checking…)' : ''}
+                  Shipping {shippingQuoteLoading ? '(calculating…)' : ''}
                 </span>
                 <span>
-                  {shippingQuote?.ok
-                    ? shippingQuote.shippingCharge === 0
-                      ? 'Free'
-                      : `₹${shippingQuote.shippingCharge}`
-                    : shippingQuote?.reason === 'not_serviceable'
-                      ? 'N/A'
-                      : '—'}
+                  {shippingQuoteLoading
+                    ? '…'
+                    : shippingQuote?.ok
+                      ? shippingQuote.shippingCharge === 0
+                        ? 'Free'
+                        : `₹${shippingQuote.shippingCharge}`
+                      : allowRelaxedShipping === true
+                        ? '—'
+                        : shippingQuote?.reason === 'not_serviceable'
+                          ? 'N/A'
+                          : '—'}
                 </span>
               </div>
               {shippingQuote?.ok && (shippingQuote.estimatedDeliveryDays != null || shippingQuote.estimatedDeliveryDate) && (
@@ -1245,13 +1328,29 @@ export default function CheckoutPage() {
                   </span>
                 </div>
               )}
+              {allowRelaxedShipping === true && !shippingQuoteHasEta && deliveryPinValid && (
+                <p className="text-[11px] text-amber-900 dark:text-amber-200/90 leading-snug col-span-full">
+                  Estimated shipping — final amount and ETA are calculated on the server after you place the order. Refresh
+                  your order page to see updates once the courier quote is applied.
+                </p>
+              )}
               <div className="flex justify-between text-muted-foreground text-xs">
                 <span>Items after discount</span>
                 <span>₹{checkoutMerchandise.total}</span>
               </div>
               <div className="flex justify-between font-bold pt-1 border-t">
                 <span>Total payable</span>
-                <span>₹{payableGrandTotal}</span>
+                <span className="tabular-nums">
+                  {!healthShippingLoaded
+                    ? '…'
+                    : !deliveryPinValid
+                      ? '—'
+                      : shippingQuoteLoading && allowRelaxedShipping !== true
+                        ? 'Calculating…'
+                        : shippingGateReady
+                          ? `₹${payableGrandTotal}`
+                          : '—'}
+                </span>
               </div>
             </div>
           </div>
