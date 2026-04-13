@@ -1562,6 +1562,10 @@ function getMailTransport() {
     port: Number(process.env.SMTP_PORT || 587),
     secure: process.env.SMTP_SECURE === 'true',
     auth: { user, pass },
+    // Avoid hanging requests when SMTP is slow/unreachable.
+    connectionTimeout: 12_000,
+    greetingTimeout: 12_000,
+    socketTimeout: 20_000,
   });
 }
 
@@ -2390,13 +2394,19 @@ async function sendOtpEmail({ to, code, purpose }) {
   const subject = purpose === 'password_reset' ? 'TrendNest99 password reset OTP' : 'TrendNest99 OTP verification';
   const text = `Your OTP code is: ${code}\n\nThis code will expire soon. If you did not request it, ignore this email.`;
 
-  await transport.sendMail({
-    from,
-    to,
-    subject,
-    text,
-  });
-  return { ok: true };
+  try {
+    await transport.sendMail({
+      from,
+      to,
+      subject,
+      text,
+    });
+    return { ok: true };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'SMTP send failed';
+    console.error('OTP email failed:', msg);
+    return { ok: false, error: msg };
+  }
 }
 
 app.get('/api/auth/me', async (req, res) => {
@@ -2673,7 +2683,7 @@ app.post('/api/auth/otp/request', async (req, res) => {
     res.json({ challengeId, masked: maskEmail(email) });
   } catch (e) {
     console.error(e);
-    res.status(500).json({ error: 'Failed to request OTP' });
+    res.status(500).json({ error: e instanceof Error ? e.message : 'Failed to request OTP' });
   }
 });
 
