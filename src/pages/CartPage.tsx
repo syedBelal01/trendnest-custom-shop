@@ -25,7 +25,7 @@ export default function CartPage() {
       const r = await validateCouponApi({
         code: trimmed,
         subtotal: computed.subtotal,
-        items: items.map(i => ({ productId: i.product.id, quantity: i.quantity })),
+        items: items.map(i => ({ productId: i.product.id, quantity: i.quantity, selectedVariant: i.selectedVariant })),
       });
       applyCoupon(r.couponCode, r.discount);
       toast.success(`Coupon applied! You save ₹${r.discount}`);

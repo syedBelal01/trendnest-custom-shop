@@ -52,7 +52,7 @@ export async function deleteCouponAdmin(id: string): Promise<void> {
 export async function validateCouponApi(params: {
   code: string;
   subtotal: number;
-  items: Array<{ productId: string; quantity: number }>;
+  items: Array<{ productId: string; quantity: number; selectedVariant?: string }>;
 }): Promise<{ couponCode: string; discount: number }> {
   const res = await fetch(apiUrl('/api/coupons/validate'), {
     method: 'POST',

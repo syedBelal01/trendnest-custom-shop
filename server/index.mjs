@@ -405,6 +405,8 @@ const CouponSchema = new mongoose.Schema(
     scope: { type: String, required: true, enum: ['cart', 'products', 'categories'] },
     productIds: { type: [String], default: [] },
     categoryIds: { type: [String], default: [] },
+    /** Optional: when set, coupon applies only if cart contains at least one matching SKU. Empty → applies to all. */
+    applicableSkus: { type: [String], default: [] },
 
     // Valid time period
     startAt: { type: Date, default: undefined },
@@ -526,6 +528,30 @@ async function validateCouponForCart({ code, subtotal, items, userId }) {
       .filter(Boolean)
       .map(String)
   );
+
+  const cartSkus = new Set();
+  for (const line of items || []) {
+    const p = productById.get(String(line?.productId));
+    if (!p) continue;
+    const sv = line?.selectedVariant ? String(line.selectedVariant) : '';
+    const vm = p.variantModel && typeof p.variantModel === 'object' ? p.variantModel : null;
+    if (vm && Array.isArray(vm.items) && sv) {
+      const hit = vm.items.find((it) => String(it?.key) === String(sv));
+      const sku = hit?.sku ? String(hit.sku).trim() : '';
+      if (sku) cartSkus.add(sku);
+    } else {
+      const sku = p?.sku ? String(p.sku).trim() : '';
+      if (sku) cartSkus.add(sku);
+    }
+  }
+
+  const applicableSkus = Array.isArray(coupon.applicableSkus)
+    ? coupon.applicableSkus.map((s) => String(s).trim()).filter(Boolean)
+    : [];
+  if (applicableSkus.length) {
+    const ok = applicableSkus.some((sku) => cartSkus.has(String(sku)));
+    if (!ok) return { ok: false, error: 'Coupon does not apply to selected products' };
+  }
 
   if (coupon.scope === 'products') {
     if (!Array.isArray(coupon.productIds) || coupon.productIds.length === 0) {
@@ -2467,6 +2493,7 @@ app.post('/api/coupons', mongoReady, adminKeyRequired, async (req, res) => {
       scope,
       productIds: parseIdList(body.productIds),
       categoryIds: parseIdList(body.categoryIds),
+      applicableSkus: parseIdList(body.applicableSkus),
 
       startAt: toDateOrUndefined(body.startAt),
       endAt: toDateOrUndefined(body.endAt),
@@ -2512,6 +2539,7 @@ app.patch('/api/coupons/:id', mongoReady, adminKeyRequired, async (req, res) => 
     if (body.scope != null) patch.scope = String(body.scope).trim();
     if (body.productIds != null) patch.productIds = parseIdList(body.productIds);
     if (body.categoryIds != null) patch.categoryIds = parseIdList(body.categoryIds);
+    if (body.applicableSkus != null) patch.applicableSkus = parseIdList(body.applicableSkus);
     if (body.startAt !== undefined) patch.startAt = toDateOrUndefined(body.startAt);
     if (body.endAt !== undefined) patch.endAt = toDateOrUndefined(body.endAt);
     if (body.isActive != null) patch.isActive = !!body.isActive;
@@ -4454,7 +4482,7 @@ async function computeServerCheckoutPricing({ req, body, rawItems, paymentMethod
   let couponIdForUsage = null;
 
   if (couponCode) {
-    const itemsForValidate = rawItems.map((l) => ({ productId: l.productId, quantity: l.quantity }));
+    const itemsForValidate = rawItems.map((l) => ({ productId: l.productId, quantity: l.quantity, selectedVariant: l.selectedVariant }));
     const sessionUserId = req.session?.userId ? String(req.session.userId) : undefined;
     const validation = await validateCouponForCart({
       code: couponCode,

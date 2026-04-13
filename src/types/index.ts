@@ -272,6 +272,8 @@ export interface Coupon {
   scope?: 'cart' | 'products' | 'categories';
   productIds?: string[];
   categoryIds?: string[];
+  /** Optional: only applies when cart has at least one matching SKU. Empty/undefined → applies to all products. */
+  applicableSkus?: string[];
   startAt?: string;
   endAt?: string;
   usageTotalLimit?: number;

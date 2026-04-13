@@ -1,14 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { useOrders } from '@/contexts/OrdersContext';
-import type { Coupon } from '@/types';
+import type { Coupon, Product } from '@/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash2, Check, ChevronsUpDown, X } from 'lucide-react';
 import { createCouponAdmin, deleteCouponAdmin, fetchCouponsAdmin, updateCouponAdmin } from '@/lib/couponsApi';
+import { fetchProductsApi } from '@/lib/api';
+import { Badge } from '@/components/ui/badge';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from '@/components/ui/command';
+import { cn } from '@/lib/utils';
 
 type CouponFormState = {
   code: string;
@@ -17,7 +22,8 @@ type CouponFormState = {
   maxDiscount: string;
   minOrder: number;
   scope: NonNullable<Coupon['scope']>;
-  productIds: string; // comma-separated
+  applicableSkus: string[];
+  productIds: string; // legacy (comma-separated)
   categoryIds: string; // comma-separated
   startAt: string;
   endAt: string;
@@ -42,6 +48,10 @@ export default function AdminCoupons() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
 
+  const [products, setProducts] = useState<Product[]>([]);
+  const [productsLoading, setProductsLoading] = useState(false);
+  const [skuPickerOpen, setSkuPickerOpen] = useState(false);
+
   const defaultForm: CouponFormState = useMemo(
     () => ({
       code: '',
@@ -50,6 +60,7 @@ export default function AdminCoupons() {
       maxDiscount: '',
       minOrder: 500,
       scope: 'cart',
+      applicableSkus: [],
       productIds: '',
       categoryIds: '',
       startAt: '',
@@ -79,6 +90,7 @@ export default function AdminCoupons() {
       maxDiscount: c.maxDiscount != null ? String(c.maxDiscount) : '',
       minOrder: typeof c.minOrder === 'number' ? c.minOrder : 0,
       scope: c.scope || 'cart',
+      applicableSkus: Array.isArray(c.applicableSkus) ? c.applicableSkus.map(s => String(s)).filter(Boolean) : [],
       productIds: (c.productIds || []).join(','),
       categoryIds: (c.categoryIds || []).join(','),
       startAt: toDateInputValue(c.startAt),
@@ -265,6 +277,45 @@ export default function AdminCoupons() {
     void refresh();
   }, [adminKeySet]);
 
+  useEffect(() => {
+    if (!open) return;
+    if (products.length) return;
+    setProductsLoading(true);
+    void (async () => {
+      try {
+        const list = await fetchProductsApi();
+        setProducts(Array.isArray(list) ? list : []);
+      } catch {
+        // Silent: coupon UI should still work without this helper.
+        setProducts([]);
+      } finally {
+        setProductsLoading(false);
+      }
+    })();
+  }, [open, products.length]);
+
+  const skuOptions = useMemo(() => {
+    const out: Array<{ sku: string; label: string }> = [];
+    for (const p of products) {
+      const name = String(p?.name ?? '').trim() || String(p?.id ?? '').trim() || 'Product';
+      const vmItems = p?.variantModel?.items;
+      if (Array.isArray(vmItems) && vmItems.length) {
+        for (const it of vmItems) {
+          const sku = String(it?.sku ?? '').trim();
+          if (!sku) continue;
+          const key = String(it?.key ?? '').trim();
+          out.push({ sku, label: `${name} (${sku})${key ? ` — ${key}` : ''}` });
+        }
+        continue;
+      }
+      const sku = String(p?.sku ?? '').trim();
+      if (!sku) continue;
+      out.push({ sku, label: `${name} (${sku})` });
+    }
+    // stable order for searching
+    return out.sort((a, b) => a.label.localeCompare(b.label));
+  }, [products]);
+
   const payloadFromForm = (): Partial<Coupon> => {
     const maxDiscount = form.maxDiscount.trim() ? Number(form.maxDiscount) : undefined;
     const usageTotalLimit = form.usageTotalLimit.trim() ? Number(form.usageTotalLimit) : undefined;
@@ -277,6 +328,7 @@ export default function AdminCoupons() {
       maxDiscount,
       minOrder: Number(form.minOrder),
       scope: form.scope,
+      applicableSkus: (form.applicableSkus ?? []).map(s => String(s).trim()).filter(Boolean),
       productIds: parseCsvIds(form.productIds),
       categoryIds: parseCsvIds(form.categoryIds),
       startAt: form.startAt || undefined,
@@ -291,10 +343,6 @@ export default function AdminCoupons() {
   const save = async () => {
     if (!form.code.trim()) {
       toast.error('Code required');
-      return;
-    }
-    if (form.scope === 'products' && !form.productIds.trim()) {
-      toast.error('Provide product IDs for products scope');
       return;
     }
     if (form.scope === 'categories' && !form.categoryIds.trim()) {
@@ -415,11 +463,82 @@ export default function AdminCoupons() {
               </Select>
 
               {form.scope === 'products' && (
-                <Input
-                  placeholder="Product IDs (comma separated, e.g. soap-1,tee-print-1)"
-                  value={form.productIds}
-                  onChange={e => setForm(p => ({ ...p, productIds: e.target.value }))}
-                />
+                <div className="space-y-2">
+                  <div className="text-xs text-muted-foreground">
+                    Select one or more SKUs the coupon should apply to. Leave empty to apply to all products.
+                  </div>
+                  <Popover open={skuPickerOpen} onOpenChange={setSkuPickerOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        role="combobox"
+                        aria-expanded={skuPickerOpen}
+                        className="w-full justify-between"
+                        disabled={productsLoading}
+                      >
+                        {productsLoading
+                          ? 'Loading products…'
+                          : form.applicableSkus.length
+                            ? `${form.applicableSkus.length} SKU(s) selected`
+                            : 'Select products (by SKU)…'}
+                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-[420px] p-0" align="start">
+                      <Command>
+                        <CommandInput placeholder="Search products…" />
+                        <CommandEmpty>No products found.</CommandEmpty>
+                        <CommandGroup>
+                          {skuOptions.map(opt => {
+                            const selected = form.applicableSkus.includes(opt.sku);
+                            return (
+                              <CommandItem
+                                key={opt.sku}
+                                value={opt.label}
+                                onSelect={() => {
+                                  setForm(p => {
+                                    const has = p.applicableSkus.includes(opt.sku);
+                                    return {
+                                      ...p,
+                                      applicableSkus: has
+                                        ? p.applicableSkus.filter(s => s !== opt.sku)
+                                        : [...p.applicableSkus, opt.sku],
+                                    };
+                                  });
+                                }}
+                              >
+                                <Check className={cn('mr-2 h-4 w-4', selected ? 'opacity-100' : 'opacity-0')} />
+                                <span className="truncate">{opt.label}</span>
+                              </CommandItem>
+                            );
+                          })}
+                        </CommandGroup>
+                      </Command>
+                    </PopoverContent>
+                  </Popover>
+
+                  {form.applicableSkus.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {form.applicableSkus.slice(0, 12).map(sku => (
+                        <Badge key={sku} variant="secondary" className="gap-1">
+                          <span className="font-mono text-[11px]">{sku}</span>
+                          <button
+                            type="button"
+                            className="opacity-70 hover:opacity-100"
+                            onClick={() => setForm(p => ({ ...p, applicableSkus: p.applicableSkus.filter(x => x !== sku) }))}
+                            aria-label={`Remove ${sku}`}
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </Badge>
+                      ))}
+                      {form.applicableSkus.length > 12 && (
+                        <Badge variant="outline">+{form.applicableSkus.length - 12} more</Badge>
+                      )}
+                    </div>
+                  )}
+                </div>
               )}
               {form.scope === 'categories' && (
                 <Input
