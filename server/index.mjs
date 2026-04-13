@@ -1569,6 +1569,34 @@ function getMailTransport() {
   });
 }
 
+async function sendEmailViaResend({ to, subject, text, html }) {
+  const key = process.env.RESEND_API_KEY ? String(process.env.RESEND_API_KEY).trim() : '';
+  if (!key) return { ok: false, error: 'RESEND_API_KEY not set' };
+  const from = process.env.RESEND_FROM_EMAIL
+    ? String(process.env.RESEND_FROM_EMAIL).trim()
+    : process.env.ORDER_FROM_EMAIL
+      ? String(process.env.ORDER_FROM_EMAIL).trim()
+      : '';
+  if (!from) return { ok: false, error: 'RESEND_FROM_EMAIL (or ORDER_FROM_EMAIL) not set' };
+
+  const payload = { from, to, subject, text, html };
+  try {
+    const r = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const msg = typeof data?.message === 'string' ? data.message : 'Resend send failed';
+      return { ok: false, error: msg };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Resend request failed' };
+  }
+}
+
 async function sendOrderEmails(orderLean) {
   const from = process.env.ORDER_FROM_EMAIL || process.env.SMTP_USER || 'trendnest099@gmail.com';
   const adminTo = process.env.ORDER_ADMIN_EMAIL || from;
@@ -2386,13 +2414,22 @@ function genNumericCode(length) {
 }
 
 async function sendOtpEmail({ to, code, purpose }) {
-  const transport = getMailTransport();
-  if (!transport) {
-    return { ok: false, error: 'SMTP not configured on server (.env)' };
-  }
-  const from = process.env.ORDER_FROM_EMAIL || process.env.SMTP_USER || 'trendnest099@gmail.com';
   const subject = purpose === 'password_reset' ? 'TrendNest99 password reset OTP' : 'TrendNest99 OTP verification';
   const text = `Your OTP code is: ${code}\n\nThis code will expire soon. If you did not request it, ignore this email.`;
+
+  // Prefer HTTPS email provider in production hosts (Render blocks outbound SMTP in many regions).
+  if (process.env.RESEND_API_KEY) {
+    const sent = await sendEmailViaResend({ to, subject, text });
+    if (sent.ok) return { ok: true };
+    console.error('OTP email (Resend) failed:', sent.error);
+    return { ok: false, error: sent.error || 'Email send failed' };
+  }
+
+  const transport = getMailTransport();
+  if (!transport) {
+    return { ok: false, error: 'Email not configured (set RESEND_API_KEY or SMTP_* env vars)' };
+  }
+  const from = process.env.ORDER_FROM_EMAIL || process.env.SMTP_USER || 'trendnest099@gmail.com';
 
   try {
     await transport.sendMail({
