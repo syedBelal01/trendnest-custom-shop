@@ -463,6 +463,17 @@ const ReviewSchema = new mongoose.Schema(
       default: [],
       _id: false,
     },
+    media: {
+      type: [
+        {
+          url: { type: String, required: true },
+          publicId: { type: String, default: '' },
+          kind: { type: String, enum: ['image', 'video'], default: 'image' },
+        },
+      ],
+      default: [],
+      _id: false,
+    },
   },
   { versionKey: false, timestamps: true }
 );
@@ -2997,6 +3008,7 @@ app.post('/api/reviews', mongoReady, requireAuth, async (req, res) => {
     const rating = Number(req.body?.rating);
     const comment = String(req.body?.comment || '').trim();
     const images = Array.isArray(req.body?.images) ? req.body.images : [];
+    const media = Array.isArray(req.body?.media) ? req.body.media : [];
 
     if (!productId) {
       res.status(400).json({ error: 'Missing productId' });
@@ -3029,6 +3041,15 @@ app.post('/api/reviews', mongoReady, requireAuth, async (req, res) => {
       }))
       .filter((x) => x.url.length > 0);
 
+    const safeMedia = media
+      .slice(0, 3)
+      .map((x) => ({
+        url: String(x?.url || '').trim(),
+        publicId: String(x?.publicId || '').trim(),
+        kind: String(x?.kind || 'image').trim().toLowerCase() === 'video' ? 'video' : 'image',
+      }))
+      .filter((x) => x.url.length > 0);
+
     const created = await Review.create({
       _id: id,
       productId,
@@ -3037,6 +3058,7 @@ app.post('/api/reviews', mongoReady, requireAuth, async (req, res) => {
       rating,
       comment,
       images: safeImages,
+      media: safeMedia,
     });
 
     res.status(201).json({ review: serializeReview(created) });
@@ -5742,6 +5764,40 @@ app.post('/api/upload/review-image', mongoReady, requireAuth, (req, res, next) =
         return;
       }
       res.json({ url: result.secure_url, publicId: result.public_id });
+    }
+  );
+  stream.end(req.file.buffer);
+});
+
+app.post('/api/upload/review-media', mongoReady, requireAuth, (req, res, next) => {
+  upload.single('file')(req, res, (err) => {
+    if (err) {
+      res.status(400).json({ error: err.message || 'Upload error' });
+      return;
+    }
+    next();
+  });
+}, (req, res) => {
+  if (!cloudName || !cloudKey || !cloudSecret) {
+    res.status(503).json({ error: 'Cloudinary is not configured on the server (.env)' });
+    return;
+  }
+  if (!req.file?.buffer) {
+    res.status(400).json({ error: 'Missing file (field name: file)' });
+    return;
+  }
+
+  const mime = String(req.file.mimetype || '');
+  const isVideo = mime.startsWith('video/');
+  const stream = cloudinary.uploader.upload_stream(
+    { folder: 'trendnest/reviews', resource_type: isVideo ? 'video' : 'image' },
+    (err, result) => {
+      if (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Cloudinary upload failed' });
+        return;
+      }
+      res.json({ url: result.secure_url, publicId: result.public_id, kind: isVideo ? 'video' : 'image' });
     }
   );
   stream.end(req.file.buffer);

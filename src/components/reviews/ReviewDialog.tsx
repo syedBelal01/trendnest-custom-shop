@@ -2,13 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { createReviewApi, uploadReviewImageApi, type ReviewImage } from '@/lib/reviewsApi';
+import { createReviewApi, uploadReviewMediaApi, type ReviewMedia } from '@/lib/reviewsApi';
 import { prepareReviewImageFile } from '@/lib/processProductImage';
 
-type LocalReviewPhoto = {
+type LocalReviewMedia = {
   id: string;
   file: File;
   previewUrl: string;
+  kind: 'image' | 'video';
 };
 
 const MAX_PHOTOS = 3;
@@ -19,10 +20,12 @@ export default function ReviewDialog(props: {
   productId: string;
   productName: string;
   onSubmitted?: () => void;
+  initialRating?: number;
+  lockRating?: boolean;
 }) {
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState('');
-  const [photos, setPhotos] = useState<LocalReviewPhoto[]>([]);
+  const [media, setMedia] = useState<LocalReviewMedia[]>([]);
   const [busy, setBusy] = useState(false);
   const [retakeIdx, setRetakeIdx] = useState<number | null>(null);
   const captureInputRef = useRef<HTMLInputElement | null>(null);
@@ -30,8 +33,12 @@ export default function ReviewDialog(props: {
 
   useEffect(() => {
     if (!props.open) return;
+    if (props.initialRating && Number.isFinite(props.initialRating)) {
+      const v = Math.max(1, Math.min(5, Math.floor(Number(props.initialRating))));
+      setRating(v);
+    }
     return () => {
-      for (const p of photos) URL.revokeObjectURL(p.previewUrl);
+      for (const m of media) URL.revokeObjectURL(m.previewUrl);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.open]);
@@ -40,22 +47,24 @@ export default function ReviewDialog(props: {
     return rating >= 1 && rating <= 5 && !busy;
   }, [rating, busy]);
 
-  const canAddMore = photos.length < MAX_PHOTOS && !busy;
+  const canAddMore = media.length < MAX_PHOTOS && !busy;
 
   const clearInputs = () => {
     if (captureInputRef.current) captureInputRef.current.value = '';
     if (galleryInputRef.current) galleryInputRef.current.value = '';
   };
 
-  const addOrReplacePhoto = async (raw: File) => {
-    const processed = await prepareReviewImageFile(raw);
-    const next: LocalReviewPhoto = {
+  const addOrReplaceMedia = async (raw: File) => {
+    const kind: 'image' | 'video' = raw.type?.startsWith('video/') ? 'video' : 'image';
+    const processed = kind === 'image' ? await prepareReviewImageFile(raw) : raw;
+    const next: LocalReviewMedia = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       file: processed,
       previewUrl: URL.createObjectURL(processed),
+      kind,
     };
 
-    setPhotos((prev) => {
+    setMedia((prev) => {
       if (retakeIdx !== null) {
         const idx = Math.max(0, Math.min(prev.length - 1, retakeIdx));
         const existing = prev[idx];
@@ -74,25 +83,25 @@ export default function ReviewDialog(props: {
   const submit = async () => {
     setBusy(true);
     try {
-      let images: ReviewImage[] = [];
-      if (photos.length) {
-        images = [];
-        for (const p of photos.slice(0, MAX_PHOTOS)) {
-          const img = await uploadReviewImageApi(p.file);
-          images.push(img);
+      let uploaded: ReviewMedia[] = [];
+      if (media.length) {
+        uploaded = [];
+        for (const m of media.slice(0, MAX_PHOTOS)) {
+          const out = await uploadReviewMediaApi(m.file);
+          uploaded.push(out);
         }
       }
       await createReviewApi({
         productId: props.productId,
         rating,
         comment: comment.trim(),
-        images,
+        media: uploaded,
       });
       toast.success('Thanks! Your review was submitted.');
       props.onOpenChange(false);
       setComment('');
-      setPhotos((prev) => {
-        for (const p of prev) URL.revokeObjectURL(p.previewUrl);
+      setMedia((prev) => {
+        for (const m of prev) URL.revokeObjectURL(m.previewUrl);
         return [];
       });
       setRating(5);
@@ -104,10 +113,10 @@ export default function ReviewDialog(props: {
     }
   };
 
-  const removePhoto = (idx: number) => {
-    setPhotos((prev) => {
-      const p = prev[idx];
-      if (p) URL.revokeObjectURL(p.previewUrl);
+  const removeMediaAt = (idx: number) => {
+    setMedia((prev) => {
+      const m = prev[idx];
+      if (m) URL.revokeObjectURL(m.previewUrl);
       return prev.filter((_, i) => i !== idx);
     });
     if (retakeIdx === idx) setRetakeIdx(null);
@@ -135,8 +144,12 @@ export default function ReviewDialog(props: {
                 <button
                   key={v}
                   type="button"
-                  onClick={() => setRating(v)}
-                  className={`text-3xl sm:text-2xl leading-none p-1 ${active ? 'text-yellow-500' : 'text-muted-foreground/40'}`}
+                  onClick={() => {
+                    if (props.lockRating) return;
+                    setRating(v);
+                  }}
+                  disabled={!!props.lockRating}
+                  className={`text-3xl sm:text-2xl leading-none p-1 ${active ? 'text-yellow-500' : 'text-muted-foreground/40'} ${props.lockRating ? 'cursor-default' : ''}`}
                   aria-label={`${v} star`}
                 >
                   ★
@@ -155,20 +168,20 @@ export default function ReviewDialog(props: {
           {/* Photo section */}
           <div className="space-y-2.5">
             <div className="flex items-center justify-between gap-2">
-              <div className="text-xs text-muted-foreground">Add photos (optional, up to {MAX_PHOTOS})</div>
-              <div className="text-xs text-muted-foreground">{photos.length}/{MAX_PHOTOS}</div>
+              <div className="text-xs text-muted-foreground">Add media (optional, up to {MAX_PHOTOS})</div>
+              <div className="text-xs text-muted-foreground">{media.length}/{MAX_PHOTOS}</div>
             </div>
 
             <input
               ref={captureInputRef}
               type="file"
-              accept="image/*"
+              accept="image/*,video/*"
               capture="environment"
               className="hidden"
               onChange={(e) => {
                 const f = e.target.files?.[0];
                 if (!f) return;
-                void addOrReplacePhoto(f).catch((err) => {
+                void addOrReplaceMedia(f).catch((err) => {
                   toast.error(err instanceof Error ? err.message : 'Could not process image');
                   setRetakeIdx(null);
                   clearInputs();
@@ -178,12 +191,12 @@ export default function ReviewDialog(props: {
             <input
               ref={galleryInputRef}
               type="file"
-              accept="image/*"
+              accept="image/*,video/*"
               className="hidden"
               onChange={(e) => {
                 const f = e.target.files?.[0];
                 if (!f) return;
-                void addOrReplacePhoto(f).catch((err) => {
+                void addOrReplaceMedia(f).catch((err) => {
                   toast.error(err instanceof Error ? err.message : 'Could not process image');
                   setRetakeIdx(null);
                   clearInputs();
@@ -203,7 +216,7 @@ export default function ReviewDialog(props: {
                   captureInputRef.current?.click();
                 }}
               >
-                📷 Capture Image
+                📷 Capture
               </Button>
               <Button
                 type="button"
@@ -220,12 +233,16 @@ export default function ReviewDialog(props: {
             </div>
 
             {/* Photo previews — responsive grid */}
-            {photos.length ? (
+            {media.length ? (
               <div className="grid grid-cols-3 gap-2">
-                {photos.map((p, idx) => (
-                  <div key={p.id} className="rounded-xl border bg-muted/20 overflow-hidden">
+                {media.map((m, idx) => (
+                  <div key={m.id} className="rounded-xl border bg-muted/20 overflow-hidden">
                     <div className="aspect-square w-full bg-muted">
-                      <img src={p.previewUrl} alt={`Review photo ${idx + 1}`} className="w-full h-full object-cover" />
+                      {m.kind === 'video' ? (
+                        <video src={m.previewUrl} className="w-full h-full object-cover" controls />
+                      ) : (
+                        <img src={m.previewUrl} alt={`Review media ${idx + 1}`} className="w-full h-full object-cover" />
+                      )}
                     </div>
                     <div className="p-1.5 flex items-center justify-between gap-1">
                       <Button
@@ -247,7 +264,7 @@ export default function ReviewDialog(props: {
                         variant="ghost"
                         disabled={busy}
                         className="text-[10px] h-7 px-2"
-                        onClick={() => removePhoto(idx)}
+                        onClick={() => removeMediaAt(idx)}
                       >
                         ✕
                       </Button>

@@ -22,6 +22,8 @@ export default function AccountOrdersPage() {
   const [promptIds, setPromptIds] = useState<Set<string>>(new Set());
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewProductId, setReviewProductId] = useState<string | null>(null);
+  const [reviewRating, setReviewRating] = useState(5);
+  const [draftRatings, setDraftRatings] = useState<Record<string, number>>({});
   const { products } = useProducts();
 
   useEffect(() => {
@@ -47,8 +49,13 @@ export default function AccountOrdersPage() {
     return () => { mounted = false; };
   }, []);
 
-  const openReview = (productId: string) => {
+  const openReview = (productId: string, rating?: number) => {
     setReviewProductId(productId);
+    if (rating != null && Number.isFinite(Number(rating))) {
+      setReviewRating(Math.max(1, Math.min(5, Math.floor(Number(rating)))));
+    } else {
+      setReviewRating(5);
+    }
     setReviewOpen(true);
   };
 
@@ -113,13 +120,39 @@ export default function AccountOrdersPage() {
                         </div>
                       </div>
                       {o.status === 'delivered' && promptIds.has(i.productId) && (
-                        <button
-                          type="button"
-                          className="self-start text-xs font-semibold text-primary hover:underline active:opacity-70 py-0.5"
-                          onClick={() => openReview(i.productId)}
-                        >
-                          Write a Review →
-                        </button>
+                        <div className="pt-1 space-y-1.5">
+                          <div className="flex items-center gap-2">
+                            {Array.from({ length: 5 }, (_, idx) => {
+                              const v = idx + 1;
+                              const cur = draftRatings[i.productId] ?? 5;
+                              const active = v <= cur;
+                              return (
+                                <button
+                                  key={v}
+                                  type="button"
+                                  className={`text-xl leading-none ${active ? 'text-yellow-500' : 'text-muted-foreground/40'}`}
+                                  aria-label={`${v} star`}
+                                  onClick={() => setDraftRatings(p => ({ ...p, [i.productId]: v }))}
+                                >
+                                  ★
+                                </button>
+                              );
+                            })}
+                            <button
+                              type="button"
+                              className="ml-1 text-xs font-semibold text-primary hover:underline active:opacity-70"
+                              onClick={() => {
+                                const r = draftRatings[i.productId] ?? 5;
+                                openReview(i.productId, r);
+                              }}
+                            >
+                              Submit →
+                            </button>
+                          </div>
+                          <div className="text-[11px] text-muted-foreground">
+                            Select a star rating first, then add comment and media.
+                          </div>
+                        </div>
                       )}
                     </div>
                   ))}
@@ -168,6 +201,7 @@ export default function AccountOrdersPage() {
           onOpenChange={setReviewOpen}
           productId={reviewProductId}
           productName={reviewProductName}
+          initialRating={reviewRating}
           onSubmitted={async () => {
             try {
               const prompts = await fetchReviewPromptsApi();

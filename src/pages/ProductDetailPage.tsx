@@ -671,7 +671,24 @@ export default function ProductDetailPage() {
                     <span className="text-yellow-500 text-sm">{'★'.repeat(r.rating)}{'☆'.repeat(5 - r.rating)}</span>
                   </div>
                   <p className="text-sm text-muted-foreground leading-relaxed">{r.comment}</p>
-                  {r.images?.length ? (
+                  {r.media?.length ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {r.media.slice(0, 4).map((m, idx) => (
+                        <a key={idx} href={m.url} target="_blank" rel="noreferrer" className="block">
+                          {m.kind === 'video' ? (
+                            <video
+                              src={m.url}
+                              className="h-16 w-16 rounded-xl object-cover border border-border bg-muted"
+                              controls
+                              muted
+                            />
+                          ) : (
+                            <img src={m.url} alt="Review" className="h-16 w-16 rounded-xl object-cover border border-border" />
+                          )}
+                        </a>
+                      ))}
+                    </div>
+                  ) : r.images?.length ? (
                     <div className="mt-3 flex flex-wrap gap-2">
                       {r.images.slice(0, 4).map((img, idx) => (
                         <a key={idx} href={img.url} target="_blank" rel="noreferrer">

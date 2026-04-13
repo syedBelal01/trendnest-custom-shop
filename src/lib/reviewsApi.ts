@@ -3,6 +3,8 @@ import { withAuthHeaders } from '@/lib/authApi';
 
 export type ReviewImage = { url: string; publicId?: string };
 
+export type ReviewMedia = { url: string; publicId?: string; kind: 'image' | 'video' };
+
 export type Review = {
   id: string;
   productId: string;
@@ -11,6 +13,7 @@ export type Review = {
   rating: number;
   comment: string;
   images?: ReviewImage[];
+  media?: ReviewMedia[];
   createdAt?: string;
 };
 
@@ -67,11 +70,44 @@ export async function uploadReviewImageApi(
   return { url: String(data.url), publicId: data.publicId ? String(data.publicId) : undefined };
 }
 
+export async function uploadReviewMediaApi(
+  fileOrBlob: File | Blob,
+  opts?: { filename?: string }
+): Promise<ReviewMedia> {
+  const fd = new FormData();
+  const filename =
+    opts?.filename ||
+    (fileOrBlob instanceof File ? fileOrBlob.name : '') ||
+    `review-${Date.now()}`;
+  fd.append('file', fileOrBlob, filename);
+  const res = await fetch(apiUrl('/api/upload/review-media'), {
+    method: 'POST',
+    credentials: 'include',
+    headers: withAuthHeaders(),
+    body: fd,
+  });
+  const data = (await res.json().catch(() => ({}))) as {
+    url?: unknown;
+    publicId?: unknown;
+    kind?: unknown;
+    error?: unknown;
+  };
+  if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Upload failed');
+  const kind: ReviewMedia['kind'] =
+    typeof data.kind === 'string' && data.kind.toLowerCase() === 'video' ? 'video' : 'image';
+  return {
+    url: String(data.url ?? ''),
+    publicId: data.publicId != null ? String(data.publicId) : undefined,
+    kind,
+  };
+}
+
 export async function createReviewApi(payload: {
   productId: string;
   rating: number;
   comment: string;
   images?: ReviewImage[];
+  media?: ReviewMedia[];
 }): Promise<Review> {
   const res = await fetch(apiUrl('/api/reviews'), {
     method: 'POST',

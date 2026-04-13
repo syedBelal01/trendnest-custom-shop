@@ -57,6 +57,7 @@ import { useProducts } from '@/contexts/ProductsContext';
 import { fetchShippingServiceabilityApi, isShippingServiceabilityError, type ShippingServiceabilityResult } from '@/lib/shippingApi';
 import { IndianPhoneInput } from '@/components/forms/IndianPhoneInput';
 import { clampIndianPhoneInput, isCompleteValidIndianMobile, isIndianPhoneValid, validateIndianPhone } from '@/lib/indianPhone';
+import { validateCouponApi } from '@/lib/couponsApi';
 
 function itemSummary(i: CartItem): string {
   const parts: string[] = [];
@@ -94,11 +95,13 @@ function matchesAddressSearch(a: Address, q: string): boolean {
 }
 
 export default function CheckoutPage() {
-  const { items, subtotal, total, discount, couponCode, clearCart, totalsForPaymentMethod, unitPriceForItem, reconcileWithStock } = useCart();
+  const { items, subtotal, total, discount, couponCode, clearCart, totalsForPaymentMethod, unitPriceForItem, reconcileWithStock, applyCoupon } = useCart();
   const navigate = useNavigate();
   const { refreshProducts } = useProducts();
   const { user, loading: authLoading, refreshAuth } = useAuth();
   const { method: paymentMethod, setMethod: setPaymentMethod } = usePaymentMethod();
+  const [couponDraft, setCouponDraft] = useState('');
+  const [couponBusy, setCouponBusy] = useState(false);
   const [form, setForm] = useState<CustomerInfo>({
     name: '',
     email: '',
@@ -123,6 +126,10 @@ export default function CheckoutPage() {
   const lastOtpEmail = useRef<string | null>(null);
   const lastAutoCity = useRef<string | null>(null);
   const lastAutoState = useRef<string | null>(null);
+
+  useEffect(() => {
+    setCouponDraft(couponCode ?? '');
+  }, [couponCode]);
 
   const [savedAddresses, setSavedAddresses] = useState<Address[]>([]);
   const [addressSearchQuery, setAddressSearchQuery] = useState('');
@@ -775,6 +782,29 @@ export default function CheckoutPage() {
     }
   };
 
+  const applyCheckoutCoupon = async () => {
+    const trimmed = couponDraft.trim();
+    if (!trimmed) {
+      toast.error('Enter coupon code');
+      return;
+    }
+    setCouponBusy(true);
+    try {
+      const computed = totalsForPaymentMethod(paymentMethod);
+      const r = await validateCouponApi({
+        code: trimmed,
+        subtotal: computed.subtotal,
+        items: items.map(i => ({ productId: i.product.id, quantity: i.quantity, selectedVariant: i.selectedVariant })),
+      });
+      applyCoupon(r.couponCode, r.discount);
+      toast.success(`Coupon applied! You save ₹${r.discount}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Invalid or expired coupon');
+    } finally {
+      setCouponBusy(false);
+    }
+  };
+
   if (orderPlaced) {
     return (
       <div className="max-w-md mx-auto px-3 sm:px-4 py-16 sm:py-20 text-center">
@@ -1339,10 +1369,27 @@ export default function CheckoutPage() {
               </div>
               {discount > 0 && (
                 <div className="flex justify-between text-primary">
-                  <span>Discount</span>
+                  <span>Discount {couponCode ? `(${couponCode})` : ''}</span>
                   <span>-₹{discount}</span>
                 </div>
               )}
+              <div className="pt-2">
+                <div className="flex gap-2">
+                  <Input
+                    value={couponDraft}
+                    onChange={e => setCouponDraft(e.target.value.toUpperCase())}
+                    placeholder="Coupon code"
+                    className="h-10 text-sm"
+                    disabled={couponBusy}
+                  />
+                  <Button type="button" variant="outline" className="h-10 px-4" onClick={() => void applyCheckoutCoupon()} disabled={couponBusy}>
+                    {couponBusy ? 'Applying…' : 'Apply'}
+                  </Button>
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Coupons are validated automatically for the items in your cart.
+                </p>
+              </div>
               <div className="flex justify-between text-muted-foreground">
                 <span>
                   Shipping {shippingQuoteLoading ? '(calculating…)' : ''}
