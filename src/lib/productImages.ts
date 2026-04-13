@@ -10,6 +10,8 @@ function firstUrlInList(list: string[] | undefined): string | undefined {
 
 /** Card / list thumbnail: first image from first variant option that has images, else `product.images`. */
 export function productPrimaryImage(product: Pick<Product, 'images' | 'variantOptions'>): string {
+  const root = firstUrlInList(product.images);
+  if (root) return root;
   const opts = product.variantOptions?.filter(v => v.name?.trim());
   if (opts?.length) {
     for (const o of opts) {
@@ -17,7 +19,7 @@ export function productPrimaryImage(product: Pick<Product, 'images' | 'variantOp
       if (u) return u;
     }
   }
-  return firstUrlInList(product.images) || PLACEHOLDER;
+  return PLACEHOLDER;
 }
 
 /** Cart line: image for the chosen variant when using `variantOptions`. */
@@ -38,6 +40,7 @@ export function galleryImagesForSelection(
   product: Product,
   selectedVariant: string
 ): string[] {
+  const root = (product.images ?? []).map(s => s.trim()).filter(Boolean);
   if (product.variantOptions?.length) {
     const names = productVariantNames(product);
     const effective =
@@ -46,7 +49,10 @@ export function galleryImagesForSelection(
         : names[0] || '';
     const opt = product.variantOptions.find(v => v.name.trim() === effective.trim());
     const fromVariant = (opt?.images ?? []).map(s => s.trim()).filter(Boolean);
-    if (fromVariant.length) return fromVariant;
+    if (fromVariant.length) {
+      // Root images are still included so admin updates to product.images always reflect on the storefront.
+      return [...fromVariant, ...root].filter((u, i, arr) => arr.indexOf(u) === i);
+    }
   }
-  return (product.images ?? []).map(s => s.trim()).filter(Boolean);
+  return root;
 }

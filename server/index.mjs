@@ -3879,11 +3879,15 @@ function buildProductUpdateSet(src) {
           ...vm,
           items: vm.items.map((it) => {
             const price = Number(it?.price);
+            const images = Array.isArray(it?.images) ? it.images.map((u) => String(u).trim()).filter(Boolean) : undefined;
+            const image = it?.image != null ? String(it.image).trim() : undefined;
             return {
               ...it,
               // Storefront compares keys as strings; coerce so admin/API JSON (number vs string) stays consistent.
               key: it?.key == null ? it?.key : String(it.key),
               codPrice: Number.isFinite(price) ? price : undefined,
+              images,
+              image,
             };
           }),
         };
