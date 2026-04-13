@@ -129,7 +129,7 @@ export default function ProductDetailPage() {
     setSelectedSize(product.sizes?.[0] || '');
     if (product.variantModel?.items?.length) {
       const items = product.variantModel.items;
-      const first = (items as any).find((x: any) => x && x.isDefault) ?? items[0];
+      const first = items.find(x => x.isDefault) ?? items[0];
       setSelectedVariantKey(first.key);
       setVariantAttrs({ ...(first.attrs ?? {}) });
       setSelectedVariant('');
@@ -255,8 +255,8 @@ export default function ProductDetailPage() {
     ? Number(selectedVariantItem.onlinePrice)
     : product.onlinePrice != null ? Number(product.onlinePrice) : codPrice;
   const selectedPrice = paymentMethod === 'razorpay' ? onlinePrice : codPrice;
-  const mrp = hasVariantModel && selectedVariantItem && (selectedVariantItem as any).originalPrice != null
-    ? Number((selectedVariantItem as any).originalPrice)
+  const mrp = hasVariantModel && selectedVariantItem && selectedVariantItem.originalPrice != null
+    ? Number(selectedVariantItem.originalPrice)
     : product.originalPrice != null ? Number(product.originalPrice) : null;
   const discount = mrp && Number.isFinite(mrp) && mrp > 0 && Number.isFinite(selectedPrice) && selectedPrice > 0
     ? Math.round(((mrp - selectedPrice) / mrp) * 100) : 0;
@@ -712,7 +712,7 @@ export default function ProductDetailPage() {
                   className="rounded-2xl border border-border bg-card overflow-hidden hover:shadow-sm transition-shadow"
                 >
                   <div className="aspect-square bg-muted">
-                    <img src={(p.images?.[0] ?? '') as any} alt={p.name} className="h-full w-full object-cover" loading="lazy" />
+                    <img src={p.images?.[0] ?? ''} alt={p.name} className="h-full w-full object-cover" loading="lazy" />
                   </div>
                   <div className="p-3">
                     <div className="text-sm font-semibold line-clamp-2">{p.name}</div>
