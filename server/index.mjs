@@ -1826,7 +1826,7 @@ function parseFrontendOrigins() {
   const raw = [process.env.FRONTEND_ORIGIN, process.env.FRONTEND_ORIGINS].filter(Boolean).join(',');
   return raw
     .split(',')
-    .map((s) => s.trim())
+    .map((s) => s.trim().replace(/\/+$/, ''))
     .filter(Boolean);
 }
 
@@ -1838,7 +1838,7 @@ const DEFAULT_FRONTEND_ORIGINS = [
 
 const allowedFrontendOrigins = (() => {
   const fromEnv = parseFrontendOrigins();
-  return fromEnv.length > 0 ? fromEnv : DEFAULT_FRONTEND_ORIGINS;
+  return Array.from(new Set([...DEFAULT_FRONTEND_ORIGINS, ...fromEnv]));
 })();
 const ALLOW_VERCEL_PREVIEW_ORIGINS = (process.env.ALLOW_VERCEL_PREVIEW_ORIGINS || '').trim().toLowerCase() === 'true';
 
