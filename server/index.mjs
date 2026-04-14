@@ -7,7 +7,6 @@ import { v2 as cloudinary } from 'cloudinary';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import nodemailer from 'nodemailer';
 import PDFDocument from 'pdfkit';
 import crypto from 'crypto';
 import Razorpay from 'razorpay';
@@ -1553,31 +1552,13 @@ async function ensureShiprocketShipmentForOrderId(orderId, source = 'system') {
   }
 }
 
-function getMailTransport() {
-  const user = process.env.SMTP_USER || process.env.ORDER_FROM_EMAIL;
-  const pass = process.env.SMTP_PASS;
-  if (!user || !pass) return null;
-  return nodemailer.createTransport({
-    host: process.env.SMTP_HOST || 'smtp.gmail.com',
-    port: Number(process.env.SMTP_PORT || 587),
-    secure: process.env.SMTP_SECURE === 'true',
-    auth: { user, pass },
-    // Avoid hanging requests when SMTP is slow/unreachable.
-    connectionTimeout: 12_000,
-    greetingTimeout: 12_000,
-    socketTimeout: 20_000,
-  });
-}
-
 async function sendEmailViaResend({ to, subject, text, html }) {
   const key = process.env.RESEND_API_KEY ? String(process.env.RESEND_API_KEY).trim() : '';
   if (!key) return { ok: false, error: 'RESEND_API_KEY not set' };
-  const from = process.env.RESEND_FROM_EMAIL
-    ? String(process.env.RESEND_FROM_EMAIL).trim()
-    : process.env.ORDER_FROM_EMAIL
-      ? String(process.env.ORDER_FROM_EMAIL).trim()
-      : '';
-  if (!from) return { ok: false, error: 'RESEND_FROM_EMAIL (or ORDER_FROM_EMAIL) not set' };
+  const from =
+    process.env.RESEND_FROM_EMAIL && String(process.env.RESEND_FROM_EMAIL).trim()
+      ? String(process.env.RESEND_FROM_EMAIL).trim()
+      : 'TrendNest <noreply@trendnest99.in>';
 
   const payload = { from, to, subject, text, html };
   try {
@@ -1598,13 +1579,7 @@ async function sendEmailViaResend({ to, subject, text, html }) {
 }
 
 async function sendOrderEmails(orderLean) {
-  const from = process.env.ORDER_FROM_EMAIL || process.env.SMTP_USER || 'trendnest099@gmail.com';
-  const adminTo = process.env.ORDER_ADMIN_EMAIL || from;
-  const transport = getMailTransport();
-  if (!transport) {
-    console.warn('Order emails skipped: SMTP_USER/SMTP_PASS (or ORDER_FROM_EMAIL) not set.');
-    return { ok: false, error: 'SMTP not configured' };
-  }
+  const adminTo = process.env.ORDER_ADMIN_EMAIL ? String(process.env.ORDER_ADMIN_EMAIL).trim() : '';
   const id = orderLean._id || orderLean.id;
   const { customer, items, subtotal, discount, total, couponCode } = orderLean;
   const addr = `${customer.address}, ${customer.city} - ${customer.pincode}`;
@@ -1630,29 +1605,22 @@ async function sendOrderEmails(orderLean) {
   const adminSubject = `New order ${id} — ₹${total}`;
   const adminText = `New order received.\n\nOrder ID: ${id}\nCustomer: ${customer.name} <${customer.email}>\nPhone: ${customer.phone}\nAddress: ${addr}\n\nItems:\n${linesText}\n\nTotal: ₹${total}\nStatus: ${orderLean.status}`;
 
-  await transport.sendMail({
-    from: `"TrendNest" <${from}>`,
+  const customerSent = await sendEmailViaResend({
     to: customer.email.trim(),
     subject: customerSubject,
     text: customerText,
     html: customerHtml,
   });
-  await transport.sendMail({
-    from: `"TrendNest" <${from}>`,
-    to: adminTo,
-    subject: adminSubject,
-    text: adminText,
-  });
+  if (!customerSent.ok) return { ok: false, error: customerSent.error || 'Failed to send customer order email' };
+
+  if (adminTo) {
+    const adminSent = await sendEmailViaResend({ to: adminTo, subject: adminSubject, text: adminText });
+    if (!adminSent.ok) return { ok: false, error: adminSent.error || 'Failed to send admin order email' };
+  }
   return { ok: true };
 }
 
 async function sendOrderStatusEmail({ orderLean, kind }) {
-  const from = process.env.ORDER_FROM_EMAIL || process.env.SMTP_USER || 'trendnest099@gmail.com';
-  const transport = getMailTransport();
-  if (!transport) {
-    console.warn('Status email skipped: SMTP_USER/SMTP_PASS (or ORDER_FROM_EMAIL) not set.');
-    return { ok: false, error: 'SMTP not configured' };
-  }
   const id = orderLean._id || orderLean.id;
   const { customer } = orderLean;
 
@@ -1660,28 +1628,16 @@ async function sendOrderStatusEmail({ orderLean, kind }) {
     const subject = `Your order is shipped — ${id} — TrendNest`;
     const text = `Hi ${customer.name},\n\nGood news! Your order has been shipped.\n\nOrder ID: ${id}\n\nWe will notify you when it is delivered.\n\n— TrendNest`;
     const html = `<p>Hi ${escapeHtml(customer.name)},</p><p><strong>Good news!</strong> Your order has been shipped.</p><p><strong>Order ID:</strong> ${escapeHtml(id)}</p><p>We will notify you when it is delivered.</p><p>— TrendNest</p>`;
-    await transport.sendMail({
-      from: `"TrendNest" <${from}>`,
-      to: customer.email.trim(),
-      subject,
-      text,
-      html,
-    });
-    return { ok: true };
+    const sent = await sendEmailViaResend({ to: customer.email.trim(), subject, text, html });
+    return sent.ok ? { ok: true } : { ok: false, error: sent.error || 'Failed to send shipped email' };
   }
 
   if (kind === 'delivered') {
     const subject = `Delivered — Thank you for shopping — ${id} — TrendNest`;
     const text = `Hi ${customer.name},\n\nThank you for shopping with TrendNest99.\n\nYour order has been delivered.\nOrder ID: ${id}\n\nWe would love your feedback. If you liked the product, please leave a review.\n\n— TrendNest`;
     const html = `<p>Hi ${escapeHtml(customer.name)},</p><p>Thank you for shopping with TrendNest99.</p><p><strong>Your order has been delivered.</strong></p><p><strong>Order ID:</strong> ${escapeHtml(id)}</p><p>We would love your feedback. If you liked the product, please leave a review.</p><p>— TrendNest</p>`;
-    await transport.sendMail({
-      from: `"TrendNest" <${from}>`,
-      to: customer.email.trim(),
-      subject,
-      text,
-      html,
-    });
-    return { ok: true };
+    const sent = await sendEmailViaResend({ to: customer.email.trim(), subject, text, html });
+    return sent.ok ? { ok: true } : { ok: false, error: sent.error || 'Failed to send delivered email' };
   }
 
   return { ok: false, error: 'Unknown status email type' };
@@ -1832,6 +1788,8 @@ function parseFrontendOrigins() {
 
 const DEFAULT_FRONTEND_ORIGINS = [
   'http://localhost:3000',
+  'http://localhost:5173',
+  'http://localhost:8081',
   'https://trendnest99.in',
   'https://www.trendnest99.in',
 ];
@@ -2422,37 +2380,71 @@ function genNumericCode(length) {
   return String(n).padStart(length, '0');
 }
 
+function otpEmailHtml({ code, purpose }) {
+  const title = purpose === 'password_reset' ? 'Reset your password' : 'Verify your email';
+  const subtitle =
+    purpose === 'password_reset'
+      ? 'Use this code to reset your TrendNest account password.'
+      : 'Use this code to verify your email for TrendNest.';
+  const purposeLabel = purpose === 'password_reset' ? 'Password reset code' : 'Verification code';
+  const safeCode = escapeHtml(code);
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>${escapeHtml(title)}</title>
+  </head>
+  <body style="margin:0;padding:0;background:#f6f7fb;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f6f7fb;padding:24px 0;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="560" cellspacing="0" cellpadding="0" style="background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #eceff4;">
+            <tr>
+              <td style="padding:22px 24px;background:#0b1220;color:#fff;">
+                <div style="font-size:16px;font-weight:700;letter-spacing:.2px;">TrendNest</div>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:24px;">
+                <h1 style="margin:0 0 8px 0;font-size:20px;line-height:1.3;color:#0b1220;">${escapeHtml(title)}</h1>
+                <p style="margin:0 0 18px 0;font-size:14px;line-height:1.6;color:#475569;">${escapeHtml(
+                  subtitle
+                )}</p>
+
+                <div style="background:#f1f5f9;border:1px solid #e2e8f0;border-radius:12px;padding:16px;text-align:center;">
+                  <div style="font-size:12px;color:#64748b;margin-bottom:8px;">${escapeHtml(purposeLabel)}</div>
+                  <div style="font-size:30px;font-weight:800;letter-spacing:6px;color:#0b1220;">${safeCode}</div>
+                </div>
+
+                <p style="margin:18px 0 0 0;font-size:13px;line-height:1.6;color:#64748b;">
+                  This code expires soon. If you didn’t request this, you can safely ignore this email.
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:16px 24px;background:#f8fafc;border-top:1px solid #eef2f7;">
+                <p style="margin:0;font-size:12px;color:#94a3b8;">© ${new Date().getFullYear()} TrendNest99</p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`;
+}
+
 async function sendOtpEmail({ to, code, purpose }) {
   const subject = purpose === 'password_reset' ? 'TrendNest99 password reset OTP' : 'TrendNest99 OTP verification';
   const text = `Your OTP code is: ${code}\n\nThis code will expire soon. If you did not request it, ignore this email.`;
+  const html = otpEmailHtml({ code, purpose });
 
-  // Prefer HTTPS email provider in production hosts (Render blocks outbound SMTP in many regions).
-  if (process.env.RESEND_API_KEY) {
-    const sent = await sendEmailViaResend({ to, subject, text });
-    if (sent.ok) return { ok: true };
-    console.error('OTP email (Resend) failed:', sent.error);
-    return { ok: false, error: sent.error || 'Email send failed' };
-  }
-
-  const transport = getMailTransport();
-  if (!transport) {
-    return { ok: false, error: 'Email not configured (set RESEND_API_KEY or SMTP_* env vars)' };
-  }
-  const from = process.env.ORDER_FROM_EMAIL || process.env.SMTP_USER || 'trendnest099@gmail.com';
-
-  try {
-    await transport.sendMail({
-      from,
-      to,
-      subject,
-      text,
-    });
-    return { ok: true };
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : 'SMTP send failed';
-    console.error('OTP email failed:', msg);
-    return { ok: false, error: msg };
-  }
+  const sent = await sendEmailViaResend({ to, subject, text, html });
+  if (sent.ok) return { ok: true };
+  console.error('OTP email (Resend) failed:', sent.error);
+  return { ok: false, error: sent.error || 'Email send failed' };
 }
 
 app.get('/api/auth/me', async (req, res) => {
@@ -2499,6 +2491,72 @@ app.get('/api/auth/email-exists', async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Failed to check email' });
+  }
+});
+
+// Registration initiates an email OTP challenge (verified in /api/auth/otp/verify).
+app.post('/api/auth/register', async (req, res) => {
+  try {
+    const email = String(req.body?.email || '').trim();
+    const name = String(req.body?.name || '').trim();
+    const phone = req.body?.phone;
+
+    if (!email || !simpleEmailValid(email)) {
+      res.status(400).json({ error: 'Invalid email' });
+      return;
+    }
+    if (!name) {
+      res.status(400).json({ error: 'Name is required' });
+      return;
+    }
+
+    let normalizedPhone;
+    if (phone != null && String(phone).trim()) {
+      try {
+        normalizedPhone = normalizeIndianMobileOrThrow(phone);
+      } catch (e) {
+        res.status(400).json({ error: e instanceof Error ? e.message : 'Invalid phone number' });
+        return;
+      }
+    }
+
+    const existing = await User.findOne({ email }).exec();
+    if (existing) {
+      res.status(409).json({ error: 'Email already registered. Please login instead.' });
+      return;
+    }
+
+    const otpLen = Number(process.env.OTP_CODE_LENGTH || 6);
+    const otpTtlSec = Number(process.env.OTP_TTL_SECONDS || 10 * 60);
+    const maxAttempts = Number(process.env.OTP_MAX_ATTEMPTS || 5);
+    const code = genNumericCode(otpLen);
+    const codeSalt = crypto.randomBytes(16).toString('hex');
+    const codeHash = sha256Hex(`${codeSalt}:${code}`);
+
+    const challengeId = `otp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const expiresAt = new Date(Date.now() + otpTtlSec * 1000);
+
+    await OtpChallenge.create({
+      challengeId,
+      purpose: 'auth',
+      email,
+      codeHash,
+      codeSalt,
+      expiresAt,
+      attempts: 0,
+      maxAttempts,
+    });
+
+    const sent = await sendOtpEmail({ to: email, code, purpose: 'auth' });
+    if (!sent.ok) {
+      res.status(503).json({ error: sent.error || 'Could not send OTP' });
+      return;
+    }
+
+    res.json({ ok: true, challengeId, masked: maskEmail(email), name, phone: normalizedPhone || undefined });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: e instanceof Error ? e.message : 'Failed to register' });
   }
 });
 
