@@ -59,6 +59,8 @@ import { IndianPhoneInput } from '@/components/forms/IndianPhoneInput';
 import { clampIndianPhoneInput, isCompleteValidIndianMobile, isIndianPhoneValid, validateIndianPhone } from '@/lib/indianPhone';
 import { validateCouponApi } from '@/lib/couponsApi';
 
+const LAST_ORDER_ID_KEY = 'tn:last_order_id_v1';
+
 function itemSummary(i: CartItem): string {
   const parts: string[] = [];
   if (i.selectedSize) parts.push(`Size ${i.selectedSize}`);
@@ -717,8 +719,9 @@ export default function CheckoutPage() {
         clearCart();
         await refreshProducts();
         window.dispatchEvent(new CustomEvent('trendnest:products-updated'));
+        sessionStorage.setItem(LAST_ORDER_ID_KEY, created.id);
         setOrderPlaced(created.id);
-        toast.success('Your order has been placed successfully.');
+        navigate('/checkout/success', { replace: true, state: { orderId: created.id } });
         return;
       }
 
@@ -753,8 +756,9 @@ export default function CheckoutPage() {
             clearCart();
             await refreshProducts();
             window.dispatchEvent(new CustomEvent('trendnest:products-updated'));
+            sessionStorage.setItem(LAST_ORDER_ID_KEY, verified.order.id);
             setOrderPlaced(verified.order.id);
-            toast.success('Payment successful. Order confirmed.');
+            navigate('/checkout/success', { replace: true, state: { orderId: verified.order.id } });
           } catch (e) {
             toast.error(e instanceof Error ? e.message : 'Payment verification failed');
           }
@@ -805,21 +809,7 @@ export default function CheckoutPage() {
     }
   };
 
-  if (orderPlaced) {
-    return (
-      <div className="max-w-md mx-auto px-3 sm:px-4 py-16 sm:py-20 text-center">
-        <CheckCircle className="h-12 sm:h-16 w-12 sm:w-16 text-primary mx-auto mb-4" />
-        <h1 className="text-xl sm:text-2xl font-bold mb-2">Order Confirmed!</h1>
-        <p className="text-muted-foreground text-sm sm:text-base mb-1">
-          Order ID: <span className="font-mono font-semibold text-foreground break-all">{orderPlaced}</span>
-        </p>
-        <p className="text-xs sm:text-sm text-muted-foreground mb-6">
-          A confirmation email has been sent to your address. We&apos;ll update you when your order ships.
-        </p>
-        <Button onClick={() => navigate('/')} className="h-10 sm:h-11">Continue Shopping</Button>
-      </div>
-    );
-  }
+  if (orderPlaced) return null;
 
   if (items.length === 0) {
     navigate('/cart');

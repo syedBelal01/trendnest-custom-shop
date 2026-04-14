@@ -14,6 +14,7 @@ import ProductDetailPage from "@/pages/ProductDetailPage";
 import CustomPrintPage from "@/pages/CustomPrintPage";
 import CartPage from "@/pages/CartPage";
 import CheckoutPage from "@/pages/CheckoutPage";
+import CheckoutSuccessPage from "@/pages/CheckoutSuccessPage";
 import SearchPage from "@/pages/SearchPage";
 import AdminLayout from "@/pages/admin/AdminLayout";
 import AdminDashboard from "@/pages/admin/AdminDashboard";
@@ -63,6 +64,7 @@ const App = () => (
                   <Route path="/custom-print" element={<CustomPrintPage />} />
                   <Route path="/cart" element={<CartPage />} />
                   <Route path="/checkout" element={<CheckoutPage />} />
+                  <Route path="/checkout/success" element={<CheckoutSuccessPage />} />
                   <Route path="/search" element={<SearchPage />} />
                   <Route path="/contact" element={<ContactPage />} />
                   <Route path="/faqs" element={<FaqsPage />} />
