@@ -1830,7 +1830,16 @@ function parseFrontendOrigins() {
     .filter(Boolean);
 }
 
-const allowedFrontendOrigins = parseFrontendOrigins();
+const DEFAULT_FRONTEND_ORIGINS = [
+  'http://localhost:3000',
+  'https://trendnest99.in',
+  'https://www.trendnest99.in',
+];
+
+const allowedFrontendOrigins = (() => {
+  const fromEnv = parseFrontendOrigins();
+  return fromEnv.length > 0 ? fromEnv : DEFAULT_FRONTEND_ORIGINS;
+})();
 const ALLOW_VERCEL_PREVIEW_ORIGINS = (process.env.ALLOW_VERCEL_PREVIEW_ORIGINS || '').trim().toLowerCase() === 'true';
 
 function isAllowedCorsOrigin(requestOrigin) {
