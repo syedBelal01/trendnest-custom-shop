@@ -62,9 +62,9 @@ export default function Footer() {
           <div className="col-span-2 md:col-span-2">
             <h4 className="font-semibold mb-2 text-sm">Contact</h4>
             <div className="flex flex-col gap-2">
-              <a href="mailto:trendnest099@gmail.com" className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors py-0.5">
+              <a href="mailto:support@trendnest99.in" className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors py-0.5">
                 <Mail className="h-3.5 w-3.5 shrink-0" />
-                <span className="break-all">trendnest099@gmail.com</span>
+                <span className="break-all">support@trendnest99.in</span>
               </a>
               <a
                 href="https://wa.me/918543841110"

@@ -14,10 +14,10 @@ export default function ContactPage() {
           <div>
             <div className="font-semibold text-sm">Email</div>
             <a
-              href="mailto:trendnest099@gmail.com"
+              href="mailto:support@trendnest99.in"
               className="text-sm text-primary hover:underline break-all"
             >
-              trendnest099@gmail.com
+              support@trendnest99.in
             </a>
           </div>
         </div>
