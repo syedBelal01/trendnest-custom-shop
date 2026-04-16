@@ -35,6 +35,9 @@ export default function HomePage() {
           content="Shop trending fashion, home essentials, and custom print products at great prices. Cash on delivery available across India."
         />
         <meta property="og:url" content={`${CANONICAL_BASE}/`} />
+        <meta property="og:image" content={`${CANONICAL_BASE}/img3.jpeg`} />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:image" content={`${CANONICAL_BASE}/img3.jpeg`} />
       </Helmet>
       {/* Hero */}
       <section className="relative bg-gradient-to-br from-primary/10 via-background to-accent overflow-hidden">
