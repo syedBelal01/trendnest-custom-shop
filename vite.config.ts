@@ -2,7 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { createRequire } from "module";
 
 const require = createRequire(import.meta.url);
@@ -13,6 +13,7 @@ const modernPuppeteer: typeof import("puppeteer") = require("puppeteer");
 // https://vitejs.dev/config/
 export default defineConfig(async ({ mode }) => {
   const CANONICAL_BASE = "https://trendnest99.in";
+  const isVercel = !!process.env.VERCEL;
 
   function xmlEscape(s: string) {
     return String(s || "")
@@ -244,12 +245,24 @@ export default defineConfig(async ({ mode }) => {
           renderer: new (vitePrerender as any).PuppeteerRenderer({
             headless: true,
             // Force a modern Chrome binary (renderer-puppeteer bundles an old puppeteer/chromium).
-            executablePath: modernPuppeteer.executablePath(),
+            executablePath: (() => {
+              // On CI/Vercel, chromium download can be skipped; only set when it exists.
+              try {
+                const p = modernPuppeteer.executablePath();
+                return p && existsSync(p) ? p : undefined;
+              } catch {
+                return undefined;
+              }
+            })(),
+            // Vercel build environment needs no-sandbox flags.
+            args: isVercel
+              ? ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+              : undefined,
             // Wait for actual app content to exist in the DOM.
             renderAfterElementExists: "main",
             // Small buffer after the selector appears.
             renderAfterTime: 2500,
-            maxConcurrentRoutes: 4,
+            maxConcurrentRoutes: isVercel ? 2 : 4,
             // Prefer load event; networkidle0 can hang on long-polling/analytics.
             navigationOptions: { waitUntil: "load", timeout: 120_000 },
             consoleHandler: (route: string, msg: any) => {
