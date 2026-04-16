@@ -7,8 +7,23 @@ const PRODUCTION_API_BASE = 'https://trendnest-custom-shop.onrender.com';
 
 export function apiUrl(path: string): string {
   let base = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '').trim() ?? '';
+  let forceSameOrigin = false;
+  // Prerender runs the app on a localhost server (e.g. http://localhost:8001).
+  // Force same-origin `/api` so Vite's proxy can forward without CORS blocks.
+  if (!import.meta.env.DEV) {
+    try {
+      const loc = (globalThis as any)?.location;
+      const host = String(loc?.hostname || '').toLowerCase();
+      if (host === 'localhost' || host === '127.0.0.1') {
+        base = '';
+        forceSameOrigin = true;
+      }
+    } catch {
+      // ignore
+    }
+  }
   // Use Render when not in Vite dev (covers production and preview); DEV is always true for vite / vite dev.
-  if (!base && !import.meta.env.DEV) base = PRODUCTION_API_BASE;
+  if (!base && !import.meta.env.DEV && !forceSameOrigin) base = PRODUCTION_API_BASE;
   return `${base}${path.startsWith('/') ? path : `/${path}`}`;
 }
 

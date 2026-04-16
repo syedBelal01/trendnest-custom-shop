@@ -14,6 +14,13 @@ const modernPuppeteer: typeof import("puppeteer") = require("puppeteer");
 export default defineConfig(async ({ mode }) => {
   const CANONICAL_BASE = "https://trendnest99.in";
   const isVercel = !!process.env.VERCEL;
+  const isCi = isVercel || !!process.env.CI;
+  const useSparticuzChromium = isVercel && process.platform !== "win32";
+
+  // Vercel's build environment often can't launch Puppeteer's bundled Chromium.
+  // Use a serverless-compatible Chromium + puppeteer-core when building on Vercel.
+  const chromium = useSparticuzChromium ? (require("@sparticuz/chromium") as any) : null;
+  const puppeteerForRenderer = useSparticuzChromium ? (require("puppeteer-core") as any) : modernPuppeteer;
 
   function xmlEscape(s: string) {
     return String(s || "")
@@ -101,6 +108,14 @@ export default defineConfig(async ({ mode }) => {
 
   const prerenderData = mode === "production" ? await getPrerenderData() : { routes: [], productById: {} };
   const prerenderRoutes = prerenderData.routes;
+
+  const prerenderProxyTarget =
+    mode === "production"
+      ? ((process.env.VITE_API_BASE_URL || process.env.API_BASE_URL || "https://trendnest-custom-shop.onrender.com") as string).replace(
+          /\/+$/,
+          ""
+        )
+      : "http://127.0.0.1:5050";
 
   function injectSeoHead(html: string, route: string): string {
     const u = route === "/" ? `${CANONICAL_BASE}/` : `${CANONICAL_BASE}${route}`;
@@ -223,7 +238,7 @@ export default defineConfig(async ({ mode }) => {
       },
       proxy: {
         "/api": {
-          target: "http://127.0.0.1:5050",
+          target: prerenderProxyTarget,
           changeOrigin: true,
         },
       },
@@ -243,21 +258,31 @@ export default defineConfig(async ({ mode }) => {
           },
           // vite-plugin-prerender v1.x does not read a `rendererOptions` field; pass a renderer instance.
           renderer: new (vitePrerender as any).PuppeteerRenderer({
-            headless: true,
-            // Force a modern Chrome binary (renderer-puppeteer bundles an old puppeteer/chromium).
-            executablePath: (() => {
-              // On CI/Vercel, chromium download can be skipped; only set when it exists.
+            headless: chromium?.headless ?? true,
+            // Force a Chrome binary that exists in the environment.
+            executablePath: await (async () => {
               try {
-                const p = modernPuppeteer.executablePath();
+                if (useSparticuzChromium && chromium?.executablePath) {
+                  const p = await chromium.executablePath();
+                  return p ? String(p) : undefined;
+                }
+              } catch {
+                // ignore
+              }
+              // Local dev/CI fallback: Puppeteer's downloaded Chrome.
+              try {
+                const p = puppeteerForRenderer?.executablePath?.();
                 return p && existsSync(p) ? p : undefined;
               } catch {
                 return undefined;
               }
             })(),
-            // Vercel build environment needs no-sandbox flags.
-            args: isVercel
-              ? ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
-              : undefined,
+            // Vercel/CI environments need no-sandbox flags.
+            args: useSparticuzChromium
+              ? (chromium?.args ?? ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"])
+              : isCi
+                ? ["--no-sandbox", "--disable-setuid-sandbox"]
+                : undefined,
             // Wait for actual app content to exist in the DOM.
             renderAfterElementExists: "main",
             // Small buffer after the selector appears.
@@ -274,6 +299,9 @@ export default defineConfig(async ({ mode }) => {
                 }
               } catch {}
             },
+            // Ensure renderer uses the right puppeteer implementation (core vs full).
+            // renderer-puppeteer supports a `puppeteer` option; if ignored, it's still safe.
+            puppeteer: puppeteerForRenderer,
           }),
         }),
     ].filter(Boolean),
