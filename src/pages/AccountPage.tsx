@@ -80,7 +80,7 @@ export default function AccountPage() {
             <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
           </Link>
         ))}
-        <a href="mailto:trendnest099@gmail.com" className="flex items-center gap-3.5 p-4 hover:bg-muted/50 transition-colors active:bg-muted/70">
+        <a href="mailto:support@trendnest99.in" className="flex items-center gap-3.5 p-4 hover:bg-muted/50 transition-colors active:bg-muted/70">
           <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
             <Headphones className="h-5 w-5 text-primary" />
           </div>

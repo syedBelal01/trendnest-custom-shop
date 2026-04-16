@@ -28,8 +28,8 @@ export default function ReturnPolicyPage() {
         </p>
         <p>
           Need help? Email{' '}
-          <a href="mailto:trendnest099@gmail.com" className="text-primary hover:underline">
-            trendnest099@gmail.com
+          <a href="mailto:support@trendnest99.in" className="text-primary hover:underline">
+            support@trendnest99.in
           </a>
           .
         </p>
