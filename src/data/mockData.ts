@@ -1,6 +1,7 @@
 import { Product, Coupon } from '@/types';
 
 const IMG = 'https://images.unsplash.com/photo-';
+const unsplash = (id: string, w = 600) => `${IMG}${id}?auto=format&fit=crop&w=${w}&q=80`;
 
 /** Store catalog: leather belts, soap dispensers, printed tees & cups (+ custom print SKUs). */
 export const initialProducts: Product[] = [
@@ -10,7 +11,7 @@ export const initialProducts: Product[] = [
     description: 'Full-grain leather belt with brushed metal buckle. Multiple waist sizes and leather finishes.',
     price: 899,
     originalPrice: 1299,
-    images: [`${IMG}1553062407-98d43420e9e7?w=600`],
+    images: [unsplash('1553062407-98d43420e9e7')],
     category: 'fashion',
     subcategory: 'Belts',
     sizes: ['28', '30', '32', '34', '36', '38', '40', '42'],
@@ -27,7 +28,7 @@ export const initialProducts: Product[] = [
     description: 'Refillable pump dispenser for bathroom or kitchen. Premium finish options.',
     price: 499,
     originalPrice: 799,
-    images: [`${IMG}1585412727339-54e4bae3cff0?w=600`],
+    images: [unsplash('1585412727339-54e4bae3cff0')],
     category: 'home',
     subcategory: 'Bath',
     variants: ['White Marble', 'Black Marble', 'Matte Silver'],
@@ -48,7 +49,7 @@ export const initialProducts: Product[] = [
     description: 'DTG printed cotton tee. Available in white, black, or gray with half or full sleeve.',
     price: 749,
     originalPrice: 999,
-    images: [`${IMG}1521572163474-6864f9cf17ab?w=600`],
+    images: [unsplash('1521572163474-6864f9cf17ab')],
     category: 'printed',
     subcategory: 'Printed Tees',
     sizes: ['XS', 'S', 'M', 'L', 'XL', 'XXL'],
@@ -66,7 +67,7 @@ export const initialProducts: Product[] = [
     description: 'Ceramic cup with durable printed artwork. Microwave-safe.',
     price: 399,
     originalPrice: 599,
-    images: [`${IMG}1514228742587-6b1558fcca3d?w=600`],
+    images: [unsplash('1514228742587-6b1558fcca3d')],
     category: 'printed',
     subcategory: 'Printed Cups',
     variants: ['White', 'Black'],
@@ -80,7 +81,7 @@ export const initialProducts: Product[] = [
     name: 'Custom Print T-Shirt',
     description: 'Upload your design — printed on premium cotton. White, black, or gray; all sizes; half or full sleeve.',
     price: 999,
-    images: [`${IMG}1523381210434-271e8be1f52b?w=600`],
+    images: [unsplash('1523381210434-271e8be1f52b')],
     category: 'printed',
     subcategory: 'Custom Print',
     sizes: ['XS', 'S', 'M', 'L', 'XL', 'XXL'],
@@ -97,7 +98,7 @@ export const initialProducts: Product[] = [
     name: 'Custom Print Cup',
     description: 'Upload your artwork for a personalized ceramic cup.',
     price: 499,
-    images: [`${IMG}1577937927133-4dcce3b43378?w=600`],
+    images: [unsplash('1577937927133-4dcce3b43378')],
     category: 'printed',
     subcategory: 'Custom Print',
     variants: ['White', 'Black'],
@@ -115,9 +116,9 @@ export const coupons: Coupon[] = [
 ];
 
 export const categories = [
-  { id: 'fashion', name: 'Fashion', icon: '👔', description: 'Style & apparel', image: `${IMG}1520975958225-67c651266c1f?w=600` },
-  { id: 'home', name: 'Home Essentials', icon: '🏠', description: 'Soap dispensers & more', image: `${IMG}1556909114-f6e7ad7d3136?w=600` },
-  { id: 'electronics', name: 'Electronics', icon: '🔌', description: 'Gadgets & accessories', image: `${IMG}1518779578993-ec3579fee39f?w=600` },
-  { id: 'printed', name: 'Printed Products', icon: '🎨', description: 'Tees, cups & custom prints', image: `${IMG}1523381210434-271e8be1f52b?w=600` },
-  { id: 'trending', name: 'Trending', icon: '🔥', description: 'Popular picks', image: `${IMG}1513506003901-1e6a229e2d15?w=600` },
+  { id: 'fashion', name: 'Fashion', icon: '👔', description: 'Style & apparel', image: unsplash('1520975958225-67c651266c1f') },
+  { id: 'home', name: 'Home Essentials', icon: '🏠', description: 'Soap dispensers & more', image: unsplash('1556909114-f6e7ad7d3136') },
+  { id: 'electronics', name: 'Electronics', icon: '🔌', description: 'Gadgets & accessories', image: unsplash('1518779578993-ec3579fee39f') },
+  { id: 'printed', name: 'Printed Products', icon: '🎨', description: 'Tees, cups & custom prints', image: unsplash('1523381210434-271e8be1f52b') },
+  { id: 'trending', name: 'Trending', icon: '🔥', description: 'Popular picks', image: unsplash('1513506003901-1e6a229e2d15') },
 ];
