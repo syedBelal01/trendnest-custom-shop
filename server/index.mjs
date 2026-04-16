@@ -1802,6 +1802,15 @@ const ALLOW_VERCEL_PREVIEW_ORIGINS = (process.env.ALLOW_VERCEL_PREVIEW_ORIGINS |
 
 function isAllowedCorsOrigin(requestOrigin) {
   if (!requestOrigin) return false;
+  // Dev convenience: allow any localhost port for Vite (ports can auto-increment).
+  if (process.env.NODE_ENV !== 'production') {
+    try {
+      const u = new URL(requestOrigin);
+      if (u.protocol === 'http:' && (u.hostname === 'localhost' || u.hostname === '127.0.0.1')) return true;
+    } catch {
+      // ignore
+    }
+  }
   if (allowedFrontendOrigins.includes(requestOrigin)) return true;
   if (ALLOW_VERCEL_PREVIEW_ORIGINS) {
     try {
@@ -3578,6 +3587,77 @@ app.get('/api/products', mongoReady, async (_req, res) => {
     console.error(e);
     res.status(500).json({ error: 'Failed to list products' });
   }
+});
+
+function xmlEscape(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+async function fetchProductsForSitemap(req) {
+  const base =
+    process.env.PUBLIC_API_BASE_URL && String(process.env.PUBLIC_API_BASE_URL).trim()
+      ? String(process.env.PUBLIC_API_BASE_URL).trim().replace(/\/+$/, '')
+      : `${req.protocol}://${req.get('host')}`;
+
+  const url = `${base}/api/products`;
+  const r = await fetch(url, { headers: { accept: 'application/json' } });
+  if (!r.ok) throw new Error(`Failed to fetch products for sitemap: ${r.status}`);
+  const data = await r.json();
+  return Array.isArray(data) ? data : [];
+}
+
+app.get('/sitemap.xml', async (req, res) => {
+  try {
+    const SITE = 'https://trendnest99.in';
+    const nowIso = new Date().toISOString();
+    const staticUrls = [
+      { loc: `${SITE}/`, lastmod: nowIso },
+      { loc: `${SITE}/category/home`, lastmod: nowIso },
+      { loc: `${SITE}/category/printed`, lastmod: nowIso },
+      { loc: `${SITE}/category/trending`, lastmod: nowIso },
+    ];
+
+    const products = await fetchProductsForSitemap(req);
+    const productUrls = products
+      .map((p) => {
+        const id = String(p?.id || p?._id || '').trim();
+        if (!id) return null;
+        const rawLastmod = p?.updatedAt || p?.createdAt || '';
+        const d = rawLastmod ? new Date(rawLastmod) : null;
+        const lastmod = d && !Number.isNaN(d.getTime()) ? d.toISOString() : nowIso;
+        return { loc: `${SITE}/product/${encodeURIComponent(id)}`, lastmod };
+      })
+      .filter(Boolean);
+
+    const urls = [...staticUrls, ...productUrls];
+    const body =
+      `<?xml version="1.0" encoding="UTF-8"?>\n` +
+      `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
+      urls
+        .map((u) => `  <url><loc>${xmlEscape(u.loc)}</loc><lastmod>${xmlEscape(u.lastmod)}</lastmod></url>`)
+        .join('\n') +
+      `\n</urlset>\n`;
+
+    res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+    res.setHeader('Cache-Control', 'public, max-age=900');
+    res.status(200).send(body);
+  } catch (e) {
+    console.error(e);
+    res.status(500).type('text/plain').send('sitemap error');
+  }
+});
+
+app.get('/robots.txt', (_req, res) => {
+  const SITE = 'https://trendnest99.in';
+  const body = `User-agent: *\nAllow: /\n\nSitemap: ${SITE}/sitemap.xml\n`;
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=900');
+  res.status(200).send(body);
 });
 
 app.get('/api/reviews/summary', mongoReady, async (req, res) => {

@@ -15,6 +15,93 @@ import { usePaymentMethod } from '@/contexts/PaymentMethodContext';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { fetchShippingServiceabilityApi, type ShippingServiceabilityResult } from '@/lib/shippingApi';
 import { Input } from '@/components/ui/input';
+import { Helmet } from 'react-helmet-async';
+
+const CANONICAL_BASE = 'https://trendnest99.in';
+
+function productJsonLd(args: {
+  url: string;
+  name: string;
+  description: string;
+  images: string[];
+  price: number;
+  inStock: boolean;
+  ratingValue?: number;
+  reviewCount?: number;
+  category?: string;
+}) {
+  const {
+    url,
+    name,
+    description,
+    images,
+    price,
+    inStock,
+    ratingValue,
+    reviewCount,
+    category,
+  } = args;
+
+  const product: any = {
+    '@context': 'https://schema.org',
+    '@type': 'Product',
+    name,
+    description,
+    image: images,
+    brand: { '@type': 'Brand', name: 'TrendNest99' },
+    category: category || undefined,
+    offers: {
+      '@type': 'Offer',
+      url,
+      priceCurrency: 'INR',
+      price: Number.isFinite(price) ? String(price) : undefined,
+      availability: inStock ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
+    },
+  };
+
+  if (ratingValue && reviewCount && reviewCount > 0) {
+    product.aggregateRating = {
+      '@type': 'AggregateRating',
+      ratingValue: Number(ratingValue).toFixed(1),
+      reviewCount: String(reviewCount),
+    };
+  }
+
+  return product;
+}
+
+function breadcrumbJsonLd(args: { url: string; categoryId?: string; categoryName?: string; productName: string }) {
+  const { url, categoryId, categoryName, productName } = args;
+  const itemListElement: any[] = [
+    { '@type': 'ListItem', position: 1, name: 'Home', item: `${CANONICAL_BASE}/` },
+  ];
+  if (categoryId && categoryName) {
+    itemListElement.push({
+      '@type': 'ListItem',
+      position: 2,
+      name: categoryName,
+      item: `${CANONICAL_BASE}/category/${encodeURIComponent(categoryId)}`,
+    });
+    itemListElement.push({
+      '@type': 'ListItem',
+      position: 3,
+      name: productName,
+      item: url,
+    });
+  } else {
+    itemListElement.push({
+      '@type': 'ListItem',
+      position: 2,
+      name: productName,
+      item: url,
+    });
+  }
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement,
+  };
+}
 
 function normKey(s: string) { return String(s ?? '').trim().toLowerCase(); }
 function normVal(s: string) { return String(s ?? '').trim().toLowerCase(); }
@@ -74,6 +161,12 @@ export default function ProductDetailPage() {
 
   // Prefer the latest list copy for stock; fall back to fetched detail.
   const product = fromList ?? fetchedProduct;
+  const seoTitle = product?.name ? `${product.name} | TrendNest99` : 'Product | TrendNest99';
+  const seoDesc = product?.description
+    ? String(product.description).slice(0, 160)
+    : 'Shop products on TrendNest99.';
+  const canonicalUrl = id ? `${CANONICAL_BASE}/product/${encodeURIComponent(id)}` : `${CANONICAL_BASE}/`;
+  const ogImage = product?.images?.[0] ? String(product.images[0]) : undefined;
   const { addItem } = useCart();
   const [selectedSize, setSelectedSize] = useState('');
   const [selectedVariant, setSelectedVariant] = useState('');
@@ -90,6 +183,8 @@ export default function ProductDetailPage() {
   const [shippingBusy, setShippingBusy] = useState(false);
 
   const hasVariantModel = !!(product?.variantModel?.items?.length);
+
+  // ... rest of component
 
   const selectedVariantItem = useMemo(() => {
     if (!product?.variantModel?.items?.length) return null;
@@ -284,6 +379,41 @@ export default function ProductDetailPage() {
 
   return (
     <>
+      <Helmet>
+        <title>{seoTitle}</title>
+        <meta name="description" content={seoDesc} />
+        <link rel="canonical" href={canonicalUrl} />
+        <meta property="og:type" content="product" />
+        <meta property="og:title" content={seoTitle} />
+        <meta property="og:description" content={seoDesc} />
+        <meta property="og:url" content={canonicalUrl} />
+        {ogImage && <meta property="og:image" content={ogImage} />}
+        <script type="application/ld+json">
+          {JSON.stringify(
+            productJsonLd({
+              url: canonicalUrl,
+              name: product.name,
+              description: String(product.description || '').trim() || seoDesc,
+              images: Array.isArray(product.images) ? product.images.map((u) => String(u)).filter(Boolean) : [],
+              price: Number.isFinite(selectedPrice) ? selectedPrice : Number(product.price) || 0,
+              inStock,
+              ratingValue: avg || undefined,
+              reviewCount: count || undefined,
+              category: product.category,
+            })
+          )}
+        </script>
+        <script type="application/ld+json">
+          {JSON.stringify(
+            breadcrumbJsonLd({
+              url: canonicalUrl,
+              categoryId: product.category,
+              categoryName: product.category === 'home' ? 'Home Essentials' : product.category === 'fashion' ? 'Fashion' : product.category === 'trending' ? 'Trending' : product.category,
+              productName: product.name,
+            })
+          )}
+        </script>
+      </Helmet>
       <div className="max-w-6xl mx-auto px-3 sm:px-4 lg:px-6 pb-28 md:pb-8 pt-4 sm:pt-6 animate-fade-in">
         {/* Back link */}
         <Link

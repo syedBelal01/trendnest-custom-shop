@@ -5,6 +5,9 @@ import ProductCard from '@/components/ProductCard';
 import { Button } from '@/components/ui/button';
 import { ArrowRight, Truck, Shield, Headphones } from 'lucide-react';
 import HeroCarousel from '@/components/HeroCarousel';
+import { Helmet } from 'react-helmet-async';
+
+const CANONICAL_BASE = 'https://trendnest99.in';
 
 export default function HomePage() {
   const { products } = useProducts();
@@ -14,6 +17,21 @@ export default function HomePage() {
 
   return (
     <div>
+      <Helmet>
+        <title>TrendNest99 | Trendy Fashion, Home Essentials & Custom Prints</title>
+        <meta
+          name="description"
+          content="Shop trending fashion, home essentials, and custom print products at great prices. Cash on delivery available across India."
+        />
+        <link rel="canonical" href={`${CANONICAL_BASE}/`} />
+        <meta property="og:type" content="website" />
+        <meta property="og:title" content="TrendNest99 | Trendy Fashion, Home Essentials & Custom Prints" />
+        <meta
+          property="og:description"
+          content="Shop trending fashion, home essentials, and custom print products at great prices. Cash on delivery available across India."
+        />
+        <meta property="og:url" content={`${CANONICAL_BASE}/`} />
+      </Helmet>
       {/* Hero */}
       <section className="relative bg-gradient-to-br from-primary/10 via-background to-accent overflow-hidden">
         <div className="max-w-7xl mx-auto px-3 sm:px-4 py-8 sm:py-16 md:py-24 flex flex-col md:flex-row items-center gap-6 sm:gap-8">

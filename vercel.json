@@ -1,12 +1,28 @@
 {
   "rewrites": [
     {
+      "source": "/sitemap.xml",
+      "destination": "https://trendnest-custom-shop.onrender.com/sitemap.xml"
+    },
+    {
+      "source": "/robots.txt",
+      "destination": "https://trendnest-custom-shop.onrender.com/robots.txt"
+    },
+    {
       "source": "/api/:path*",
       "destination": "https://trendnest-custom-shop.onrender.com/api/:path*"
     },
     {
       "source": "/(.*)",
       "destination": "/index.html"
+    }
+  ],
+  "redirects": [
+    {
+      "source": "/(.*)",
+      "has": [{ "type": "host", "value": "www.trendnest99.in" }],
+      "destination": "https://trendnest99.in/$1",
+      "permanent": true
     }
   ]
 }

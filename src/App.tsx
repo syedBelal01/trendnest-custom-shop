@@ -41,6 +41,7 @@ import ShippingPolicyPage from "@/pages/ShippingPolicyPage";
 import NotFound from "@/pages/NotFound";
 import ScrollToTop from "@/components/ScrollToTop";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { Helmet } from "react-helmet-async";
 
 const queryClient = new QueryClient();
 
@@ -50,6 +51,32 @@ const App = () => (
       <ProductsProvider>
         <OrdersProvider>
           <CartProvider>
+            <Helmet>
+              <script type="application/ld+json">
+                {JSON.stringify({
+                  "@context": "https://schema.org",
+                  "@type": "Organization",
+                  name: "TrendNest99",
+                  url: "https://trendnest99.in",
+                  contactPoint: [
+                    {
+                      "@type": "ContactPoint",
+                      contactType: "customer support",
+                      email: "support@trendnest99.in",
+                      availableLanguage: ["en", "hi"],
+                    },
+                  ],
+                })}
+              </script>
+              <script type="application/ld+json">
+                {JSON.stringify({
+                  "@context": "https://schema.org",
+                  "@type": "WebSite",
+                  name: "TrendNest99",
+                  url: "https://trendnest99.in",
+                })}
+              </script>
+            </Helmet>
             <Toaster />
             <Sonner />
             <BrowserRouter>
