@@ -6,11 +6,15 @@ import { Button } from '@/components/ui/button';
 import { ArrowRight, Truck, Shield, Headphones } from 'lucide-react';
 import HeroCarousel from '@/components/HeroCarousel';
 import { Helmet } from 'react-helmet-async';
+import { DEFAULT_PRODUCT_IMAGE } from '@/lib/api';
+import ProductCardSkeleton from '@/components/ProductCardSkeleton';
+import { useDelayedFlag } from '@/hooks/useDelayedFlag';
 
 const CANONICAL_BASE = 'https://trendnest99.in';
 
 export default function HomePage() {
-  const { products } = useProducts();
+  const { products, loading } = useProducts();
+  const showSkeleton = useDelayedFlag(loading, 250);
   const trending = products.filter(p => p.isTrending).slice(0, 4);
   const deals = products.filter(p => p.originalPrice).slice(0, 4);
   const fashion = products.filter(p => p.category === 'fashion');
@@ -76,7 +80,9 @@ export default function HomePage() {
           <span className="text-xs sm:text-sm text-muted-foreground hidden sm:inline">Curated on your home page</span>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
-          {fashion.map(p => <ProductCard key={p.id} product={p} />)}
+          {showSkeleton
+            ? Array.from({ length: 4 }, (_, i) => <ProductCardSkeleton key={`fashion-skel-${i}`} />)
+            : fashion.map(p => <ProductCard key={p.id} product={p} />)}
         </div>
       </section>
 
@@ -86,7 +92,17 @@ export default function HomePage() {
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4 max-w-5xl">
           {categories.map(c => (
             <Link key={c.id} to={`/category/${c.id}`} className="group relative aspect-[4/3] rounded-xl overflow-hidden border">
-              <img src={c.image} alt={c.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" />
+              <img
+                src={c.image}
+                alt={c.name}
+                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                loading="lazy"
+                onError={(e) => {
+                  const img = e.currentTarget;
+                  img.onerror = null;
+                  img.src = DEFAULT_PRODUCT_IMAGE;
+                }}
+              />
               <div className="absolute inset-0 bg-gradient-to-t from-foreground/70 to-transparent" />
               <div className="absolute bottom-2 sm:bottom-3 left-2 sm:left-3 text-background">
                 <p className="text-sm sm:text-lg font-bold">{c.icon} {c.name}</p>
@@ -104,7 +120,9 @@ export default function HomePage() {
           <Link to="/category/trending" className="text-primary text-xs sm:text-sm font-medium hover:underline">View All →</Link>
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
-          {trending.map(p => <ProductCard key={p.id} product={p} />)}
+          {showSkeleton
+            ? Array.from({ length: 4 }, (_, i) => <ProductCardSkeleton key={`trending-skel-${i}`} />)
+            : trending.map(p => <ProductCard key={p.id} product={p} />)}
         </div>
       </section>
 
@@ -116,7 +134,9 @@ export default function HomePage() {
             <Link to="/category/trending" className="text-primary text-xs sm:text-sm font-medium hover:underline">View All →</Link>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
-            {deals.map(p => <ProductCard key={p.id} product={p} />)}
+            {showSkeleton
+              ? Array.from({ length: 4 }, (_, i) => <ProductCardSkeleton key={`deals-skel-${i}`} />)
+              : deals.map(p => <ProductCard key={p.id} product={p} />)}
           </div>
         </div>
       </section>

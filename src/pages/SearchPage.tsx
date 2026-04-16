@@ -4,9 +4,12 @@ import ProductCard from '@/components/ProductCard';
 import { Input } from '@/components/ui/input';
 import { Search } from 'lucide-react';
 import { useState, useMemo } from 'react';
+import ProductCardSkeleton from '@/components/ProductCardSkeleton';
+import { useDelayedFlag } from '@/hooks/useDelayedFlag';
 
 export default function SearchPage() {
-  const { products } = useProducts();
+  const { products, loading } = useProducts();
+  const showSkeleton = useDelayedFlag(loading, 250);
   const [params] = useSearchParams();
   const initial = params.get('q') || '';
   const [query, setQuery] = useState(initial);
@@ -32,7 +35,11 @@ export default function SearchPage() {
       {query.trim() && (
         <p className="text-sm text-muted-foreground mb-4 sm:mb-6">{results.length} result{results.length !== 1 ? 's' : ''} for "{query}"</p>
       )}
-      {results.length > 0 ? (
+      {query.trim() && showSkeleton ? (
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
+          {Array.from({ length: 8 }, (_, i) => <ProductCardSkeleton key={`search-skel-${i}`} />)}
+        </div>
+      ) : results.length > 0 ? (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
           {results.map(p => <ProductCard key={p.id} product={p} />)}
         </div>

@@ -31,7 +31,7 @@ type ProductsContextValue = {
 const ProductsContext = createContext<ProductsContextValue | undefined>(undefined);
 
 export function ProductsProvider({ children }: { children: ReactNode }) {
-  const [products, setProducts] = useState<Product[]>(() => [...initialProducts]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [ratingSummary, setRatingSummary] = useState<Record<string, RatingSummary>>({});
   const [loading, setLoading] = useState(true);
   const [apiAvailable, setApiAvailable] = useState(false);

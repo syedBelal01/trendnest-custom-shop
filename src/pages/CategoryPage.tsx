@@ -5,12 +5,15 @@ import ProductCard from '@/components/ProductCard';
 import { useState } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Helmet } from 'react-helmet-async';
+import ProductCardSkeleton from '@/components/ProductCardSkeleton';
+import { useDelayedFlag } from '@/hooks/useDelayedFlag';
 
 const CANONICAL_BASE = 'https://trendnest99.in';
 
 export default function CategoryPage() {
   const { id } = useParams<{ id: string }>();
-  const { products } = useProducts();
+  const { products, loading } = useProducts();
+  const showSkeleton = useDelayedFlag(loading, 250);
   const [sort, setSort] = useState('default');
 
   if (id === 'fashion') {
@@ -29,6 +32,23 @@ export default function CategoryPage() {
   if (sort === 'low') filtered = [...filtered].sort((a, b) => a.price - b.price);
   if (sort === 'high') filtered = [...filtered].sort((a, b) => b.price - a.price);
   if (sort === 'rating') filtered = [...filtered].sort((a, b) => b.rating - a.rating);
+
+  if (showSkeleton) {
+    return (
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 py-6 sm:py-8">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 mb-6 sm:mb-8">
+          <div className="space-y-2">
+            <div className="h-8 w-56 rounded-md bg-muted animate-pulse" />
+            <div className="h-4 w-32 rounded-md bg-muted animate-pulse" />
+          </div>
+          <div className="h-10 sm:h-9 w-full sm:w-44 rounded-md bg-muted animate-pulse" />
+        </div>
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
+          {Array.from({ length: 8 }, (_, i) => <ProductCardSkeleton key={`cat-skel-${i}`} />)}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-3 sm:px-4 py-6 sm:py-8">

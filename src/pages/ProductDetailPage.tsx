@@ -16,6 +16,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { fetchShippingServiceabilityApi, type ShippingServiceabilityResult } from '@/lib/shippingApi';
 import { Input } from '@/components/ui/input';
 import { Helmet } from 'react-helmet-async';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useDelayedFlag } from '@/hooks/useDelayedFlag';
 
 const CANONICAL_BASE = 'https://trendnest99.in';
 
@@ -135,7 +137,8 @@ const pillBtn = (active: boolean) =>
 export default function ProductDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { products, ratingSummary } = useProducts();
+  const { products, ratingSummary, loading } = useProducts();
+  const showSkeleton = useDelayedFlag(loading, 250);
   const { method: paymentMethod, setMethod: setPaymentMethod } = usePaymentMethod();
   const fromList = id ? products.find(p => p.id === id) : undefined;
   const [fetchedProduct, setFetchedProduct] = useState<Product | null>(null);
@@ -332,6 +335,26 @@ export default function ProductDetailPage() {
       .filter(p => (p.category || '') === (product.category || ''))
       .slice(0, 5);
   }, [products, product?.id, product?.category]);
+
+  if (!product && showSkeleton) {
+    return (
+      <div className="max-w-6xl mx-auto px-3 sm:px-4 lg:px-6 pb-28 md:pb-8 pt-4 sm:pt-6">
+        <div className="h-4 w-20 bg-muted rounded-md animate-pulse mb-4" />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-10 md:items-start">
+          <div className="aspect-square rounded-2xl overflow-hidden border bg-card">
+            <Skeleton className="h-full w-full rounded-none" />
+          </div>
+          <div className="space-y-4">
+            <Skeleton className="h-7 w-4/5" />
+            <Skeleton className="h-5 w-32" />
+            <Skeleton className="h-20 w-full" />
+            <Skeleton className="h-11 w-full" />
+            <Skeleton className="h-11 w-full" />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!product) {
     return (

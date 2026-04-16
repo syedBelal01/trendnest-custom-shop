@@ -1,5 +1,19 @@
 import { Link } from 'react-router-dom';
-import { Home, ShoppingBag, Paintbrush, TrendingUp, MessageCircle, HelpCircle, RotateCcw, Truck, Package, Mail, Phone } from 'lucide-react';
+import {
+  Home,
+  ShoppingBag,
+  Paintbrush,
+  TrendingUp,
+  MessageCircle,
+  HelpCircle,
+  RotateCcw,
+  Truck,
+  Package,
+  Mail,
+  Phone,
+  Instagram,
+  Facebook,
+} from 'lucide-react';
 
 const shopLinks = [
   { to: '/', label: 'Home', icon: Home },
@@ -74,6 +88,26 @@ export default function Footer() {
               >
                 <Phone className="h-3.5 w-3.5 shrink-0" />
                 <span>WhatsApp: 8543841110</span>
+              </a>
+
+              <a
+                href="https://www.instagram.com/trendnest099?utm_source=qr&igsh=MWR0ZzBqOGloZzZzNg=="
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors py-0.5"
+              >
+                <Instagram className="h-3.5 w-3.5 shrink-0" />
+                <span>Instagram</span>
+              </a>
+
+              <a
+                href="https://www.facebook.com/share/18QuviL6fn/"
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors py-0.5"
+              >
+                <Facebook className="h-3.5 w-3.5 shrink-0" />
+                <span>Facebook</span>
               </a>
             </div>
           </div>
