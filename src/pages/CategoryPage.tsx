@@ -1,4 +1,4 @@
-import { Navigate, useParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import { categories } from '@/data/mockData';
 import { useProducts } from '@/contexts/ProductsContext';
 import ProductCard from '@/components/ProductCard';
@@ -15,10 +15,6 @@ export default function CategoryPage() {
   const { products, loading } = useProducts();
   const showSkeleton = useDelayedFlag(loading, 250);
   const [sort, setSort] = useState('default');
-
-  if (id === 'fashion') {
-    return <Navigate to="/#fashion-picks" replace />;
-  }
 
   const category = categories.find(c => c.id === id);
   let filtered =
