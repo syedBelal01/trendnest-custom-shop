@@ -22,7 +22,7 @@
       "source": "/(.*)",
       "has": [{ "type": "host", "value": "www.trendnest99.in" }],
       "destination": "https://trendnest99.in/$1",
-      "permanent": true
+      "statusCode": 301
     }
   ]
 }
