@@ -492,7 +492,7 @@ export default function ProductDetailPage() {
                 {shippingBusy
                   ? 'Checking serviceability…'
                   : shippingQuote?.ok
-                    ? `${shippingQuote.shippingCharge === 0 ? 'Free shipping' : `Shipping from ₹${shippingQuote.shippingCharge}`}${
+                    ? `Free shipping${
                         shippingQuote.estimatedDeliveryDays != null ? ` · ETA ${shippingQuote.estimatedDeliveryDays} day(s)` : ''
                       }`
                     : shippingQuote?.reason === 'not_serviceable'

@@ -202,6 +202,8 @@ export interface Order {
   /** Merchandise after discount (before shipping), when stored by the server. */
   goodsTotal?: number;
   shippingCharge?: number;
+  /** Admin-only: real Shiprocket shipping cost (hidden from customers). */
+  actualShippingCharge?: number;
   freeShippingApplied?: boolean;
   discount: number;
   couponCode?: string;

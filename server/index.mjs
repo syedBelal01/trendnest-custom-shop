@@ -731,6 +731,8 @@ const OrderSchema = new mongoose.Schema(
     /** Merchandise after discount (before shipping). */
     goodsTotal: { type: Number, default: undefined },
     shippingCharge: { type: Number, default: 0 },
+    /** Internal-only: real Shiprocket shipping charge (never shown to customers). */
+    actualShippingCharge: { type: Number, default: 0 },
     freeShippingApplied: { type: Boolean, default: false },
     total: { type: Number, required: true },
     // Payment is separate from fulfillment `status` (keeps COD flow unchanged).
@@ -830,6 +832,8 @@ const PaymentSessionSchema = new mongoose.Schema(
     couponCode: String,
     goodsTotal: { type: Number, default: undefined },
     shippingCharge: { type: Number, default: 0 },
+    /** Internal-only: real Shiprocket shipping charge (never shown to customers). */
+    actualShippingCharge: { type: Number, default: 0 },
     freeShippingApplied: { type: Boolean, default: false },
     total: { type: Number, required: true },
     hasCustomPrint: { type: Boolean, default: false },
@@ -1050,6 +1054,41 @@ function serializeOrder(doc) {
   return out;
 }
 
+function stripShippingRatesDeep(x) {
+  if (!x || typeof x !== 'object') return x;
+  try {
+    const o = JSON.parse(JSON.stringify(x));
+    const sug = o?.courierSuggestions;
+    if (Array.isArray(sug)) {
+      o.courierSuggestions = sug.map((c) => {
+        const cc = c && typeof c === 'object' ? { ...c } : {};
+        delete cc.rate;
+        return cc;
+      });
+    }
+    return o;
+  } catch {
+    return x;
+  }
+}
+
+function serializeOrderForClient(doc) {
+  const out = serializeOrder(doc);
+  if (!out) return null;
+  // Never expose internal shipping cost or courier rates to customers.
+  delete out.actualShippingCharge;
+  if (out.shipping && typeof out.shipping === 'object') {
+    if (out.shipping.serviceability) out.shipping.serviceability = stripShippingRatesDeep(out.shipping.serviceability);
+    // Optional: also strip any courierSelection rate-like fields if present later.
+  }
+  return out;
+}
+
+function serializeOrderForAdmin(doc) {
+  // Admin can see actualShippingCharge; keep full record.
+  return serializeOrder(doc);
+}
+
 function serializePaymentSession(doc) {
   if (!doc) return null;
   const o = doc.toObject ? doc.toObject({ flattenMaps: true, versionKey: false }) : { ...doc };
@@ -1060,6 +1099,15 @@ function serializePaymentSession(doc) {
   if (out.updatedAt instanceof Date) out.updatedAt = out.updatedAt.toISOString();
   if (out.expiresAt instanceof Date) out.expiresAt = out.expiresAt.toISOString();
   if (out.paidAt instanceof Date) out.paidAt = out.paidAt.toISOString();
+  return out;
+}
+
+function serializePaymentSessionForClient(doc) {
+  const out = serializePaymentSession(doc);
+  if (!out) return null;
+  delete out.actualShippingCharge;
+  // Never expose stored shipping quote details to customers.
+  delete out.shippingQuoteSnapshot;
   return out;
 }
 
@@ -2046,6 +2094,8 @@ async function resolveShippingChargeForPricing({ pincode, cod, pricedLines, good
     const out = {
       ok: true,
       shippingCharge: freeShippingApplied ? 0 : Math.round(computedCharge),
+      // Keep the real Shiprocket cost regardless of free-delivery thresholds.
+      actualShippingCharge: Math.round(computedCharge),
       freeShippingApplied,
       estimatedDeliveryDays,
       estimatedDeliveryDate,
@@ -2094,6 +2144,25 @@ app.post('/api/shipping/serviceability', async (req, res) => {
       goodsAfterDiscount: Number.isFinite(goodsAfterDiscount) ? goodsAfterDiscount : 0,
     });
 
+    // Public contract: always free delivery (₹0). Keep ETA/serviceability.
+    if (result && result.ok === true) {
+      const safeSuggestions = Array.isArray(result.courierSuggestions)
+        ? result.courierSuggestions.map((c) => {
+            const cc = c && typeof c === 'object' ? { ...c } : {};
+            delete cc.rate;
+            return cc;
+          })
+        : [];
+      res.status(200).json({
+        ...result,
+        shippingCharge: 0,
+        freeShippingApplied: true,
+        courierSuggestions: safeSuggestions,
+        // never expose internal charge
+        actualShippingCharge: undefined,
+      });
+      return;
+    }
     res.status(200).json(result);
   } catch (e) {
     console.error(e);
@@ -2905,7 +2974,7 @@ app.post('/api/auth/otp/verify', async (req, res) => {
 app.get('/api/me/orders', mongoReady, requireAuth, async (req, res) => {
   try {
     const docs = await Order.find({ userId: req.session.userId }).sort({ createdAt: -1 }).lean();
-    res.json(docs.map((d) => serializeOrder(d)));
+    res.json(docs.map((d) => serializeOrderForClient(d)));
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Failed to load your orders' });
@@ -2924,7 +2993,7 @@ app.get('/api/me/orders/:id', mongoReady, requireAuth, async (req, res) => {
       res.status(404).json({ error: 'Order not found' });
       return;
     }
-    res.json(serializeOrder(doc));
+    res.json(serializeOrderForClient(doc));
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Failed to load your order' });
@@ -4548,10 +4617,8 @@ async function finalizePendingOrderShipping(orderId) {
       return;
     }
 
-    const newCharge = roundMoney2(ship.shippingCharge);
-    const oldCharge = roundMoney2(order.shippingCharge);
-    const newTotal = roundMoney2(goodsAfterDiscount + newCharge);
-    const paid = roundMoney2(order.amountPaid || 0);
+    const actualCharge = roundMoney2(ship.actualShippingCharge ?? ship.shippingCharge);
+    const oldActual = roundMoney2(order.actualShippingCharge || 0);
 
     const edd =
       ship.estimatedDeliveryDate && !Number.isNaN(new Date(ship.estimatedDeliveryDate).getTime())
@@ -4559,19 +4626,12 @@ async function finalizePendingOrderShipping(orderId) {
         : undefined;
     const cheapest = Array.isArray(ship.courierSuggestions) && ship.courierSuggestions[0];
 
-    const balance = roundMoney2(newTotal - paid);
-    const prepaidImbalance =
-      String(order.paymentMethod || '') === 'razorpay' && String(order.paymentStatus || '') === 'paid' && balance > 0.005;
-    const codChargeAppeared =
-      String(order.paymentMethod || '') === 'cod' &&
-      newCharge > 0.005 &&
-      oldCharge < 0.005 &&
-      sh.estimated === true;
-
     const $set = {
-      shippingCharge: newCharge,
-      freeShippingApplied: !!ship.freeShippingApplied,
-      total: newTotal,
+      // User-facing free delivery stays free; store real cost internally.
+      shippingCharge: 0,
+      actualShippingCharge: actualCharge,
+      freeShippingApplied: true,
+      total: roundMoney2(goodsAfterDiscount),
       'shipping.estimated': false,
       'shipping.finalized': true,
       'shipping.quoteRecalcAt': new Date(),
@@ -4579,32 +4639,26 @@ async function finalizePendingOrderShipping(orderId) {
       'shipping.serviceability': {
         ok: true,
         recalculatedAt: new Date().toISOString(),
-        freeShippingApplied: !!ship.freeShippingApplied,
+        freeShippingApplied: true,
         quoteId: ship.quoteId,
         courierSuggestions: (ship.courierSuggestions || []).slice(0, 5),
       },
       'shipping.estimatedDeliveryDate': edd || undefined,
       'shipping.courierName': cheapest?.courierName || undefined,
-      'shipping.pricingPendingReview': prepaidImbalance || codChargeAppeared,
+      // Free delivery model: no customer-facing pricing adjustments required.
+      'shipping.pricingPendingReview': false,
     };
 
     if (String(order.paymentMethod || '') === 'cod' && String(order.paymentStatus || '') !== 'paid') {
-      $set.amountDue = newTotal;
+      $set.amountDue = roundMoney2(goodsAfterDiscount);
     }
 
     if (String(order.paymentMethod || '') === 'razorpay' && String(order.paymentStatus || '') === 'paid') {
-      if (balance > 0.005) {
-        $set.amountDue = balance;
-        $set['shipping.balanceDueShipping'] = balance;
-      } else {
-        $set.amountDue = 0;
-      }
+      $set.amountDue = 0;
     }
 
     const update = { $set };
-    if (!(String(order.paymentMethod || '') === 'razorpay' && balance > 0.005)) {
-      update.$unset = { 'shipping.balanceDueShipping': '' };
-    }
+    update.$unset = { 'shipping.balanceDueShipping': '' };
     await Order.updateOne({ _id: id }, update);
 
     await Order.updateOne(
@@ -4615,10 +4669,7 @@ async function finalizePendingOrderShipping(orderId) {
             at: new Date().toISOString(),
             kind: 'shipping_quote_finalized',
             source: 'system',
-            status:
-              newCharge < 0.005
-                ? 'Final shipping: free'
-                : `Final shipping: ₹${newCharge}${prepaidImbalance ? ' (balance may be due)' : ''}`,
+            status: 'Shipping quote finalized (free delivery)',
           },
         },
       }
@@ -4626,25 +4677,9 @@ async function finalizePendingOrderShipping(orderId) {
 
     logJson('info', 'order.shipping_finalized', {
       orderId: id,
-      newCharge,
-      oldCharge,
-      newTotal,
-      prepaidImbalance,
-      codChargeAppeared,
+      actualShippingCharge: actualCharge,
+      oldActualShippingCharge: oldActual,
     });
-
-    if (prepaidImbalance || codChargeAppeared) {
-      logIntegrationNotifyPending({
-        event: 'shipping_pricing_adjustment',
-        orderId: id,
-        pricingPendingReview: true,
-        balanceDueShipping: balance > 0.005 ? balance : undefined,
-        amountDue: $set.amountDue,
-        newTotal,
-        amountPaidSnapshot: paid,
-        notifyChannelsPlanned: ['sms', 'email', 'admin_dashboard'],
-      });
-    }
 
     await syncOrderAdminFlags(id);
   } catch (e) {
@@ -4776,9 +4811,11 @@ async function computeServerCheckoutPricing({ req, body, rawItems, paymentMethod
     );
   }
 
-  const shippingCharge = shippingPlaceholder ? 0 : roundMoney2(ship.shippingCharge);
-  const freeShippingApplied = shippingPlaceholder ? false : !!ship.freeShippingApplied;
-  const total = roundMoney2(goodsAfterDiscount + shippingCharge);
+  const actualShippingCharge = shippingPlaceholder ? 0 : roundMoney2(ship.actualShippingCharge ?? ship.shippingCharge);
+  // User-facing free delivery: never charge shipping.
+  const shippingCharge = 0;
+  const freeShippingApplied = ship?.ok === true;
+  const total = roundMoney2(goodsAfterDiscount);
 
   return {
     pricedItems,
@@ -4787,6 +4824,7 @@ async function computeServerCheckoutPricing({ req, body, rawItems, paymentMethod
     couponCode,
     goodsAfterDiscount,
     shippingCharge,
+    actualShippingCharge,
     freeShippingApplied,
     total,
     shippingPlaceholder,
@@ -4858,7 +4896,7 @@ app.post('/api/orders', mongoReady, async (req, res) => {
     assertDeclaredMoneyMatches('Payable total', ['declaredTotal', 'total'], body, pricing.total);
 
     const pricedItems = pricing.pricedItems;
-    const { subtotal, discount, couponCode, goodsAfterDiscount, shippingCharge, freeShippingApplied, total, shippingPlaceholder, ship } =
+    const { subtotal, discount, couponCode, goodsAfterDiscount, shippingCharge, actualShippingCharge, freeShippingApplied, total, shippingPlaceholder, ship } =
       pricing;
 
     const orderId = `ORD-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -4884,6 +4922,7 @@ app.post('/api/orders', mongoReady, async (req, res) => {
       couponCode,
       goodsTotal: goodsAfterDiscount,
       shippingCharge,
+      actualShippingCharge,
       freeShippingApplied,
       total,
       shipping: buildOrderShippingFromCheckout({ shippingPlaceholder, ship }),
@@ -4897,7 +4936,7 @@ app.post('/api/orders', mongoReady, async (req, res) => {
     });
     await syncOrderAdminFlags(orderId);
     const fresh = await Order.findById(orderId).lean();
-    res.status(201).json(serializeOrder(fresh));
+    res.status(201).json(serializeOrderForClient(fresh));
 
     setImmediate(() => {
       void (async () => {
@@ -5072,6 +5111,7 @@ app.post('/api/payments/razorpay/session', mongoReady, async (req, res) => {
       couponCode,
       goodsAfterDiscount,
       shippingCharge,
+      actualShippingCharge,
       freeShippingApplied,
       total,
       shippingPlaceholder,
@@ -5101,6 +5141,7 @@ app.post('/api/payments/razorpay/session', mongoReady, async (req, res) => {
       couponCode,
       goodsTotal: goodsAfterDiscount,
       shippingCharge,
+      actualShippingCharge,
       freeShippingApplied,
       total,
       hasCustomPrint: !!body.hasCustomPrint,
@@ -5110,7 +5151,7 @@ app.post('/api/payments/razorpay/session', mongoReady, async (req, res) => {
     });
 
     res.status(201).json({
-      session: serializePaymentSession(await PaymentSession.findById(sessionId).lean()),
+      session: serializePaymentSessionForClient(await PaymentSession.findById(sessionId).lean()),
       keyId: String(RAZORPAY_KEY_ID),
       razorpayOrderId: String(rpOrder.id),
       amount: Number(rpOrder.amount),
@@ -5143,18 +5184,18 @@ app.post('/api/payments/razorpay/cancel', mongoReady, async (req, res) => {
       return;
     }
     if (String(s.status) === 'paid') {
-      res.json({ ok: true, session: serializePaymentSession(s) });
+      res.json({ ok: true, session: serializePaymentSessionForClient(s) });
       return;
     }
     if (isExpired(s.expiresAt)) {
       await PaymentSession.updateOne({ _id: sessionId }, { $set: { status: 'expired', error: 'Timed out' } });
       const fresh = await PaymentSession.findById(sessionId).lean();
-      res.json({ ok: true, session: serializePaymentSession(fresh) });
+      res.json({ ok: true, session: serializePaymentSessionForClient(fresh) });
       return;
     }
     await PaymentSession.updateOne({ _id: sessionId }, { $set: { status: 'cancelled', error: null } });
     const fresh = await PaymentSession.findById(sessionId).lean();
-    res.json({ ok: true, session: serializePaymentSession(fresh) });
+    res.json({ ok: true, session: serializePaymentSessionForClient(fresh) });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Failed to cancel payment session' });

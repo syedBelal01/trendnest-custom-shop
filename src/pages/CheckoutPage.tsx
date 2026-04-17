@@ -489,8 +489,8 @@ export default function CheckoutPage() {
     healthShippingLoaded &&
     (allowRelaxedShipping === true || (!shippingQuoteLoading && shippingQuoteHasEta));
 
-  const shippingChargeForTotal = shippingQuoteHasEta ? Number(shippingQuote?.shippingCharge) || 0 : allowRelaxedShipping === true ? 0 : 0;
-  const payableGrandTotal = checkoutMerchandise.total + shippingChargeForTotal;
+  const shippingChargeForTotal = 0;
+  const payableGrandTotal = checkoutMerchandise.total;
 
   // Shiprocket serviceability — clear stale quotes while pin / cart / payment changes, then refetch.
   useEffect(() => {
@@ -701,8 +701,7 @@ export default function CheckoutPage() {
     setSubmitting(true);
     try {
       const computed = totalsForPaymentMethod(paymentMethod);
-      const shipAdd = shippingQuoteHasEta ? Number(shippingQuote?.shippingCharge) || 0 : 0;
-      const payableTotal = computed.total + shipAdd;
+      const payableTotal = computed.total;
       const payload = {
         customer: { ...form, email: form.email.trim(), phone: phoneCheck.digits },
         items: cartItemsToOrderLines(items).map((l, idx) => ({ ...l, price: unitPriceForItem(items[idx], paymentMethod) })),
@@ -1316,7 +1315,7 @@ export default function CheckoutPage() {
                   : allowRelaxedShipping === true
                     ? `Place Order — ₹${payableGrandTotal}`
                     : shippingQuoteLoading
-                      ? 'Calculating shipping…'
+                      ? 'Checking delivery estimate…'
                       : isShippingServiceabilityError(shippingQuote)
                         ? shippingQuote.reason === 'not_serviceable'
                           ? 'Delivery not available'
@@ -1328,11 +1327,11 @@ export default function CheckoutPage() {
           {deliveryValid && deliveryPinValid && healthShippingLoaded && !shippingGateReady && !submitting && (
             <p className="text-xs text-muted-foreground mt-2 text-center">
               {shippingQuoteLoading
-                ? 'Calculating shipping and delivery estimate…'
+                ? 'Checking delivery estimate…'
                 : isShippingServiceabilityError(shippingQuote)
                   ? shippingQuote.reason === 'not_serviceable'
                     ? 'We cannot deliver to this pincode. Try a different address.'
-                    : 'Could not load shipping rates. Check the pincode or try again shortly.'
+                    : 'Could not load delivery estimate. Check the pincode or try again shortly.'
                   : 'Confirming delivery timeline…'}
             </p>
           )}
@@ -1382,15 +1381,13 @@ export default function CheckoutPage() {
               </div>
               <div className="flex justify-between text-muted-foreground">
                 <span>
-                  Shipping {shippingQuoteLoading ? '(calculating…)' : ''}
+                  Shipping {shippingQuoteLoading ? '(checking…)' : ''}
                 </span>
                 <span>
                   {shippingQuoteLoading
                     ? '…'
                     : shippingQuote?.ok
-                      ? shippingQuote.shippingCharge === 0
-                        ? 'Free'
-                        : `₹${shippingQuote.shippingCharge}`
+                      ? 'Free'
                       : allowRelaxedShipping === true
                         ? '—'
                         : isShippingServiceabilityError(shippingQuote) && shippingQuote.reason === 'not_serviceable'
@@ -1412,8 +1409,7 @@ export default function CheckoutPage() {
               )}
               {allowRelaxedShipping === true && !shippingQuoteHasEta && deliveryPinValid && (
                 <p className="text-[11px] text-amber-900 dark:text-amber-200/90 leading-snug col-span-full">
-                  Estimated shipping — final amount and ETA are calculated on the server after you place the order. Refresh
-                  your order page to see updates once the courier quote is applied.
+                  Delivery estimate is still loading. You can continue once it’s available.
                 </p>
               )}
               <div className="flex justify-between text-muted-foreground text-xs">

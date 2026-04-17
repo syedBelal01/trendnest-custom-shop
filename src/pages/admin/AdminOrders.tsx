@@ -157,6 +157,12 @@ export default function AdminOrders() {
                   Subtotal ₹{o.subtotal}
                   {o.discount > 0 && ` · Discount -₹${o.discount}${o.couponCode ? ` (${o.couponCode})` : ''}`}
                 </p>
+                <p className="text-xs text-muted-foreground">
+                  Shipping (internal): ₹{Number(o.actualShippingCharge ?? 0).toFixed(0)}
+                  {o.goodsTotal != null
+                    ? ` · Profit: ₹${Math.max(0, Math.round((Number(o.goodsTotal) || 0) - (Number(o.actualShippingCharge) || 0)))}`
+                    : ''}
+                </p>
                 <p className="font-semibold">Total: ₹{o.total}</p>
                 {(o.paymentMethod || o.paymentStatus) && (
                   <p className="text-xs text-muted-foreground">

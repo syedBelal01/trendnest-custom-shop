@@ -257,7 +257,7 @@ export default function AccountOrderDetailPage() {
               <div className="flex justify-between gap-2">
                 <span>Shipping</span>
                 <span className="tabular-nums text-foreground">
-                  {order.shippingCharge < 0.005 ? 'Free' : `₹${order.shippingCharge}`}
+                  Free
                 </span>
               </div>
             )}
