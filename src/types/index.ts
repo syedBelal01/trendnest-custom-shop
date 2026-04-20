@@ -188,7 +188,7 @@ export interface Order {
   items: OrderLineSnapshot[];
   customer: CustomerInfo;
   userId?: string;
-  status: 'pending' | 'packed' | 'shipped' | 'delivered' | 'cancelled';
+  status: 'pending' | 'confirmed' | 'packed' | 'shipped' | 'delivered' | 'cancelled';
   paymentMethod?: 'cod' | 'razorpay';
   paymentStatus?: 'unpaid' | 'paid' | 'failed';
   amountDue?: number;

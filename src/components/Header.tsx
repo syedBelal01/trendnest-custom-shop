@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useCart } from '@/contexts/CartContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 const navLinks = [
   { label: 'Home', to: '/category/home' },
@@ -19,6 +19,15 @@ export default function Header() {
   const [search, setSearch] = useState('');
   const [mobileOpen, setMobileOpen] = useState(false);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMobileOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [mobileOpen]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,17 +83,36 @@ export default function Header() {
 
       {/* Mobile menu */}
       {mobileOpen && (
-        <div className="md:hidden border-t bg-background px-3 py-3 space-y-1">
-          <form onSubmit={handleSearch} className="sm:hidden mb-2">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search..." className="pl-9 h-10" />
-            </div>
-          </form>
-          {navLinks.map(l => (
-            <Link key={l.to} to={l.to} onClick={() => setMobileOpen(false)} className="block px-3 py-2.5 text-sm font-medium rounded-md hover:bg-accent active:bg-accent/80">{l.label}</Link>
-          ))}
-        </div>
+        <>
+          {/* Tap anywhere outside to close */}
+          <button
+            type="button"
+            aria-label="Close menu"
+            className="md:hidden fixed inset-0 z-40 cursor-default bg-black/20"
+            onClick={() => setMobileOpen(false)}
+          />
+          <div
+            className="md:hidden relative z-50 border-t bg-background px-3 py-3 space-y-1"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <form onSubmit={handleSearch} className="sm:hidden mb-2">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search..." className="pl-9 h-10" />
+              </div>
+            </form>
+            {navLinks.map(l => (
+              <Link
+                key={l.to}
+                to={l.to}
+                onClick={() => setMobileOpen(false)}
+                className="block px-3 py-2.5 text-sm font-medium rounded-md hover:bg-accent active:bg-accent/80"
+              >
+                {l.label}
+              </Link>
+            ))}
+          </div>
+        </>
       )}
     </header>
   );

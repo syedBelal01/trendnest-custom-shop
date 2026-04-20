@@ -675,7 +675,7 @@ const ReviewInviteSchema = new mongoose.Schema(
     orderId: { type: String, required: true, index: true },
     productId: { type: String, required: true, index: true },
     deliveredAt: { type: Date, required: true },
-    expiresAt: { type: Date, required: true, index: true },
+    expiresAt: { type: Date, required: true },
     usedAt: { type: Date, default: undefined },
     revokedAt: { type: Date, default: undefined },
   },
@@ -829,7 +829,7 @@ async function validateCouponForCart({ code, subtotal, items, userId }) {
 }
 
 const MAX_CUSTOM_INLINE_BYTES = 500 * 1024;
-const ORDER_STATUSES = ['pending', 'packed', 'shipped', 'delivered', 'cancelled'];
+const ORDER_STATUSES = ['pending', 'confirmed', 'packed', 'shipped', 'delivered', 'cancelled'];
 const RETURN_REQUEST_STATUSES = ['requested', 'approved', 'rejected', 'picked_up', 'received', 'refunded'];
 
 const ReturnRequestTimelineSchema = new mongoose.Schema(
@@ -1011,7 +1011,7 @@ const OrderSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: ORDER_STATUSES,
-      default: 'pending',
+      default: 'confirmed',
     },
     shippedAt: Date,
     deliveredAt: Date,
@@ -1932,7 +1932,7 @@ async function ensureShiprocketShipmentForOrderId(orderId, source = 'system') {
     );
 
     await Order.updateOne(
-      { _id: id, status: 'pending' },
+      { _id: id, status: { $in: ['pending', 'confirmed'] } },
       { $set: { status: 'packed' } }
     );
     logJson('info', 'shiprocket.shipment_ok', {
@@ -3717,7 +3717,7 @@ app.post('/api/me/orders/:id/cancel', mongoReady, requireAuth, async (req, res) 
       return;
     }
 
-    const preShipment = status === 'pending' || status === 'packed';
+    const preShipment = status === 'pending' || status === 'confirmed';
     if (!preShipment) {
       res.status(409).json({ error: 'Order cannot be cancelled after it is shipped.' });
       return;
@@ -3726,7 +3726,7 @@ app.post('/api/me/orders/:id/cancel', mongoReady, requireAuth, async (req, res) 
     // Mark cancelled first (so repeated calls are idempotent and won’t trigger multiple refunds).
     const now = new Date();
     await Order.updateOne(
-      { _id: id, userId: req.session.userId, status: { $in: ['pending', 'packed'] } },
+      { _id: id, userId: req.session.userId, status: { $in: ['pending', 'confirmed'] } },
       { $set: { status: 'cancelled', cancelledAt: now, cancellationReason: reason || '' } }
     );
 
@@ -5980,7 +5980,7 @@ app.post('/api/orders', mongoReady, async (req, res) => {
       amountDue: total,
       amountPaid: 0,
       hasCustomPrint: !!body.hasCustomPrint,
-      status: 'pending',
+      status: 'confirmed',
       stockDeductedAt: new Date(),
     });
     await syncOrderAdminFlags(orderId);
@@ -6385,7 +6385,7 @@ app.post('/api/payments/razorpay/verify', mongoReady, async (req, res) => {
       razorpayPaymentId,
       razorpaySignature,
       hasCustomPrint: !!session.hasCustomPrint,
-      status: 'pending',
+      status: 'confirmed',
       stockDeductedAt: new Date(),
     });
     await syncOrderAdminFlags(orderId);

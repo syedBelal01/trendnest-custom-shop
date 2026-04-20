@@ -88,7 +88,7 @@ export default function AccountOrderDetailPage() {
   }, [loadOrder]);
 
   const pendingShippingFinalize = order?.shipping?.estimated === true && order?.shipping?.finalized !== true;
-  const canCancel = order?.status === 'pending';
+  const canCancel = order?.status === 'pending' || order?.status === 'confirmed';
 
   useEffect(() => {
     if (!pendingShippingFinalize || !id) return;
