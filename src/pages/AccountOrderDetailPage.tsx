@@ -88,7 +88,7 @@ export default function AccountOrderDetailPage() {
   }, [loadOrder]);
 
   const pendingShippingFinalize = order?.shipping?.estimated === true && order?.shipping?.finalized !== true;
-  const canCancel = order?.status === 'pending' || order?.status === 'packed';
+  const canCancel = order?.status === 'pending';
 
   useEffect(() => {
     if (!pendingShippingFinalize || !id) return;
@@ -366,16 +366,19 @@ export default function AccountOrderDetailPage() {
               ) : null}
             </div>
           ) : canCancel ? (
-            <button
-              type="button"
-              className="w-full text-left text-[11px] text-muted-foreground underline underline-offset-4 hover:text-foreground active:opacity-80"
-              onClick={() => {
-                setCancelReason('');
-                setCancelOpen(true);
-              }}
-            >
-              Cancel this order
-            </button>
+            <div className="space-y-1">
+              <div className="text-[11px] text-muted-foreground">More actions</div>
+              <button
+                type="button"
+                className="w-full text-left text-[11px] text-muted-foreground underline underline-offset-4 hover:text-foreground active:opacity-80"
+                onClick={() => {
+                  setCancelReason('');
+                  setCancelOpen(true);
+                }}
+              >
+                Cancel this order
+              </button>
+            </div>
           ) : null}
 
           {canOpenReturn ? (
