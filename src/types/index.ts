@@ -188,7 +188,7 @@ export interface Order {
   items: OrderLineSnapshot[];
   customer: CustomerInfo;
   userId?: string;
-  status: 'pending' | 'packed' | 'shipped' | 'delivered';
+  status: 'pending' | 'packed' | 'shipped' | 'delivered' | 'cancelled';
   paymentMethod?: 'cod' | 'razorpay';
   paymentStatus?: 'unpaid' | 'paid' | 'failed';
   amountDue?: number;
@@ -250,6 +250,18 @@ export interface Order {
   };
   /** Customer return / refund requests (embedded on order). */
   returnRequests?: OrderReturnRequest[];
+  cancelledAt?: string;
+  cancellationReason?: string;
+  cancellationRefund?: {
+    kind?: 'razorpay' | 'none';
+    status?: 'pending' | 'processing' | 'completed' | 'failed';
+    amount?: number;
+    currency?: string;
+    razorpayRefundId?: string;
+    razorpayPaymentId?: string;
+    error?: string;
+    processedAt?: string;
+  };
 }
 
 export interface CustomerInfo {

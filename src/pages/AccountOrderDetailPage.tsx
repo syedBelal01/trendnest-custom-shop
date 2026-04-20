@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { toast } from 'sonner';
-import { fetchMyOrderByIdApi } from '@/lib/authApi';
+import { cancelMyOrderApi, fetchMyOrderByIdApi } from '@/lib/authApi';
 import { requestReturnApi, uploadReturnImageApi } from '@/lib/returnsApi';
 import type { Order, OrderLineSnapshot, OrderReturnRequest } from '@/types';
 import { ArrowLeft, Truck, MapPin, Package, Clock, RefreshCw, Undo2, ImagePlus, ExternalLink } from 'lucide-react';
@@ -62,6 +62,9 @@ export default function AccountOrderDetailPage() {
   const [loading, setLoading] = useState(true);
   const [returnOpen, setReturnOpen] = useState(false);
   const [reason, setReason] = useState('');
+  const [cancelOpen, setCancelOpen] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelBusy, setCancelBusy] = useState(false);
   const [returnImages, setReturnImages] = useState<string[]>([]);
   const [partialMode, setPartialMode] = useState(false);
   const [lineQty, setLineQty] = useState<Record<string, number>>({});
@@ -85,6 +88,7 @@ export default function AccountOrderDetailPage() {
   }, [loadOrder]);
 
   const pendingShippingFinalize = order?.shipping?.estimated === true && order?.shipping?.finalized !== true;
+  const canCancel = order?.status === 'pending' || order?.status === 'packed';
 
   useEffect(() => {
     if (!pendingShippingFinalize || !id) return;
@@ -343,6 +347,37 @@ export default function AccountOrderDetailPage() {
         </div>
 
         <div className="pt-2 border-t space-y-2">
+          {order.status === 'cancelled' ? (
+            <div className="rounded-xl border bg-muted/40 px-3 py-2 text-xs space-y-1">
+              <div className="font-semibold">Order cancelled</div>
+              {order.cancelledAt ? <div className="text-muted-foreground">Cancelled at: {fmtDate(order.cancelledAt)}</div> : null}
+              {order.cancellationRefund?.kind === 'razorpay' ? (
+                <div className="text-muted-foreground">
+                  Refund: <span className="font-semibold">{order.cancellationRefund.status || 'pending'}</span>
+                  {order.cancellationRefund.amount != null ? ` · ₹${order.cancellationRefund.amount}` : ''}
+                  {order.cancellationRefund.status === 'completed'
+                    ? ' (initiated)'
+                    : order.cancellationRefund.status === 'failed'
+                      ? order.cancellationRefund.error
+                        ? ` — ${order.cancellationRefund.error}`
+                        : ' — refund initiation failed'
+                      : ' — will reflect in 2–5 working days'}
+                </div>
+              ) : null}
+            </div>
+          ) : canCancel ? (
+            <button
+              type="button"
+              className="w-full text-left text-[11px] text-muted-foreground underline underline-offset-4 hover:text-foreground active:opacity-80"
+              onClick={() => {
+                setCancelReason('');
+                setCancelOpen(true);
+              }}
+            >
+              Cancel this order
+            </button>
+          ) : null}
+
           {canOpenReturn ? (
             <Button type="button" className="w-full gap-2" variant="secondary" onClick={openReturnDialog}>
               <Undo2 className="h-4 w-4" />
@@ -353,6 +388,56 @@ export default function AccountOrderDetailPage() {
           )}
         </div>
       </div>
+
+      <Dialog open={cancelOpen} onOpenChange={(o) => (cancelBusy ? null : setCancelOpen(o))}>
+        <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-md mx-auto rounded-2xl p-4 sm:p-6">
+          <DialogHeader>
+            <DialogTitle>Cancel order</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-xs text-muted-foreground">
+              You can cancel only before the order is shipped. For online payments, refunds typically reflect in 2–5 working days.
+            </p>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Reason (optional)</Label>
+              <Textarea
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                placeholder="Tell us why you’re cancelling (optional)"
+                disabled={cancelBusy}
+              />
+            </div>
+            <div className="flex flex-col sm:flex-row gap-2 pt-1">
+              <Button
+                type="button"
+                variant="destructive"
+                disabled={cancelBusy || !id}
+                onClick={() => {
+                  if (!id) return;
+                  setCancelBusy(true);
+                  void (async () => {
+                    try {
+                      const out = await cancelMyOrderApi(id, cancelReason.trim());
+                      toast.success(out.message || 'Order cancelled');
+                      setCancelOpen(false);
+                      setOrder(out.order);
+                    } catch (e) {
+                      toast.error(e instanceof Error ? e.message : 'Could not cancel order');
+                    } finally {
+                      setCancelBusy(false);
+                    }
+                  })();
+                }}
+              >
+                Confirm cancel
+              </Button>
+              <Button type="button" variant="outline" disabled={cancelBusy} onClick={() => setCancelOpen(false)}>
+                Keep order
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {(order.returnRequests?.length ?? 0) > 0 ? (
         <div className="rounded-2xl border bg-card shadow-sm p-4 space-y-3">

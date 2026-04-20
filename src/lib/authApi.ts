@@ -154,6 +154,18 @@ export async function fetchMyOrderByIdApi(orderId: string): Promise<Order> {
   return data as Order;
 }
 
+export async function cancelMyOrderApi(orderId: string, reason: string): Promise<{ order: Order; message?: string }> {
+  const res = await fetch(apiUrl(`/api/me/orders/${encodeURIComponent(orderId)}/cancel`), {
+    method: 'POST',
+    credentials: 'include',
+    headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ reason }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Failed to cancel order');
+  return { order: (data.order ?? null) as Order, message: typeof data.message === 'string' ? data.message : undefined };
+}
+
 export type Address = NonNullable<import('@/types').User['addresses']>[number];
 
 export async function fetchMyAddressesApi(): Promise<Address[]> {
