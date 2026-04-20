@@ -333,6 +333,11 @@ const ProductSchema = new mongoose.Schema(
     variantOptions: { type: [VariantOptionSchema], default: undefined },
     variants: [String],
     sleeveTypes: [String],
+    // Internal-only: shipping attributes used for rate calculation/logistics. Optional; defaults applied when missing.
+    shipWeightKg: { type: Number, default: undefined, min: 0 },
+    shipLengthCm: { type: Number, default: undefined, min: 0 },
+    shipWidthCm: { type: Number, default: undefined, min: 0 },
+    shipHeightCm: { type: Number, default: undefined, min: 0 },
     /** Key-value product details (Brand, Material, etc.); only complete pairs are stored after normalize. */
     specifications: { type: [ProductSpecificationSchema], default: [] },
     /** New variants model (combinations with per-variant pricing/stock/SKU). */
@@ -370,6 +375,8 @@ const ProductDraftSchema = new mongoose.Schema(
     },
     /** Step 4 payload */
     variants: { type: Object, default: {} },
+    /** Internal-only: shipping attributes (optional). */
+    shipping: { type: Object, default: {} },
     /** Product id created when published (optional). */
     publishedProductId: { type: String, default: '' },
   },
@@ -1090,6 +1097,11 @@ function serialize(doc) {
 function serializeProductDoc(doc) {
   const o = serialize(doc);
   if (!o) return null;
+  // Internal-only shipping attributes should not be exposed to storefront clients.
+  delete o.shipWeightKg;
+  delete o.shipLengthCm;
+  delete o.shipWidthCm;
+  delete o.shipHeightCm;
   const raw = o.specifications;
   if (!Array.isArray(raw)) {
     o.specifications = [];
@@ -1555,7 +1567,47 @@ async function createShiprocketShipmentForOrderDoc(orderLean) {
 
   const items = Array.isArray(orderLean.items) ? orderLean.items : [];
   const qtySum = items.reduce((acc, it) => acc + Math.max(0, Math.floor(Number(it?.quantity) || 0)), 0);
-  const weightKg = clampNum((qtySum || 1) * SHIPROCKET_DEFAULT_WEIGHT_KG, { min: 0.1, max: 25 });
+
+  // Prefer per-product shipping attributes (fallback to configured defaults).
+  const itemProductIds = Array.from(
+    new Set(
+      items
+        .map((it) => String(it?.productId ?? it?._id ?? it?.id ?? '').trim())
+        .filter(Boolean)
+    )
+  );
+  const shipById = new Map();
+  if (itemProductIds.length) {
+    const prods = await Product.find({ _id: { $in: itemProductIds } })
+      .select({ _id: 1, shipWeightKg: 1, shipLengthCm: 1, shipWidthCm: 1, shipHeightCm: 1 })
+      .lean();
+    for (const p of prods) shipById.set(String(p._id), p);
+  }
+
+  const weightSum = items.reduce((acc, it) => {
+    const pid = String(it?.productId ?? it?._id ?? it?.id ?? '').trim();
+    const qty = Math.max(0, Math.floor(Number(it?.quantity) || 0));
+    const p = shipById.get(pid);
+    const w = Number(p?.shipWeightKg);
+    const per = Number.isFinite(w) && w > 0 ? w : SHIPROCKET_DEFAULT_WEIGHT_KG;
+    return acc + qty * per;
+  }, 0);
+  const weightKg = clampNum((weightSum || (qtySum || 1) * SHIPROCKET_DEFAULT_WEIGHT_KG), { min: 0.1, max: 25 });
+
+  const dimMax = { l: SHIPROCKET_DEFAULT_LENGTH_CM, w: SHIPROCKET_DEFAULT_BREADTH_CM, h: SHIPROCKET_DEFAULT_HEIGHT_CM };
+  for (const it of items) {
+    const pid = String(it?.productId ?? it?._id ?? it?.id ?? '').trim();
+    const p = shipById.get(pid);
+    const l = Number(p?.shipLengthCm);
+    const w = Number(p?.shipWidthCm);
+    const h = Number(p?.shipHeightCm);
+    if (Number.isFinite(l) && l > 0) dimMax.l = Math.max(dimMax.l, l);
+    if (Number.isFinite(w) && w > 0) dimMax.w = Math.max(dimMax.w, w);
+    if (Number.isFinite(h) && h > 0) dimMax.h = Math.max(dimMax.h, h);
+  }
+  const pkgLength = clampNum(dimMax.l, { min: 1, max: 200 });
+  const pkgBreadth = clampNum(dimMax.w, { min: 1, max: 200 });
+  const pkgHeight = clampNum(dimMax.h, { min: 1, max: 200 });
 
   // Pre-fetch serviceability so we can select courier deterministically.
   const { companies, raw: serviceabilityRaw } = await fetchShiprocketServiceabilityForOrder({
@@ -1661,9 +1713,9 @@ async function createShiprocketShipmentForOrderDoc(orderLean) {
     order_items: orderItems,
     payment_method: cod ? 'COD' : 'Prepaid',
     sub_total: subTotal,
-    length: clampNum(SHIPROCKET_DEFAULT_LENGTH_CM, { min: 1 }),
-    breadth: clampNum(SHIPROCKET_DEFAULT_BREADTH_CM, { min: 1 }),
-    height: clampNum(SHIPROCKET_DEFAULT_HEIGHT_CM, { min: 1 }),
+    length: pkgLength,
+    breadth: pkgBreadth,
+    height: pkgHeight,
     weight: weightKg,
   };
 
@@ -2506,8 +2558,35 @@ async function resolveShippingChargeForPricing({ pincode, cod, pricedLines, good
     };
   }
 
-  const qtySum = (pricedLines || []).reduce((acc, l) => acc + Math.max(0, Math.floor(Number(l?.quantity) || 0)), 0);
-  const weight = clampNum((qtySum || 1) * SHIPROCKET_DEFAULT_WEIGHT_KG, { min: 0.1, max: 25 });
+  const lines = Array.isArray(pricedLines) ? pricedLines : [];
+  const qtySum = lines.reduce((acc, l) => acc + Math.max(0, Math.floor(Number(l?.quantity) || 0)), 0);
+
+  // Prefer per-product shipping weights (fallback to configured default).
+  const productIds = Array.from(
+    new Set(
+      lines
+        .map((l) => String(l?.productId ?? l?.id ?? '').trim())
+        .filter(Boolean)
+    )
+  );
+  const productWeightById = new Map();
+  if (productIds.length) {
+    const prods = await Product.find({ _id: { $in: productIds } })
+      .select({ _id: 1, shipWeightKg: 1 })
+      .lean();
+    for (const p of prods) {
+      const n = Number(p?.shipWeightKg);
+      if (Number.isFinite(n) && n > 0) productWeightById.set(String(p._id), n);
+    }
+  }
+
+  const weightSum = lines.reduce((acc, l) => {
+    const pid = String(l?.productId ?? l?.id ?? '').trim();
+    const qty = Math.max(0, Math.floor(Number(l?.quantity) || 0));
+    const per = productWeightById.has(pid) ? Number(productWeightById.get(pid)) : SHIPROCKET_DEFAULT_WEIGHT_KG;
+    return acc + qty * per;
+  }, 0);
+  const weight = clampNum((weightSum || (qtySum || 1) * SHIPROCKET_DEFAULT_WEIGHT_KG), { min: 0.1, max: 25 });
   const goodsRound = Math.round(Math.max(0, Number(goodsAfterDiscount) || 0));
 
   const cacheKey = JSON.stringify({
@@ -4876,6 +4955,7 @@ function normalizeDraftPatch(patch) {
     out.images = { items, primaryIndex };
   }
   if (patch.variants !== undefined) out.variants = patch.variants && typeof patch.variants === 'object' ? patch.variants : {};
+  if (patch.shipping !== undefined) out.shipping = patch.shipping && typeof patch.shipping === 'object' ? patch.shipping : {};
   return out;
 }
 
@@ -4892,6 +4972,7 @@ function requireUniqueSkus(rows) {
 
 function draftToProductPayload(draft) {
   const d = draft?.details && typeof draft.details === 'object' ? draft.details : {};
+  const ship = draft?.shipping && typeof draft.shipping === 'object' ? draft.shipping : {};
   const images = Array.isArray(draft?.images?.items) ? draft.images.items.map((u) => String(u)).filter(Boolean).slice(0, 8) : [];
   const primaryIndex = clampImagePrimaryIndex(images, draft?.images?.primaryIndex);
   const orderedImages = images.length
@@ -4913,7 +4994,24 @@ function draftToProductPayload(draft) {
     images: orderedImages.length ? orderedImages : undefined,
     isTrending: !!d.isTrending,
     isCustomPrint: !!d.isCustomPrint,
+    shipWeightKg: ship?.weightKg != null && ship.weightKg !== '' ? Number(ship.weightKg) : undefined,
+    shipLengthCm: ship?.lengthCm != null && ship.lengthCm !== '' ? Number(ship.lengthCm) : undefined,
+    shipWidthCm: ship?.widthCm != null && ship.widthCm !== '' ? Number(ship.widthCm) : undefined,
+    shipHeightCm: ship?.heightCm != null && ship.heightCm !== '' ? Number(ship.heightCm) : undefined,
   };
+
+  // Validate/clamp shipping inputs when present (optional fields).
+  const clampOpt = (v, { min, max }) => {
+    if (v === undefined || v === null) return undefined;
+    const n = Number(v);
+    if (!Number.isFinite(n)) return undefined;
+    if (n <= 0) return undefined;
+    return clampNum(n, { min, max });
+  };
+  base.shipWeightKg = clampOpt(base.shipWeightKg, { min: 0.05, max: 25 });
+  base.shipLengthCm = clampOpt(base.shipLengthCm, { min: 1, max: 200 });
+  base.shipWidthCm = clampOpt(base.shipWidthCm, { min: 1, max: 200 });
+  base.shipHeightCm = clampOpt(base.shipHeightCm, { min: 1, max: 200 });
 
   if (!hasVariants) {
     const simple = v.simple && typeof v.simple === 'object' ? v.simple : {};
@@ -5066,6 +5164,9 @@ app.patch('/api/admin/product-drafts/:draftId', mongoReady, adminKeyRequired, as
     }
     if (patch.variants !== undefined && isPlainObject(existing.variants) && isPlainObject(patch.variants)) {
       $set.variants = { ...(existing.variants ?? {}), ...(patch.variants ?? {}) };
+    }
+    if (patch.shipping !== undefined && isPlainObject(existing.shipping) && isPlainObject(patch.shipping)) {
+      $set.shipping = { ...(existing.shipping ?? {}), ...(patch.shipping ?? {}) };
     }
 
     await ProductDraft.updateOne({ _id: draftId }, { $set });
@@ -5281,6 +5382,22 @@ function buildProductUpdateSet(src) {
   }
   if (src.specifications !== undefined) {
     out.specifications = normalizeSpecificationsFromBody(src.specifications);
+  }
+  if (src.shipWeightKg !== undefined) {
+    const n = Number(src.shipWeightKg);
+    out.shipWeightKg = Number.isFinite(n) && n > 0 ? clampNum(n, { min: 0.05, max: 25 }) : undefined;
+  }
+  if (src.shipLengthCm !== undefined) {
+    const n = Number(src.shipLengthCm);
+    out.shipLengthCm = Number.isFinite(n) && n > 0 ? clampNum(n, { min: 1, max: 200 }) : undefined;
+  }
+  if (src.shipWidthCm !== undefined) {
+    const n = Number(src.shipWidthCm);
+    out.shipWidthCm = Number.isFinite(n) && n > 0 ? clampNum(n, { min: 1, max: 200 }) : undefined;
+  }
+  if (src.shipHeightCm !== undefined) {
+    const n = Number(src.shipHeightCm);
+    out.shipHeightCm = Number.isFinite(n) && n > 0 ? clampNum(n, { min: 1, max: 200 }) : undefined;
   }
   return Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined));
 }

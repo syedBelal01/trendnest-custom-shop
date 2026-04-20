@@ -15,6 +15,12 @@ export type ProductDraft = {
   details: Record<string, unknown>;
   images: { items: string[]; primaryIndex: number };
   variants: Record<string, unknown>;
+  shipping?: {
+    weightKg?: number | '' | string;
+    lengthCm?: number | '' | string;
+    widthCm?: number | '' | string;
+    heightCm?: number | '' | string;
+  };
   publishedProductId?: string;
   createdAt?: string;
   updatedAt?: string;

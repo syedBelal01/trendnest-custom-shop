@@ -64,6 +64,12 @@ export interface Product {
       images?: string[];
     }>;
   };
+
+  // Internal-only shipping attributes (not intended for customer UI).
+  shipWeightKg?: number;
+  shipLengthCm?: number;
+  shipWidthCm?: number;
+  shipHeightCm?: number;
 }
 
 export interface Review {

@@ -1097,7 +1097,7 @@ function VariantRow(props: {
 }
 
 function ReviewPublishStep() {
-  const { draft, flush } = useProductDraft();
+  const { draft, updateDraftLocal, flush } = useProductDraft();
   const nav = useNavigate();
   const [busy, setBusy] = useState(false);
   const { refreshProducts } = useProducts();
@@ -1105,6 +1105,15 @@ function ReviewPublishStep() {
   if (!draft) return null;
   const details = (draft.details ?? {}) as any;
   const variants = (draft.variants ?? {}) as any;
+  const shipping = (draft.shipping ?? {}) as any;
+
+  const shipStr = (v: any) => (v === undefined || v === null ? '' : String(v));
+  const shipNum = (s: string) => {
+    if (s.trim() === '') return '';
+    const n = Number(s);
+    return Number.isFinite(n) ? n : s; // keep raw so admin sees what they typed
+  };
+  const isBadPositive = (v: any) => v !== '' && (!Number.isFinite(Number(v)) || Number(v) <= 0);
 
   const publish = async (publishAs: 'draft' | 'published') => {
     setBusy(true);
@@ -1195,6 +1204,66 @@ function ReviewPublishStep() {
           </div>
           <div className="text-sm text-muted-foreground">
             {variants.hasVariants ? `${Array.isArray(variants.items) ? variants.items.length : 0} variant(s)` : 'No variants (simple product)'}
+          </div>
+        </div>
+
+        <div className="rounded-xl border bg-card p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-medium">Shipping (internal)</div>
+            <div className="text-xs text-muted-foreground">Used for Shiprocket only</div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <div className="text-xs text-muted-foreground">Weight (kg)</div>
+              <Input
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                min={0}
+                value={shipStr(shipping.weightKg)}
+                onChange={(e) => updateDraftLocal({ shipping: { ...shipping, weightKg: shipNum(e.target.value) } })}
+              />
+              {isBadPositive(shipping.weightKg) ? <div className="text-[11px] text-destructive">Must be a positive number</div> : null}
+            </div>
+            <div className="space-y-1">
+              <div className="text-xs text-muted-foreground">Length (cm)</div>
+              <Input
+                type="number"
+                inputMode="decimal"
+                step="1"
+                min={0}
+                value={shipStr(shipping.lengthCm)}
+                onChange={(e) => updateDraftLocal({ shipping: { ...shipping, lengthCm: shipNum(e.target.value) } })}
+              />
+              {isBadPositive(shipping.lengthCm) ? <div className="text-[11px] text-destructive">Must be a positive number</div> : null}
+            </div>
+            <div className="space-y-1">
+              <div className="text-xs text-muted-foreground">Width (cm)</div>
+              <Input
+                type="number"
+                inputMode="decimal"
+                step="1"
+                min={0}
+                value={shipStr(shipping.widthCm)}
+                onChange={(e) => updateDraftLocal({ shipping: { ...shipping, widthCm: shipNum(e.target.value) } })}
+              />
+              {isBadPositive(shipping.widthCm) ? <div className="text-[11px] text-destructive">Must be a positive number</div> : null}
+            </div>
+            <div className="space-y-1">
+              <div className="text-xs text-muted-foreground">Height (cm)</div>
+              <Input
+                type="number"
+                inputMode="decimal"
+                step="1"
+                min={0}
+                value={shipStr(shipping.heightCm)}
+                onChange={(e) => updateDraftLocal({ shipping: { ...shipping, heightCm: shipNum(e.target.value) } })}
+              />
+              {isBadPositive(shipping.heightCm) ? <div className="text-[11px] text-destructive">Must be a positive number</div> : null}
+            </div>
+          </div>
+          <div className="text-xs text-muted-foreground">
+            Optional. If blank, your existing Shiprocket defaults will be used.
           </div>
         </div>
       </div>
