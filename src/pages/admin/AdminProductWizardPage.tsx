@@ -134,7 +134,12 @@ function mergeVariantItems(
   });
 }
 
-function StepShell(props: { step: number; children: React.ReactNode }) {
+function StepShell(props: {
+  step: number;
+  saving?: boolean;
+  onGoStep?: (step: number) => void;
+  children: React.ReactNode;
+}) {
   const steps = [
     { n: 1, label: 'Category & Details' },
     { n: 2, label: 'Variants' },
@@ -144,9 +149,22 @@ function StepShell(props: { step: number; children: React.ReactNode }) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         {steps.map(s => (
-          <div key={s.n} className={`px-2 py-1 rounded-md border ${s.n === props.step ? 'bg-primary text-primary-foreground border-primary' : ''}`}>
+          <button
+            key={s.n}
+            type="button"
+            disabled={!!props.saving}
+            className={`px-2 py-1 rounded-md border transition-colors ${
+              s.n === props.step
+                ? 'bg-primary text-primary-foreground border-primary'
+                : 'hover:bg-accent hover:text-foreground'
+            } ${props.saving ? 'opacity-60 cursor-not-allowed' : ''}`}
+            onClick={() => {
+              if (!props.onGoStep) return;
+              props.onGoStep(s.n);
+            }}
+          >
             Step {s.n}: {s.label}
-          </div>
+          </button>
         ))}
       </div>
       {props.children}
@@ -196,7 +214,7 @@ function WizardInner({ step }: { step: number }) {
         <div className="text-xs text-muted-foreground">Draft: {draft.draftId}</div>
 
         {step === 1 && (
-          <StepShell step={1}>
+          <StepShell step={1} saving={saving} onGoStep={(n) => void go(n)}>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1">
                 <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Main Category</div>
@@ -616,9 +634,11 @@ function ImagesInlineUploader() {
 }
 
 function ImagesStep() {
-  const { draft, updateDraftLocal } = useProductDraft();
+  const nav = useNavigate();
+  const { draft, updateDraftLocal, flush } = useProductDraft();
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [navBusy, setNavBusy] = useState(false);
   const [maxEdge, setMaxEdge] = useState(1200);
   const [qualityPct, setQualityPct] = useState(85);
 
@@ -649,7 +669,22 @@ function ImagesStep() {
   };
 
   return (
-    <StepShell step={1}>
+    <StepShell
+      step={1}
+      saving={busy || navBusy}
+      onGoStep={(n) => {
+        if (!draft) return;
+        setNavBusy(true);
+        void (async () => {
+          try {
+            await flush();
+            nav(`/admin/products/draft/${encodeURIComponent(draft.draftId)}/step/${n}`);
+          } finally {
+            setNavBusy(false);
+          }
+        })();
+      }}
+    >
       <div className="space-y-3">
         <div className="flex items-center justify-between gap-2">
           <div className="text-sm font-medium">Images (up to 8)</div>
@@ -686,12 +721,14 @@ function ImagesStep() {
 }
 
 function VariantsStep() {
-  const { draft, updateDraftLocal } = useProductDraft();
+  const nav = useNavigate();
+  const { draft, updateDraftLocal, flush } = useProductDraft();
   const variants = (draft?.variants ?? {}) as any;
   const hasVariants = !!variants.hasVariants;
   const details = (draft?.details ?? {}) as Record<string, unknown>;
   const inheritedName = String(details.name ?? '');
   const inheritedDesc = String(details.description ?? '');
+  const [navBusy, setNavBusy] = useState(false);
 
   const [typeName, setTypeName] = useState('Size');
   const [typeValues, setTypeValues] = useState('S, M, L');
@@ -708,7 +745,22 @@ function VariantsStep() {
   };
 
   return (
-    <StepShell step={2}>
+    <StepShell
+      step={2}
+      saving={navBusy}
+      onGoStep={(n) => {
+        if (!draft) return;
+        setNavBusy(true);
+        void (async () => {
+          try {
+            await flush();
+            nav(`/admin/products/draft/${encodeURIComponent(draft.draftId)}/step/${n}`);
+          } finally {
+            setNavBusy(false);
+          }
+        })();
+      }}
+    >
       <div className="space-y-3">
         <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-2">
           <div className="flex items-center gap-3 flex-wrap">
@@ -1074,7 +1126,22 @@ function ReviewPublishStep() {
   };
 
   return (
-    <StepShell step={3}>
+    <StepShell
+      step={3}
+      saving={busy}
+      onGoStep={(n) => {
+        if (!draft) return;
+        setBusy(true);
+        void (async () => {
+          try {
+            await flush();
+            nav(`/admin/products/draft/${encodeURIComponent(draft.draftId)}/step/${n}`);
+          } finally {
+            setBusy(false);
+          }
+        })();
+      }}
+    >
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
         <div className="rounded-xl border bg-card p-4 space-y-2">
           <div className="flex items-center justify-between">
