@@ -13,6 +13,8 @@ import Razorpay from 'razorpay';
 import session from 'express-session';
 import MongoStore from 'connect-mongo';
 import { normalizeIndianMobileOrThrow, normalizeIndianMobileOptional } from './indianPhone.mjs';
+import { resolveMx } from 'dns/promises';
+import validator from 'validator';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Always load .env from project root (folder above server/), not only from process.cwd()
@@ -117,6 +119,46 @@ function shiprocketConfigured() {
 
 function normalizePincode(p) {
   return String(p || '').replace(/[^\d]/g, '').slice(0, 6);
+}
+
+function normalizePhoneDigits(p) {
+  const digits = String(p || '').replace(/[^\d]/g, '');
+  if (!digits) return '';
+  // Common case: +91XXXXXXXXXX or 91XXXXXXXXXX
+  if (digits.length > 10) return digits.slice(-10);
+  return digits;
+}
+
+function isProbablyValidEmail(s) {
+  const x = String(s || '').trim();
+  // Intentionally simple: prevents empty/obviously malformed strings from hitting Shiprocket.
+  return x.includes('@') && x.includes('.') && x.length >= 6 && x.length <= 200;
+}
+
+function summarizeShiprocketAdhocPayload(p) {
+  // Avoid logging PII in production logs.
+  const items = Array.isArray(p?.order_items) ? p.order_items : [];
+  return {
+    order_id: p?.order_id,
+    order_date: p?.order_date,
+    pickup_location: p?.pickup_location,
+    billing_city: p?.billing_city,
+    billing_state: p?.billing_state,
+    billing_pincode: p?.billing_pincode,
+    billing_country: p?.billing_country,
+    billing_email_present: !!String(p?.billing_email || '').trim(),
+    billing_phone_last4: String(p?.billing_phone || '').slice(-4),
+    shipping_is_billing: p?.shipping_is_billing,
+    payment_method: p?.payment_method,
+    sub_total: p?.sub_total,
+    dims: { length: p?.length, breadth: p?.breadth, height: p?.height, weight: p?.weight },
+    items_count: items.length,
+    items_summary: items.slice(0, 10).map((it) => ({
+      sku_present: !!String(it?.sku || '').trim(),
+      units: it?.units,
+      selling_price: it?.selling_price,
+    })),
+  };
 }
 
 function clampNum(n, { min = 0, max = Number.POSITIVE_INFINITY } = {}) {
@@ -391,6 +433,145 @@ const ClientAuthTokenSchema = new mongoose.Schema(
 const User = mongoose.model('User', UserSchema);
 const OtpChallenge = mongoose.model('OtpChallenge', OtpChallengeSchema);
 const ClientAuthToken = mongoose.model('ClientAuthToken', ClientAuthTokenSchema);
+
+// --- Disposable email domain blocklist ---
+const DisposableDomainSchema = new mongoose.Schema(
+  {
+    /** Lowercased domain, stored as document id (e.g. "mailinator.com"). */
+    _id: { type: String, required: true },
+    enabled: { type: Boolean, default: true, index: true },
+    source: { type: String, default: '' }, // e.g. "seed" | "admin"
+    reason: { type: String, default: '' },
+  },
+  { versionKey: false, timestamps: true, collection: 'disposable_domains' }
+);
+
+const DailyAuthMetricSchema = new mongoose.Schema(
+  {
+    _id: { type: String, required: true }, // YYYY-MM-DD
+    blockedDisposable: { type: Number, default: 0 },
+    blockedNoMx: { type: Number, default: 0 },
+    blockedMxLookupFailed: { type: Number, default: 0 },
+    rateLimitHits: { type: Number, default: 0 },
+  },
+  { versionKey: false, timestamps: true, collection: 'daily_auth_metrics' }
+);
+
+const DisposableDomain = mongoose.model('DisposableDomain', DisposableDomainSchema);
+const DailyAuthMetric = mongoose.model('DailyAuthMetric', DailyAuthMetricSchema);
+
+// --- Disposable domains cache (single instance) ---
+const DISPOSABLE_DOMAIN_CACHE_TTL_MS = Math.max(10_000, Number(process.env.DISPOSABLE_DOMAIN_CACHE_TTL_MS || 5 * 60_000));
+let disposableDomainCacheLoadedAtMs = 0;
+/** @type {Set<string>} */
+let disposableDomainCacheSet = new Set();
+
+async function loadDisposableDomainsIfStale() {
+  if (mongoose.connection.readyState !== 1) return;
+  const now = Date.now();
+  if (now - disposableDomainCacheLoadedAtMs < DISPOSABLE_DOMAIN_CACHE_TTL_MS && disposableDomainCacheSet.size > 0) return;
+  const docs = await DisposableDomain.find({ enabled: true }).select({ _id: 1 }).lean();
+  disposableDomainCacheSet = new Set((docs || []).map((d) => String(d._id || '').trim().toLowerCase()).filter(Boolean));
+  disposableDomainCacheLoadedAtMs = now;
+}
+
+async function isDisposableDomain(domainLower) {
+  const domain = String(domainLower || '').trim().toLowerCase();
+  if (!domain) return false;
+  await loadDisposableDomainsIfStale();
+  return disposableDomainCacheSet.has(domain);
+}
+
+function invalidateDisposableDomainCache() {
+  disposableDomainCacheLoadedAtMs = 0;
+}
+
+function upsertDisposableDomainCache(domainLower, enabled) {
+  const domain = String(domainLower || '').trim().toLowerCase();
+  if (!domain) return;
+  if (enabled) disposableDomainCacheSet.add(domain);
+  else disposableDomainCacheSet.delete(domain);
+  disposableDomainCacheLoadedAtMs = Date.now();
+}
+
+// --- MX validation (single instance cache) ---
+const MX_CACHE_TTL_MS = Math.max(10_000, Number(process.env.MX_CACHE_TTL_MS || 15 * 60_000));
+const MX_LOOKUP_TIMEOUT_MS = Math.max(250, Number(process.env.MX_LOOKUP_TIMEOUT_MS || 2000));
+/** @type {Map<string, { atMs: number, ok: boolean }>} */
+const mxCache = new Map();
+
+function withTimeout(promise, timeoutMs) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), timeoutMs)),
+  ]);
+}
+
+async function hasValidMxOrThrow(domainLower) {
+  const domain = String(domainLower || '').trim().toLowerCase();
+  if (!domain) throw new Error('Invalid email');
+  const cached = mxCache.get(domain);
+  const now = Date.now();
+  if (cached && now - cached.atMs < MX_CACHE_TTL_MS) {
+    if (!cached.ok) throw new Error('no_mx');
+    return true;
+  }
+
+  try {
+    const records = await withTimeout(resolveMx(domain), MX_LOOKUP_TIMEOUT_MS);
+    const ok = Array.isArray(records) && records.length > 0;
+    mxCache.set(domain, { atMs: now, ok });
+    if (!ok) throw new Error('no_mx');
+    return true;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e || '');
+    // Treat explicit no-record cases as no_mx; everything else is lookup failure.
+    if (msg === 'no_mx' || /ENODATA|ENOTFOUND|NXDOMAIN/i.test(msg)) {
+      mxCache.set(domain, { atMs: now, ok: false });
+      throw new Error('no_mx');
+    }
+    throw new Error('mx_lookup_failed');
+  }
+}
+
+// --- Rate limiting (single instance) ---
+const SIGNUP_RATE_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.SIGNUP_RATE_LIMIT_WINDOW_MS || 60_000));
+const SIGNUP_RATE_LIMIT_MAX = Math.max(1, Number(process.env.SIGNUP_RATE_LIMIT_MAX || 5));
+/** @type {Map<string, { count: number, resetAtMs: number }>} */
+const ipRateLimitMap = new Map();
+
+function getClientIp(req) {
+  const ip = req?.ip ? String(req.ip) : '';
+  return ip || 'unknown';
+}
+
+function rateLimitByIp({ keyPrefix, limit, windowMs }) {
+  return async function rateLimitMiddleware(req, res, next) {
+    try {
+      const ip = getClientIp(req);
+      const key = `${keyPrefix}:${ip}`;
+      const now = Date.now();
+      const cur = ipRateLimitMap.get(key);
+      if (!cur || cur.resetAtMs <= now) {
+        ipRateLimitMap.set(key, { count: 1, resetAtMs: now + windowMs });
+        next();
+        return;
+      }
+      if (cur.count >= limit) {
+        logJson('warn', 'ratelimit.hit', { ip, path: req.path });
+        await bumpDailyAuthMetric('rateLimitHits', 1);
+        res.status(429).json({ error: 'Too many attempts. Please try again in a minute.' });
+        return;
+      }
+      cur.count += 1;
+      ipRateLimitMap.set(key, cur);
+      next();
+    } catch (e) {
+      console.error(e);
+      next();
+    }
+  };
+}
 
 const CouponSchema = new mongoose.Schema(
   {
@@ -1129,6 +1310,45 @@ function simpleEmailValid(s) {
   return typeof s === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
 }
 
+function normalizeEmailOrThrow(raw) {
+  const input = typeof raw === 'string' ? raw : String(raw || '');
+  const trimmed = input.trim();
+  if (!trimmed) throw new Error('Invalid email');
+  if (!validator.isEmail(trimmed, { allow_utf8_local_part: false })) throw new Error('Invalid email');
+
+  const normalized = validator.normalizeEmail(trimmed, {
+    gmail_remove_dots: false,
+    gmail_remove_subaddress: false,
+    gmail_convert_googlemaildotcom: true,
+    outlookdotcom_remove_subaddress: false,
+    yahoo_remove_subaddress: false,
+    icloud_remove_subaddress: false,
+  });
+  const email = String(normalized || trimmed).trim();
+  const at = email.lastIndexOf('@');
+  if (at <= 0 || at === email.length - 1) throw new Error('Invalid email');
+  const domainLower = email.slice(at + 1).trim().toLowerCase();
+  if (!domainLower || domainLower.includes(' ') || domainLower.includes('/')) throw new Error('Invalid email');
+  return { normalizedEmail: email, domainLower };
+}
+
+function getIsoDayKey(d = new Date()) {
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+async function bumpDailyAuthMetric(field, by = 1) {
+  try {
+    const key = getIsoDayKey();
+    await DailyAuthMetric.updateOne({ _id: key }, { $inc: { [field]: by } }, { upsert: true });
+  } catch (e) {
+    // Metrics are best-effort; never block auth flows on metrics failures.
+    console.error(e);
+  }
+}
+
 function normalizeOrderItemsFromBody(items) {
   if (!Array.isArray(items) || items.length === 0) throw new Error('Order must include at least one item');
   const lines = [];
@@ -1237,6 +1457,36 @@ async function fetchShiprocketServiceabilityForOrder({ deliveryPincode, cod, wei
   return { companies, raw: data };
 }
 
+function extractShiprocketOrderId(data) {
+  return String(data?.order_id || data?.data?.order_id || data?.payload?.order_id || '').trim();
+}
+
+function extractShiprocketShipmentId(data) {
+  const raw = data?.shipment_id ?? data?.data?.shipment_id ?? data?.payload?.shipment_id ?? null;
+  const n = raw != null ? Number(raw) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function extractShipmentIdFromOrderShow(showData) {
+  // Shiprocket response formats vary; try common nests.
+  const direct = extractShiprocketShipmentId(showData);
+  if (direct) return direct;
+  const d = showData?.data ?? showData?.payload ?? showData;
+
+  const candidates = [];
+  if (Array.isArray(d?.shipments)) candidates.push(d.shipments);
+  if (Array.isArray(d?.data?.shipments)) candidates.push(d.data.shipments);
+  if (Array.isArray(d?.order?.shipments)) candidates.push(d.order.shipments);
+
+  for (const arr of candidates) {
+    const first = arr?.[0];
+    const maybe = first?.shipment_id ?? first?.id ?? first?.shipmentId ?? null;
+    const n = maybe != null ? Number(maybe) : NaN;
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return null;
+}
+
 async function createShiprocketShipmentForOrderDoc(orderLean) {
   if (!shiprocketConfigured()) {
     const err = new Error('Shiprocket is not configured on the server');
@@ -1248,6 +1498,11 @@ async function createShiprocketShipmentForOrderDoc(orderLean) {
   const customer = orderLean.customer || {};
   const deliveryPincode = normalizePincode(customer.pincode);
   const cod = String(orderLean.paymentMethod || '') !== 'razorpay';
+  if (deliveryPincode.length !== 6) {
+    const err = new Error('Invalid delivery pincode for Shiprocket');
+    err.statusCode = 400;
+    throw err;
+  }
 
   const items = Array.isArray(orderLean.items) ? orderLean.items : [];
   const qtySum = items.reduce((acc, it) => acc + Math.max(0, Math.floor(Number(it?.quantity) || 0)), 0);
@@ -1268,36 +1523,112 @@ async function createShiprocketShipmentForOrderDoc(orderLean) {
 
   // Create Shiprocket order (adhoc).
   const orderDate = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  const billingCustomerName = String(customer.name || '').trim();
+  const billingCity = String(customer.city || '').trim();
+  const billingState = String(customer.state || '').trim();
+  const billingEmail = String(customer.email || '').trim();
+  const billingPhoneDigits = normalizePhoneDigits(customer.phone);
+  const billingPincodeNum = Number(deliveryPincode);
+
+  if (!billingCustomerName) {
+    const err = new Error('Missing customer name for Shiprocket billing');
+    err.statusCode = 400;
+    throw err;
+  }
+  if (!billingCity) {
+    const err = new Error('Missing customer city for Shiprocket billing');
+    err.statusCode = 400;
+    throw err;
+  }
+  if (!billingState) {
+    const err = new Error('Missing customer state for Shiprocket billing');
+    err.statusCode = 400;
+    throw err;
+  }
+  if (!isProbablyValidEmail(billingEmail)) {
+    const err = new Error('Invalid customer email for Shiprocket billing');
+    err.statusCode = 400;
+    throw err;
+  }
+  if (billingPhoneDigits.length !== 10) {
+    const err = new Error('Invalid customer phone for Shiprocket billing (need 10 digits)');
+    err.statusCode = 400;
+    throw err;
+  }
+  if (!Number.isFinite(billingPincodeNum) || String(billingPincodeNum).length !== 6) {
+    const err = new Error('Invalid billing pincode for Shiprocket');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const orderItems = items.map((it, idx) => {
+    const name = String(it?.name || '').trim();
+    const sku = String(it?.sku || it?.productId || it?._id || it?.id || '').trim() || `item-${idx + 1}`;
+    const units = Math.max(1, Math.floor(Number(it?.quantity) || 1));
+    const sellingPrice = Math.max(0, Number(it?.price) || 0);
+    if (!name) {
+      const err = new Error(`Missing item name for Shiprocket (item #${idx + 1})`);
+      err.statusCode = 400;
+      throw err;
+    }
+    if (!sku) {
+      const err = new Error(`Missing item sku for Shiprocket (item #${idx + 1})`);
+      err.statusCode = 400;
+      throw err;
+    }
+    if (!(sellingPrice > 0)) {
+      const err = new Error(`Invalid item selling_price for Shiprocket (item #${idx + 1})`);
+      err.statusCode = 400;
+      throw err;
+    }
+    return {
+      name,
+      sku,
+      units,
+      selling_price: sellingPrice,
+      discount: 0,
+      tax: 0,
+      hsn: '',
+    };
+  });
+
+  const computedSubTotal = orderItems.reduce((acc, it) => acc + Number(it.selling_price) * Number(it.units), 0);
+  const subTotal = Math.max(0, Number.isFinite(computedSubTotal) ? computedSubTotal : 0);
+
   const payload = {
     order_id: orderId,
     order_date: orderDate,
     pickup_location: String(SHIPROCKET_PICKUP_LOCATION_NAME),
-    billing_customer_name: String(customer.name || ''),
+    billing_customer_name: billingCustomerName,
     billing_last_name: '',
     billing_address: String(customer.address || ''),
-    billing_city: String(customer.city || ''),
-    billing_pincode: String(deliveryPincode),
-    billing_state: String(customer.state || ''),
+    billing_city: billingCity,
+    billing_pincode: billingPincodeNum,
+    billing_state: billingState,
     billing_country: 'India',
-    billing_email: String(customer.email || ''),
-    billing_phone: String(customer.phone || ''),
+    billing_email: billingEmail,
+    billing_phone: Number(billingPhoneDigits),
     shipping_is_billing: true,
-    order_items: items.map((it) => ({
-      name: String(it?.name || ''),
-      sku: String(it?.productId || ''),
-      units: Math.max(1, Math.floor(Number(it?.quantity) || 1)),
-      selling_price: Math.max(0, Number(it?.price) || 0),
-      discount: 0,
-      tax: 0,
-      hsn: '',
-    })),
+    order_items: orderItems,
     payment_method: cod ? 'COD' : 'Prepaid',
-    sub_total: Math.max(0, Number(orderLean.subtotal) || 0),
+    sub_total: subTotal,
     length: clampNum(SHIPROCKET_DEFAULT_LENGTH_CM, { min: 1 }),
     breadth: clampNum(SHIPROCKET_DEFAULT_BREADTH_CM, { min: 1 }),
     height: clampNum(SHIPROCKET_DEFAULT_HEIGHT_CM, { min: 1 }),
     weight: weightKg,
   };
+
+  logJson('info', 'shiprocket.adhoc_create_attempt', {
+    orderId,
+    cod,
+    pickupLocation: String(SHIPROCKET_PICKUP_LOCATION_NAME),
+    pickupPincode: normalizePincode(SHIPROCKET_PICKUP_PINCODE),
+    deliveryPincode,
+    weightKg,
+    selectedCourierId: selected?.courierId,
+    selectedCourierName: selected?.courierName,
+    payload: summarizeShiprocketAdhocPayload(payload),
+  });
 
   const { res: createRes, data: createData } = await shiprocketFetch('/orders/create/adhoc', {
     method: 'POST',
@@ -1311,9 +1642,59 @@ async function createShiprocketShipmentForOrderDoc(orderLean) {
     throw err;
   }
 
-  const shiprocketOrderId = String(createData?.order_id || createData?.data?.order_id || '').trim();
-  const shipmentId = Number(createData?.shipment_id ?? createData?.data?.shipment_id ?? NaN);
-  if (!shipmentId || !Number.isFinite(shipmentId)) {
+  const shiprocketOrderId = extractShiprocketOrderId(createData);
+  let shipmentId = extractShiprocketShipmentId(createData);
+  if (!shipmentId) {
+    const msgRaw = typeof createData?.message === 'string' ? createData.message : '';
+    logJson('warn', 'shiprocket.adhoc_create_missing_shipment_id', {
+      orderId,
+      shiprocketOrderId: shiprocketOrderId || undefined,
+      status: createRes.status,
+      message: msgRaw || undefined,
+      responseKeys: createData && typeof createData === 'object' ? Object.keys(createData) : typeof createData,
+    });
+
+    if (msgRaw.toLowerCase().includes('wrong pickup location')) {
+      const err = new Error(
+        `Shiprocket pickup_location mismatch: set SHIPROCKET_PICKUP_LOCATION_NAME to the exact Pickup Address name from Shiprocket (Settings → Pickup Address). Shiprocket message: ${msgRaw}`
+      );
+      err.code = 'SHIPROCKET_BAD_PICKUP_LOCATION';
+      err.statusCode = 503;
+      throw err;
+    }
+  }
+
+  if (!shipmentId && shiprocketOrderId) {
+    const { res: showRes, data: showData } = await shiprocketFetch(`/orders/show/${encodeURIComponent(shiprocketOrderId)}`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (showRes.ok) {
+      shipmentId = extractShipmentIdFromOrderShow(showData);
+      if (shipmentId) {
+        logJson('info', 'shiprocket.order_show_recovered_shipment_id', {
+          orderId,
+          shiprocketOrderId,
+          shipmentId,
+        });
+      } else {
+        logJson('warn', 'shiprocket.order_show_no_shipment_id', {
+          orderId,
+          shiprocketOrderId,
+          responseKeys: showData && typeof showData === 'object' ? Object.keys(showData) : typeof showData,
+        });
+      }
+    } else {
+      logJson('warn', 'shiprocket.order_show_failed', {
+        orderId,
+        shiprocketOrderId,
+        status: showRes.status,
+        message: typeof showData?.message === 'string' ? showData.message : undefined,
+      });
+    }
+  }
+
+  if (!shipmentId) {
     const err = new Error('Shiprocket order creation returned no shipment_id');
     err.statusCode = 502;
     throw err;
@@ -1515,18 +1896,25 @@ async function ensureShiprocketShipmentForOrderId(orderId, source = 'system') {
     await syncOrderAdminFlags(id);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    const code = err && typeof err === 'object' ? String(err.code || '') : '';
     const orderAfter = await Order.findById(id).lean();
     const prevAttempts = Math.max(0, Math.floor(Number(orderAfter?.shipping?.shipmentAttemptCount) || 0));
     const nextAttempt = prevAttempts + 1;
-    const exhausted = nextAttempt >= SHIPROCKET_SHIPMENT_MAX_ATTEMPTS;
+    const nonRetryable =
+      code === 'SHIPROCKET_BAD_PICKUP_LOCATION' ||
+      msg.toLowerCase().includes('wrong pickup location') ||
+      msg.toLowerCase().includes('pickup_location mismatch');
+    const exhausted = nonRetryable || nextAttempt >= SHIPROCKET_SHIPMENT_MAX_ATTEMPTS;
 
     logJson('error', 'shiprocket.shipment_failed', {
       orderId: id,
       source,
       message: msg,
+      code: code || undefined,
       attempt: nextAttempt,
       maxAttempts: SHIPROCKET_SHIPMENT_MAX_ATTEMPTS,
       exhausted,
+      nonRetryable,
     });
 
     if (exhausted) {
@@ -1535,7 +1923,9 @@ async function ensureShiprocketShipmentForOrderId(orderId, source = 'system') {
         {
           $set: {
             'shipping.manualRequired': true,
-            'shipping.manualReason': `Shipment failed after ${SHIPROCKET_SHIPMENT_MAX_ATTEMPTS} attempts: ${msg}`,
+            'shipping.manualReason': nonRetryable
+              ? `Shipment blocked by configuration error: ${msg}`
+              : `Shipment failed after ${SHIPROCKET_SHIPMENT_MAX_ATTEMPTS} attempts: ${msg}`,
             'shipping.error': msg,
             'shipping.shipmentAttemptCount': nextAttempt,
             'shipping.shipmentLastFailureAt': new Date(),
@@ -2573,16 +2963,24 @@ app.get('/api/auth/email-exists', async (req, res) => {
 });
 
 // Registration initiates an email OTP challenge (verified in /api/auth/otp/verify).
-app.post('/api/auth/register', async (req, res) => {
+app.post(
+  '/api/auth/register',
+  rateLimitByIp({ keyPrefix: 'auth_register', limit: SIGNUP_RATE_LIMIT_MAX, windowMs: SIGNUP_RATE_LIMIT_WINDOW_MS }),
+  async (req, res) => {
   try {
-    const email = String(req.body?.email || '').trim();
-    const name = String(req.body?.name || '').trim();
-    const phone = req.body?.phone;
-
-    if (!email || !simpleEmailValid(email)) {
+    let normalizedEmail;
+    let domainLower;
+    try {
+      const parsed = normalizeEmailOrThrow(req.body?.email);
+      normalizedEmail = parsed.normalizedEmail;
+      domainLower = parsed.domainLower;
+    } catch {
       res.status(400).json({ error: 'Invalid email' });
       return;
     }
+    const name = String(req.body?.name || '').trim();
+    const phone = req.body?.phone;
+
     if (!name) {
       res.status(400).json({ error: 'Name is required' });
       return;
@@ -2598,7 +2996,26 @@ app.post('/api/auth/register', async (req, res) => {
       }
     }
 
-    const existing = await User.findOne({ email }).exec();
+    // Block disposable/invalid domains before creating OTP challenges.
+    const ip = getClientIp(req);
+    if (await isDisposableDomain(domainLower)) {
+      logJson('warn', 'auth.email_blocked', { email: normalizedEmail, domain: domainLower, ip, reason: 'disposable_domain' });
+      await bumpDailyAuthMetric('blockedDisposable', 1);
+      res.status(400).json({ error: 'Please use a valid personal email address' });
+      return;
+    }
+    try {
+      await hasValidMxOrThrow(domainLower);
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : 'mx_lookup_failed';
+      logJson('warn', 'auth.email_blocked', { email: normalizedEmail, domain: domainLower, ip, reason });
+      if (reason === 'no_mx') await bumpDailyAuthMetric('blockedNoMx', 1);
+      else await bumpDailyAuthMetric('blockedMxLookupFailed', 1);
+      res.status(400).json({ error: 'Please use a valid personal email address' });
+      return;
+    }
+
+    const existing = await User.findOne({ email: normalizedEmail }).exec();
     if (existing) {
       res.status(409).json({ error: 'Email already registered. Please login instead.' });
       return;
@@ -2617,7 +3034,7 @@ app.post('/api/auth/register', async (req, res) => {
     await OtpChallenge.create({
       challengeId,
       purpose: 'auth',
-      email,
+      email: normalizedEmail,
       codeHash,
       codeSalt,
       expiresAt,
@@ -2625,13 +3042,19 @@ app.post('/api/auth/register', async (req, res) => {
       maxAttempts,
     });
 
-    const sent = await sendOtpEmail({ to: email, code, purpose: 'auth' });
+    const sent = await sendOtpEmail({ to: normalizedEmail, code, purpose: 'auth' });
     if (!sent.ok) {
       res.status(503).json({ error: sent.error || 'Could not send OTP' });
       return;
     }
 
-    res.json({ ok: true, challengeId, masked: maskEmail(email), name, phone: normalizedPhone || undefined });
+    res.json({
+      ok: true,
+      challengeId,
+      masked: maskEmail(normalizedEmail),
+      name,
+      phone: normalizedPhone || undefined,
+    });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: e instanceof Error ? e.message : 'Failed to register' });
@@ -2662,6 +3085,82 @@ app.get('/api/coupons', mongoReady, adminKeyRequired, async (_req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Failed to list coupons' });
+  }
+});
+
+// --- Admin: disposable email domain blocklist ---
+app.get('/api/admin/disposable-domains', mongoReady, adminKeyRequired, async (_req, res) => {
+  try {
+    const docs = await DisposableDomain.find().sort({ _id: 1 }).lean();
+    res.json(
+      (docs || []).map((d) => ({
+        domain: String(d._id || ''),
+        enabled: d.enabled !== false,
+        source: d.source || '',
+        reason: d.reason || '',
+        createdAt: d.createdAt instanceof Date ? d.createdAt.toISOString() : d.createdAt,
+        updatedAt: d.updatedAt instanceof Date ? d.updatedAt.toISOString() : d.updatedAt,
+      }))
+    );
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to list disposable domains' });
+  }
+});
+
+app.post('/api/admin/disposable-domains', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    const raw = req.body?.domain;
+    const domain = String(raw || '').trim().toLowerCase();
+    if (!domain || domain.includes(' ') || domain.includes('/') || !domain.includes('.')) {
+      res.status(400).json({ error: 'Invalid domain' });
+      return;
+    }
+    await DisposableDomain.updateOne(
+      { _id: domain },
+      { $set: { enabled: true, source: 'admin', reason: String(req.body?.reason || '').trim() } },
+      { upsert: true }
+    );
+    upsertDisposableDomainCache(domain, true);
+    res.status(201).json({ ok: true, domain });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to add disposable domain' });
+  }
+});
+
+app.delete('/api/admin/disposable-domains/:domain', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    const domain = String(req.params?.domain || '').trim().toLowerCase();
+    if (!domain) {
+      res.status(400).json({ error: 'Invalid domain' });
+      return;
+    }
+    await DisposableDomain.updateOne({ _id: domain }, { $set: { enabled: false, source: 'admin' } }, { upsert: true });
+    upsertDisposableDomainCache(domain, false);
+    res.status(204).end();
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to remove disposable domain' });
+  }
+});
+
+app.get('/api/admin/auth-metrics/daily', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    const limit = Math.max(1, Math.min(90, Number(req.query?.limit || 30)));
+    const docs = await DailyAuthMetric.find().sort({ _id: -1 }).limit(limit).lean();
+    res.json(
+      (docs || []).map((d) => ({
+        day: String(d._id),
+        blockedDisposable: Number(d.blockedDisposable || 0),
+        blockedNoMx: Number(d.blockedNoMx || 0),
+        blockedMxLookupFailed: Number(d.blockedMxLookupFailed || 0),
+        rateLimitHits: Number(d.rateLimitHits || 0),
+      }))
+    );
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to load auth metrics' });
   }
 });
 
@@ -2802,14 +3301,22 @@ app.post('/api/coupons/validate', mongoReady, async (req, res) => {
   }
 });
 
-app.post('/api/auth/otp/request', async (req, res) => {
+app.post(
+  '/api/auth/otp/request',
+  rateLimitByIp({ keyPrefix: 'auth_otp_request', limit: SIGNUP_RATE_LIMIT_MAX, windowMs: SIGNUP_RATE_LIMIT_WINDOW_MS }),
+  async (req, res) => {
   try {
-    const email = String(req.body?.email || req.body?.identifier || '').trim();
-    const purpose = String(req.body?.purpose || 'checkout');
-    if (!email || !simpleEmailValid(email)) {
+    let normalizedEmail;
+    let domainLower;
+    try {
+      const parsed = normalizeEmailOrThrow(req.body?.email || req.body?.identifier);
+      normalizedEmail = parsed.normalizedEmail;
+      domainLower = parsed.domainLower;
+    } catch {
       res.status(400).json({ error: 'Invalid email' });
       return;
     }
+    const purpose = String(req.body?.purpose || 'checkout');
 
     const phoneHint = req.body?.phone;
     if (phoneHint != null && String(phoneHint).trim()) {
@@ -2826,7 +3333,36 @@ app.post('/api/auth/otp/request', async (req, res) => {
       return;
     }
 
-    const existingUser = await User.findOne({ email }).exec();
+    // For auth/checkout OTP issuance, block disposable/invalid domains.
+    // For password reset, we still validate domain/MX but avoid enumeration responses below.
+    const ip = getClientIp(req);
+    if (await isDisposableDomain(domainLower)) {
+      logJson('warn', 'auth.email_blocked', { email: normalizedEmail, domain: domainLower, ip, reason: 'disposable_domain' });
+      await bumpDailyAuthMetric('blockedDisposable', 1);
+      // For password_reset, keep generic response to avoid enumeration.
+      if (purpose === 'password_reset') {
+        res.json({ ok: true });
+        return;
+      }
+      res.status(400).json({ error: 'Please use a valid personal email address' });
+      return;
+    }
+    try {
+      await hasValidMxOrThrow(domainLower);
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : 'mx_lookup_failed';
+      logJson('warn', 'auth.email_blocked', { email: normalizedEmail, domain: domainLower, ip, reason });
+      if (reason === 'no_mx') await bumpDailyAuthMetric('blockedNoMx', 1);
+      else await bumpDailyAuthMetric('blockedMxLookupFailed', 1);
+      if (purpose === 'password_reset') {
+        res.json({ ok: true });
+        return;
+      }
+      res.status(400).json({ error: 'Please use a valid personal email address' });
+      return;
+    }
+
+    const existingUser = await User.findOne({ email: normalizedEmail }).exec();
     if (purpose === 'password_reset' && !existingUser) {
       // Avoid account enumeration. Still respond with a generic success.
       res.json({ ok: true });
@@ -2848,7 +3384,7 @@ app.post('/api/auth/otp/request', async (req, res) => {
       challengeId,
       purpose,
       userId: existingUser?._id,
-      email,
+      email: normalizedEmail,
       codeHash,
       codeSalt,
       expiresAt,
@@ -2856,20 +3392,23 @@ app.post('/api/auth/otp/request', async (req, res) => {
       maxAttempts,
     });
 
-    const sent = await sendOtpEmail({ to: email, code, purpose });
+    const sent = await sendOtpEmail({ to: normalizedEmail, code, purpose });
     if (!sent.ok) {
       res.status(503).json({ error: sent.error || 'Could not send OTP' });
       return;
     }
 
-    res.json({ challengeId, masked: maskEmail(email) });
+    res.json({ challengeId, masked: maskEmail(normalizedEmail) });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: e instanceof Error ? e.message : 'Failed to request OTP' });
   }
 });
 
-app.post('/api/auth/otp/verify', async (req, res) => {
+app.post(
+  '/api/auth/otp/verify',
+  rateLimitByIp({ keyPrefix: 'auth_otp_verify', limit: SIGNUP_RATE_LIMIT_MAX, windowMs: SIGNUP_RATE_LIMIT_WINDOW_MS }),
+  async (req, res) => {
   try {
     const challengeId = String(req.body?.challengeId || '').trim();
     const code = String(req.body?.code || '').trim();
@@ -2910,17 +3449,47 @@ app.post('/api/auth/otp/verify', async (req, res) => {
       return;
     }
 
+    // Defense-in-depth: re-check email domain + MX before creating user.
+    const ip = getClientIp(req);
+    const email = String(challenge.email || '').trim();
+    let normalizedEmail;
+    let domainLower;
+    try {
+      const parsed = normalizeEmailOrThrow(email);
+      normalizedEmail = parsed.normalizedEmail;
+      domainLower = parsed.domainLower;
+    } catch {
+      logJson('warn', 'auth.email_blocked', { email, ip, reason: 'invalid_email_on_challenge' });
+      res.status(400).json({ error: 'Please use a valid personal email address' });
+      return;
+    }
+    if (await isDisposableDomain(domainLower)) {
+      logJson('warn', 'auth.email_blocked', { email: normalizedEmail, domain: domainLower, ip, reason: 'disposable_domain' });
+      await bumpDailyAuthMetric('blockedDisposable', 1);
+      res.status(400).json({ error: 'Please use a valid personal email address' });
+      return;
+    }
+    try {
+      await hasValidMxOrThrow(domainLower);
+    } catch (e) {
+      const reason = e instanceof Error ? e.message : 'mx_lookup_failed';
+      logJson('warn', 'auth.email_blocked', { email: normalizedEmail, domain: domainLower, ip, reason });
+      if (reason === 'no_mx') await bumpDailyAuthMetric('blockedNoMx', 1);
+      else await bumpDailyAuthMetric('blockedMxLookupFailed', 1);
+      res.status(400).json({ error: 'Please use a valid personal email address' });
+      return;
+    }
+
     let userId = challenge.userId ? String(challenge.userId) : '';
     if (!userId && challenge.purpose !== 'password_reset') {
-      const email = String(challenge.email || '').trim();
-      const existing = email ? await User.findOne({ email }).exec() : null;
+      const existing = normalizedEmail ? await User.findOne({ email: normalizedEmail }).exec() : null;
       if (existing) {
         userId = existing._id;
       } else {
         const newId = `usr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         const created = await User.create({
           _id: newId,
-          email,
+          email: normalizedEmail,
           name: String(req.body?.name || '').trim() || '',
           phone: normalizedPhone,
           mustResetPassword: true,
@@ -6108,12 +6677,33 @@ async function seedIfEmpty() {
   console.log('Seeded products collection from server/seed.json');
 }
 
+async function seedDisposableDomainsIfEmpty() {
+  const count = await DisposableDomain.countDocuments();
+  if (count > 0) return;
+  const raw = readFileSync(join(__dirname, 'disposable-domain-blacklist.json'), 'utf8');
+  const domains = JSON.parse(raw);
+  const list = (Array.isArray(domains) ? domains : [])
+    .map((d) => String(d || '').trim().toLowerCase())
+    .filter(Boolean);
+  if (list.length === 0) return;
+  await DisposableDomain.insertMany(
+    list.map((domain) => ({ _id: domain, enabled: true, source: 'seed', reason: 'seed_blacklist' })),
+    { ordered: false }
+  ).catch((e) => {
+    // Ignore dup keys for partial seeds.
+    if (!(e && e.code === 11000)) throw e;
+  });
+  console.log(`Seeded disposable domain blocklist (${list.length} domains)`);
+  invalidateDisposableDomainCache();
+}
+
 async function main() {
   if (MONGODB_URI) {
     try {
       await mongoose.connect(MONGODB_URI);
       console.log('MongoDB connected');
       await seedIfEmpty();
+      await seedDisposableDomainsIfEmpty();
       await runOneTimeOrderMigrations();
     } catch (e) {
       console.error('MongoDB connection failed:', e.message);
