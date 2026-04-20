@@ -120,3 +120,36 @@ export async function createReviewApi(payload: {
   return (data.review ?? null) as Review;
 }
 
+export type ReviewInviteVerifyStatus = 'ok' | 'invalid' | 'expired' | 'used' | 'revoked' | 'not_eligible';
+
+export async function verifyReviewInviteApi(token: string): Promise<{
+  status: ReviewInviteVerifyStatus;
+  orderId?: string;
+  expiresAt?: string;
+  product?: { id: string; name: string; image?: string };
+}> {
+  const res = await fetch(apiUrl(`/api/review-invites/verify?token=${encodeURIComponent(token)}`), {
+    credentials: 'include',
+    headers: withAuthHeaders(),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok && typeof data?.status === 'string') return data as any;
+  if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Failed to verify review link');
+  return data as any;
+}
+
+export async function submitReviewInviteApi(payload: {
+  token: string;
+  rating: number;
+  comment: string;
+}): Promise<Review> {
+  const res = await fetch(apiUrl('/api/review-invites/submit'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Failed to submit review');
+  return (data.review ?? null) as Review;
+}
+

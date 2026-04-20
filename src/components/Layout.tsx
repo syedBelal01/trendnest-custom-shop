@@ -2,6 +2,7 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { Outlet, useLocation } from 'react-router-dom';
 import ReviewPromptBar from '@/components/reviews/ReviewPromptBar';
+import ReviewReminderPopup from '@/components/reviews/ReviewReminderPopup';
 import { useEffect } from 'react';
 import { useProducts } from '@/contexts/ProductsContext';
 
@@ -22,6 +23,7 @@ export default function Layout() {
     <div className="min-h-screen flex flex-col">
       <Header />
       <ReviewPromptBar />
+      <ReviewReminderPopup />
       <main className="flex-1">
         <Outlet />
       </main>

@@ -41,6 +41,10 @@ const SHIPROCKET_DEFAULT_WEIGHT_KG = Number(process.env.SHIPROCKET_DEFAULT_WEIGH
 const SHIPROCKET_DEFAULT_LENGTH_CM = Number(process.env.SHIPROCKET_DEFAULT_LENGTH_CM || 25);
 const SHIPROCKET_DEFAULT_BREADTH_CM = Number(process.env.SHIPROCKET_DEFAULT_BREADTH_CM || 20);
 const SHIPROCKET_DEFAULT_HEIGHT_CM = Number(process.env.SHIPROCKET_DEFAULT_HEIGHT_CM || 5);
+const FRONTEND_PUBLIC_URL = process.env.FRONTEND_PUBLIC_URL
+  ? String(process.env.FRONTEND_PUBLIC_URL).trim().replace(/\/+$/, '')
+  : 'https://trendnest99.in';
+const REVIEW_INVITE_VALID_DAYS = Math.max(1, Math.floor(Number(process.env.REVIEW_INVITE_VALID_DAYS || 7)));
 /** After a failed Shiprocket login, skip new auth attempts for this long (reduces load on bad credentials). */
 const SHIPROCKET_AUTH_FAILURE_COOLDOWN_MS = Math.max(
   10_000,
@@ -661,6 +665,28 @@ const ReviewSchema = new mongoose.Schema(
 ReviewSchema.index({ productId: 1, userId: 1 }, { unique: true });
 
 const Review = mongoose.model('Review', ReviewSchema);
+
+const ReviewInviteSchema = new mongoose.Schema(
+  {
+    _id: { type: String, required: true },
+    tokenHash: { type: String, required: true, unique: true, index: true },
+    tokenPrefix: { type: String, required: true, index: true },
+    userId: { type: String, required: true, index: true },
+    orderId: { type: String, required: true, index: true },
+    productId: { type: String, required: true, index: true },
+    deliveredAt: { type: Date, required: true },
+    expiresAt: { type: Date, required: true, index: true },
+    usedAt: { type: Date, default: undefined },
+    revokedAt: { type: Date, default: undefined },
+  },
+  { versionKey: false, timestamps: true }
+);
+
+ReviewInviteSchema.index({ userId: 1, orderId: 1, productId: 1 }, { unique: true });
+// Optional cleanup: expired invites can be removed automatically.
+ReviewInviteSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+
+const ReviewInvite = mongoose.model('ReviewInvite', ReviewInviteSchema);
 
 const ReviewPromptDismissalSchema = new mongoose.Schema(
   {
@@ -2071,9 +2097,74 @@ async function sendOrderStatusEmail({ orderLean, kind }) {
   }
 
   if (kind === 'delivered') {
+    const uid = orderLean?.userId ? String(orderLean.userId).trim() : '';
+    const deliveredAt = orderLean?.deliveredAt ? new Date(orderLean.deliveredAt) : null;
+    const deliveredAtOk = deliveredAt && !Number.isNaN(deliveredAt.getTime());
+    const items = Array.isArray(orderLean?.items) ? orderLean.items : [];
+
+    let reviewLinksText = '';
+    let reviewLinksHtml = '';
+    try {
+      if (uid && deliveredAtOk && items.length) {
+        const productIds = [...new Set(items.map((x) => String(x?.productId || '')).filter(Boolean))];
+        if (productIds.length) {
+          const reviewed = await Review.find({ userId: uid, productId: { $in: productIds } }).select({ productId: 1 }).lean();
+          const reviewedSet = new Set(reviewed.map((r) => String(r.productId)));
+          const existingInvites = await ReviewInvite.find({ userId: uid, orderId: String(id), productId: { $in: productIds } })
+            .select({ productId: 1 })
+            .lean();
+          const invitedSet = new Set(existingInvites.map((x) => String(x.productId)));
+
+          const perProduct = [];
+          for (const pid of productIds) {
+            if (reviewedSet.has(pid)) continue;
+            if (invitedSet.has(pid)) continue;
+
+            const raw = crypto.randomBytes(24).toString('hex');
+            const tokenHash = hashReviewInviteTokenRaw(raw);
+            const tokenPrefix = raw.slice(0, 8);
+            const expiresAt = new Date(deliveredAt.getTime() + REVIEW_INVITE_VALID_DAYS * 86400000);
+            const invId = `rinv-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+            await ReviewInvite.create({
+              _id: invId,
+              tokenHash,
+              tokenPrefix,
+              userId: uid,
+              orderId: String(id),
+              productId: pid,
+              deliveredAt,
+              expiresAt,
+            });
+
+            const line = items.find((x) => String(x?.productId) === pid);
+            const name = String(line?.name || 'Product');
+            perProduct.push({ pid, name, url: buildReviewInviteLink(raw) });
+          }
+
+          if (perProduct.length) {
+            reviewLinksText =
+              `\n\nLeave a review (valid for ${REVIEW_INVITE_VALID_DAYS} days):\n` +
+              perProduct.map((x) => `- ${x.name}: ${x.url}`).join('\n');
+            reviewLinksHtml =
+              `<p><strong>Leave a review</strong> (valid for ${REVIEW_INVITE_VALID_DAYS} days):</p>` +
+              `<ul>` +
+              perProduct
+                .map((x) => `<li>${escapeHtml(x.name)}: <a href="${escapeHtml(x.url)}">${escapeHtml(x.url)}</a></li>`)
+                .join('') +
+              `</ul>`;
+          }
+        }
+      }
+    } catch (e) {
+      logJson('error', 'review_invite_email_build_failed', {
+        orderId: String(id),
+        message: e instanceof Error ? e.message : String(e),
+      });
+    }
+
     const subject = `Delivered — Thank you for shopping — ${id} — TrendNest`;
-    const text = `Hi ${customer.name},\n\nThank you for shopping with TrendNest99.\n\nYour order has been delivered.\nOrder ID: ${id}\n\nWe would love your feedback. If you liked the product, please leave a review.\n\n— TrendNest`;
-    const html = `<p>Hi ${escapeHtml(customer.name)},</p><p>Thank you for shopping with TrendNest99.</p><p><strong>Your order has been delivered.</strong></p><p><strong>Order ID:</strong> ${escapeHtml(id)}</p><p>We would love your feedback. If you liked the product, please leave a review.</p><p>— TrendNest</p>`;
+    const text = `Hi ${customer.name},\n\nThank you for shopping with TrendNest99.\n\nYour order has been delivered.\nOrder ID: ${id}\n\nWe would love your feedback. If you liked the product, please leave a review.${reviewLinksText}\n\n— TrendNest`;
+    const html = `<p>Hi ${escapeHtml(customer.name)},</p><p>Thank you for shopping with TrendNest99.</p><p><strong>Your order has been delivered.</strong></p><p><strong>Order ID:</strong> ${escapeHtml(id)}</p><p>We would love your feedback. If you liked the product, please leave a review.</p>${reviewLinksHtml}<p>— TrendNest</p>`;
     const sent = await sendEmailViaResend({ to: customer.email.trim(), subject, text, html });
     return sent.ok ? { ok: true } : { ok: false, error: sent.error || 'Failed to send delivered email' };
   }
@@ -2106,8 +2197,8 @@ async function canUserReviewProduct({ userId, productId }) {
   if (!u || !p) return { ok: false, error: 'Invalid user or product' };
 
   const now = Date.now();
-  const fifteenDaysMs = 15 * 24 * 60 * 60 * 1000;
-  const minDeliveredAt = new Date(now - fifteenDaysMs);
+  const reviewWindowMs = REVIEW_INVITE_VALID_DAYS * 24 * 60 * 60 * 1000;
+  const minDeliveredAt = new Date(now - reviewWindowMs);
 
   // Must have a delivered order within last 15 days containing the product.
   const order = await Order.findOne({
@@ -2120,7 +2211,7 @@ async function canUserReviewProduct({ userId, productId }) {
     .lean();
 
   if (!order) {
-    return { ok: false, error: 'You can review only after delivery (within 15 days)' };
+    return { ok: false, error: `You can review only after delivery (within ${REVIEW_INVITE_VALID_DAYS} days)` };
   }
 
   const existing = await Review.findOne({ productId: p, userId: u }).lean();
@@ -2793,6 +2884,15 @@ function maskEmail(email) {
 
 function sha256Hex(s) {
   return crypto.createHash('sha256').update(s).digest('hex');
+}
+
+function hashReviewInviteTokenRaw(raw) {
+  return sha256Hex(`tn_review_invite_v1:${raw}`);
+}
+
+function buildReviewInviteLink(raw) {
+  const t = String(raw || '').trim();
+  return `${FRONTEND_PUBLIC_URL}/review/${encodeURIComponent(t)}`;
 }
 
 function hashClientAuthTokenRaw(raw) {
@@ -3833,12 +3933,173 @@ app.post('/api/reviews', mongoReady, requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/review-invites/verify', mongoReady, async (req, res) => {
+  try {
+    const raw = String(req.query?.token || '').trim();
+    if (!raw || raw.length < 20) {
+      res.status(400).json({ error: 'Missing token' });
+      return;
+    }
+    const tokenHash = hashReviewInviteTokenRaw(raw);
+    const now = new Date();
+    const inv = await ReviewInvite.findOne({ tokenHash }).lean();
+    if (!inv) {
+      res.status(404).json({ status: 'invalid' });
+      return;
+    }
+    if (inv.revokedAt) {
+      res.status(410).json({ status: 'revoked' });
+      return;
+    }
+    if (inv.usedAt) {
+      res.status(409).json({ status: 'used' });
+      return;
+    }
+    if (inv.expiresAt && inv.expiresAt.getTime && inv.expiresAt.getTime() <= now.getTime()) {
+      res.status(410).json({ status: 'expired', expiresAt: inv.expiresAt instanceof Date ? inv.expiresAt.toISOString() : inv.expiresAt });
+      return;
+    }
+    const order = await Order.findById(String(inv.orderId)).lean();
+    if (!order || String(order.status || '') !== 'delivered') {
+      res.status(403).json({ status: 'not_eligible' });
+      return;
+    }
+    const deliveredAt = order.deliveredAt ? new Date(order.deliveredAt) : null;
+    if (!deliveredAt || Number.isNaN(deliveredAt.getTime())) {
+      res.status(403).json({ status: 'not_eligible' });
+      return;
+    }
+    const deadline = deliveredAt.getTime() + REVIEW_INVITE_VALID_DAYS * 86400000;
+    if (Date.now() > deadline) {
+      res.status(410).json({ status: 'expired', expiresAt: new Date(deadline).toISOString() });
+      return;
+    }
+    const it = (order.items || []).find((x) => String(x?.productId) === String(inv.productId));
+    if (!it) {
+      res.status(403).json({ status: 'not_eligible' });
+      return;
+    }
+    const product = await Product.findById(String(inv.productId)).select({ _id: 1, name: 1, images: 1 }).lean();
+    res.json({
+      status: 'ok',
+      product: product
+        ? { id: String(product._id), name: String(product.name || ''), image: Array.isArray(product.images) ? product.images[0] : undefined }
+        : { id: String(inv.productId), name: String(it?.name || 'Product') },
+      orderId: String(inv.orderId),
+      expiresAt: inv.expiresAt instanceof Date ? inv.expiresAt.toISOString() : inv.expiresAt,
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to verify token' });
+  }
+});
+
+app.post('/api/review-invites/submit', mongoReady, async (req, res) => {
+  try {
+    const raw = String(req.body?.token || '').trim();
+    const rating = Number(req.body?.rating);
+    const comment = String(req.body?.comment || '').trim();
+    if (!raw || raw.length < 20) {
+      res.status(400).json({ error: 'Missing token' });
+      return;
+    }
+    if (!Number.isFinite(rating) || rating < 1 || rating > 5) {
+      res.status(400).json({ error: 'Rating must be 1 to 5' });
+      return;
+    }
+    if (comment.length > 2000) {
+      res.status(400).json({ error: 'Comment is too long' });
+      return;
+    }
+    const tokenHash = hashReviewInviteTokenRaw(raw);
+    const now = new Date();
+    const inv = await ReviewInvite.findOne({ tokenHash }).lean();
+    if (!inv) {
+      res.status(404).json({ error: 'Invalid or expired link' });
+      return;
+    }
+    if (inv.revokedAt) {
+      res.status(410).json({ error: 'This link is no longer valid' });
+      return;
+    }
+    if (inv.usedAt) {
+      res.status(409).json({ error: 'This review link was already used' });
+      return;
+    }
+    if (inv.expiresAt && inv.expiresAt.getTime && inv.expiresAt.getTime() <= now.getTime()) {
+      res.status(410).json({ error: 'This review link has expired' });
+      return;
+    }
+
+    const order = await Order.findById(String(inv.orderId)).lean();
+    if (!order || String(order.status || '') !== 'delivered') {
+      res.status(403).json({ error: 'You can review only after delivery' });
+      return;
+    }
+    if (String(order.userId || '') !== String(inv.userId || '')) {
+      res.status(403).json({ error: 'Not eligible to review' });
+      return;
+    }
+    const deliveredAt = order.deliveredAt ? new Date(order.deliveredAt) : null;
+    if (!deliveredAt || Number.isNaN(deliveredAt.getTime())) {
+      res.status(403).json({ error: 'Not eligible to review' });
+      return;
+    }
+    const deadline = deliveredAt.getTime() + REVIEW_INVITE_VALID_DAYS * 86400000;
+    if (Date.now() > deadline) {
+      res.status(410).json({ error: 'This review link has expired' });
+      return;
+    }
+    const hasItem = (order.items || []).some((x) => String(x?.productId) === String(inv.productId));
+    if (!hasItem) {
+      res.status(403).json({ error: 'Not eligible to review' });
+      return;
+    }
+
+    const existing = await Review.findOne({ productId: String(inv.productId), userId: String(inv.userId) }).lean();
+    if (existing) {
+      await ReviewInvite.updateOne({ _id: inv._id, usedAt: { $exists: false } }, { $set: { usedAt: now } });
+      res.status(409).json({ error: 'You already reviewed this product' });
+      return;
+    }
+
+    const user = await User.findById(String(inv.userId)).lean();
+    const userName = String(user?.name || '').trim() || 'Customer';
+    const id = `rev-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    const created = await Review.create({
+      _id: id,
+      productId: String(inv.productId),
+      userId: String(inv.userId),
+      userName,
+      rating,
+      comment,
+      images: [],
+      media: [],
+    });
+
+    await ReviewInvite.updateOne(
+      { _id: inv._id, usedAt: { $exists: false } },
+      { $set: { usedAt: now } }
+    );
+
+    res.status(201).json({ review: serializeReview(created) });
+  } catch (e) {
+    console.error(e);
+    if (e && e.code === 11000) {
+      res.status(409).json({ error: 'You already reviewed this product' });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to submit review' });
+  }
+});
+
 app.get('/api/me/review-prompts', mongoReady, requireAuth, async (req, res) => {
   try {
     const userId = String(req.session.userId);
     const now = Date.now();
-    const fifteenDaysMs = 15 * 24 * 60 * 60 * 1000;
-    const minDeliveredAt = new Date(now - fifteenDaysMs);
+    const reviewWindowMs = REVIEW_INVITE_VALID_DAYS * 24 * 60 * 60 * 1000;
+    const minDeliveredAt = new Date(now - reviewWindowMs);
 
     const delivered = await Order.find({
       userId,

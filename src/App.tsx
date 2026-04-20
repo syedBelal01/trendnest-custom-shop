@@ -42,6 +42,7 @@ import NotFound from "@/pages/NotFound";
 import ScrollToTop from "@/components/ScrollToTop";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { Helmet } from "react-helmet-async";
+import ReviewInvitePage from "@/pages/ReviewInvitePage";
 
 const queryClient = new QueryClient();
 
@@ -88,6 +89,7 @@ const App = () => (
                   <Route path="/" element={<HomePage />} />
                   <Route path="/category/:id" element={<CategoryPage />} />
                   <Route path="/product/:id" element={<ProductDetailPage />} />
+                  <Route path="/review/:token" element={<ReviewInvitePage />} />
                   <Route path="/custom-print" element={<CustomPrintPage />} />
                   <Route path="/cart" element={<CartPage />} />
                   <Route path="/checkout" element={<CheckoutPage />} />
