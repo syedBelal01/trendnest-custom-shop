@@ -81,20 +81,32 @@ export default function Header() {
         </Button>
       </div>
 
-      {/* Mobile menu */}
-      {mobileOpen && (
-        <>
-          {/* Tap anywhere outside to close */}
-          <button
-            type="button"
-            aria-label="Close menu"
-            className="md:hidden fixed inset-0 z-40 cursor-default bg-black/20"
-            onClick={() => setMobileOpen(false)}
-          />
-          <div
-            className="md:hidden relative z-50 border-t bg-background px-3 py-3 space-y-1"
-            onClick={(e) => e.stopPropagation()}
-          >
+      {/* Mobile menu - full overlay so taps anywhere outside close it */}
+      <div
+        className={`md:hidden fixed inset-0 z-[60] transition-opacity duration-200 ${mobileOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+        aria-hidden={!mobileOpen}
+      >
+        {/* Backdrop - tap to close */}
+        <button
+          type="button"
+          aria-label="Close menu"
+          className="absolute inset-0 w-full h-full cursor-default bg-black/40"
+          onClick={() => setMobileOpen(false)}
+        />
+        {/* Slide-down panel - clicks inside don't bubble to backdrop */}
+        <div
+          className={`absolute top-0 inset-x-0 bg-background border-b shadow-lg transition-transform duration-200 ease-out ${mobileOpen ? 'translate-y-0' : '-translate-y-full'}`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="h-14 flex items-center justify-between px-3 border-b">
+            <span className="font-bold text-lg" style={{ fontFamily: 'Space Grotesk' }}>
+              Trend<span className="text-primary">Nest</span>99
+            </span>
+            <Button variant="ghost" size="icon" className="h-10 w-10" onClick={() => setMobileOpen(false)} aria-label="Close menu">
+              <X className="h-5 w-5" />
+            </Button>
+          </div>
+          <div className="px-3 py-3 space-y-1">
             <form onSubmit={handleSearch} className="sm:hidden mb-2">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -112,8 +124,8 @@ export default function Header() {
               </Link>
             ))}
           </div>
-        </>
-      )}
+        </div>
+      </div>
     </header>
   );
 }
