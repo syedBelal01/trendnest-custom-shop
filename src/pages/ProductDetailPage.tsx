@@ -755,36 +755,37 @@ export default function ProductDetailPage() {
           </div>
 
           {/* Highlights row (keeps your theme colors) */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="rounded-2xl border border-border bg-card p-4 flex items-center gap-3">
-              <BadgeCheck className="h-5 w-5 text-primary" />
-              <div>
-                <div className="text-sm font-semibold">Quality checked</div>
-                <div className="text-xs text-muted-foreground">Verified before dispatch</div>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
+            <div className="rounded-2xl border border-border bg-card p-3 sm:p-4 flex items-center gap-2.5 sm:gap-3 min-w-0">
+              <BadgeCheck className="h-5 w-5 text-primary shrink-0" />
+              <div className="min-w-0">
+                <div className="text-xs sm:text-sm font-semibold truncate">Quality checked</div>
+                <div className="text-[10px] sm:text-xs text-muted-foreground truncate">Verified before dispatch</div>
               </div>
             </div>
-            <div className="rounded-2xl border border-border bg-card p-4 flex items-center gap-3">
-              <ShieldCheck className="h-5 w-5 text-primary" />
-              <div>
-                <div className="text-sm font-semibold">Secure payments</div>
-                <div className="text-xs text-muted-foreground">Trusted checkout</div>
+            <div className="rounded-2xl border border-border bg-card p-3 sm:p-4 flex items-center gap-2.5 sm:gap-3 min-w-0">
+              <ShieldCheck className="h-5 w-5 text-primary shrink-0" />
+              <div className="min-w-0">
+                <div className="text-xs sm:text-sm font-semibold truncate">Secure payments</div>
+                <div className="text-[10px] sm:text-xs text-muted-foreground truncate">Trusted checkout</div>
               </div>
             </div>
-            <div className="rounded-2xl border border-border bg-card p-4 flex items-center gap-3">
-              <Truck className="h-5 w-5 text-primary" />
-              <div>
-                <div className="text-sm font-semibold">Fast delivery</div>
-                <div className="text-xs text-muted-foreground">Quick processing</div>
+            <div className="rounded-2xl border border-border bg-card p-3 sm:p-4 flex items-center gap-2.5 sm:gap-3 min-w-0">
+              <Truck className="h-5 w-5 text-primary shrink-0" />
+              <div className="min-w-0">
+                <div className="text-xs sm:text-sm font-semibold truncate">Fast delivery</div>
+                <div className="text-[10px] sm:text-xs text-muted-foreground truncate">Quick processing</div>
               </div>
             </div>
-            <div className="rounded-2xl border border-border bg-card p-4 flex items-center gap-3">
-              <Package className="h-5 w-5 text-primary" />
-              <div>
-                <div className="text-sm font-semibold">Easy support</div>
-                <div className="text-xs text-muted-foreground">We’re here to help</div>
+            <div className="rounded-2xl border border-border bg-card p-3 sm:p-4 flex items-center gap-2.5 sm:gap-3 min-w-0">
+              <Package className="h-5 w-5 text-primary shrink-0" />
+              <div className="min-w-0">
+                <div className="text-xs sm:text-sm font-semibold truncate">Easy support</div>
+                <div className="text-[10px] sm:text-xs text-muted-foreground truncate">We're here to help</div>
               </div>
             </div>
           </div>
+        </div>
         </div>
 
         {/* Reviews section */}
