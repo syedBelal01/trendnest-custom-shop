@@ -695,43 +695,18 @@ export default function ProductDetailPage() {
               </span>
             </p>
 
-            {/* Product specifications – collapsible (mobile only; desktop uses tabs below) */}
-            {specRows.length > 0 && (
-              <div className="rounded-2xl border border-border bg-card/50 overflow-hidden md:hidden">
-                <button
-                  type="button"
-                  onClick={() => setSpecsOpen(!specsOpen)}
-                  className="flex items-center justify-between w-full p-4 text-left"
-                >
-                  <h2 className="text-base font-semibold text-foreground">Product Details</h2>
-                  {specsOpen ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
-                </button>
-                {specsOpen && (
-                  <div className="px-4 pb-4 animate-fade-in">
-                    <dl className="space-y-2 text-sm">
-                      {specRows.map((row, i) => (
-                        <div key={`${row.label}-${i}`} className="flex justify-between py-1.5 border-b border-border/40 last:border-0">
-                          <dt className="text-muted-foreground font-medium">{row.label.trim()}</dt>
-                          <dd className="text-foreground text-right max-w-[55%]">{row.value.trim()}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         </div>
 
-        {/* Desktop-only rich layout: tabs + highlights + related */}
-        <div className="hidden md:block mt-10 space-y-8">
+        {/* Rich layout: tabs + highlights + related (responsive on all viewports) */}
+        <div className="mt-8 sm:mt-10 space-y-6 sm:space-y-8">
           {/* Tabs row */}
-          <div className="rounded-2xl border border-border bg-card p-5">
+          <div className="rounded-2xl border border-border bg-card p-3 sm:p-5">
             <Tabs defaultValue="description">
-              <TabsList className="w-full justify-start">
-                <TabsTrigger value="description">Description</TabsTrigger>
-                <TabsTrigger value="specs">Specifications</TabsTrigger>
-                <TabsTrigger value="shipping">Shipping &amp; Returns</TabsTrigger>
+              <TabsList className="w-full justify-start overflow-x-auto scrollbar-none flex-nowrap">
+                <TabsTrigger value="description" className="text-xs sm:text-sm whitespace-nowrap">Description</TabsTrigger>
+                <TabsTrigger value="specs" className="text-xs sm:text-sm whitespace-nowrap">Specifications</TabsTrigger>
+                <TabsTrigger value="shipping" className="text-xs sm:text-sm whitespace-nowrap">Shipping &amp; Returns</TabsTrigger>
               </TabsList>
               <TabsContent value="description" className="mt-4">
                 <p className="text-sm text-muted-foreground leading-relaxed">
@@ -780,33 +755,33 @@ export default function ProductDetailPage() {
           </div>
 
           {/* Highlights row (keeps your theme colors) */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <div className="rounded-2xl border border-border bg-card p-4 flex items-center gap-3">
-              <BadgeCheck className="h-5 w-5 text-primary" />
-              <div>
-                <div className="text-sm font-semibold">Quality checked</div>
-                <div className="text-xs text-muted-foreground">Verified before dispatch</div>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-4">
+            <div className="rounded-2xl border border-border bg-card p-3 sm:p-4 flex items-center gap-2.5 sm:gap-3 min-w-0">
+              <BadgeCheck className="h-5 w-5 text-primary shrink-0" />
+              <div className="min-w-0">
+                <div className="text-xs sm:text-sm font-semibold truncate">Quality checked</div>
+                <div className="text-[10px] sm:text-xs text-muted-foreground truncate">Verified before dispatch</div>
               </div>
             </div>
-            <div className="rounded-2xl border border-border bg-card p-4 flex items-center gap-3">
-              <ShieldCheck className="h-5 w-5 text-primary" />
-              <div>
-                <div className="text-sm font-semibold">Secure payments</div>
-                <div className="text-xs text-muted-foreground">Trusted checkout</div>
+            <div className="rounded-2xl border border-border bg-card p-3 sm:p-4 flex items-center gap-2.5 sm:gap-3 min-w-0">
+              <ShieldCheck className="h-5 w-5 text-primary shrink-0" />
+              <div className="min-w-0">
+                <div className="text-xs sm:text-sm font-semibold truncate">Secure payments</div>
+                <div className="text-[10px] sm:text-xs text-muted-foreground truncate">Trusted checkout</div>
               </div>
             </div>
-            <div className="rounded-2xl border border-border bg-card p-4 flex items-center gap-3">
-              <Truck className="h-5 w-5 text-primary" />
-              <div>
-                <div className="text-sm font-semibold">Fast delivery</div>
-                <div className="text-xs text-muted-foreground">Quick processing</div>
+            <div className="rounded-2xl border border-border bg-card p-3 sm:p-4 flex items-center gap-2.5 sm:gap-3 min-w-0">
+              <Truck className="h-5 w-5 text-primary shrink-0" />
+              <div className="min-w-0">
+                <div className="text-xs sm:text-sm font-semibold truncate">Fast delivery</div>
+                <div className="text-[10px] sm:text-xs text-muted-foreground truncate">Quick processing</div>
               </div>
             </div>
-            <div className="rounded-2xl border border-border bg-card p-4 flex items-center gap-3">
-              <Package className="h-5 w-5 text-primary" />
-              <div>
-                <div className="text-sm font-semibold">Easy support</div>
-                <div className="text-xs text-muted-foreground">We’re here to help</div>
+            <div className="rounded-2xl border border-border bg-card p-3 sm:p-4 flex items-center gap-2.5 sm:gap-3 min-w-0">
+              <Package className="h-5 w-5 text-primary shrink-0" />
+              <div className="min-w-0">
+                <div className="text-xs sm:text-sm font-semibold truncate">Easy support</div>
+                <div className="text-[10px] sm:text-xs text-muted-foreground truncate">We're here to help</div>
               </div>
             </div>
           </div>
