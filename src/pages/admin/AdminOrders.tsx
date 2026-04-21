@@ -9,9 +9,11 @@ import { FileDown } from 'lucide-react';
 
 const statusColors: Record<OrderStatus, string> = {
   pending: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200',
+  confirmed: 'bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-200',
   packed: 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-200',
   shipped: 'bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-200',
   delivered: 'bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-200',
+  cancelled: 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-200',
 };
 
 function itemDetail(i: OrderLineSnapshot): string {
