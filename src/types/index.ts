@@ -258,6 +258,8 @@ export interface Order {
   returnRequests?: OrderReturnRequest[];
   cancelledAt?: string;
   cancellationReason?: string;
+  /** Timestamp when order was marked delivered. */
+  deliveredAt?: string;
   cancellationRefund?: {
     kind?: 'razorpay' | 'none';
     status?: 'pending' | 'processing' | 'completed' | 'failed';

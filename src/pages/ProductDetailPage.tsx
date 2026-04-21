@@ -13,7 +13,7 @@ import { fetchProductByIdApi } from '@/lib/api';
 import { parseProductSpecifications } from '@/lib/productSpecifications';
 import { usePaymentMethod } from '@/contexts/PaymentMethodContext';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { fetchShippingServiceabilityApi, type ShippingServiceabilityResult } from '@/lib/shippingApi';
+import { fetchShippingServiceabilityApi, isShippingServiceabilityError, type ShippingServiceabilityResult } from '@/lib/shippingApi';
 import { Input } from '@/components/ui/input';
 import { Helmet } from 'react-helmet-async';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -495,7 +495,7 @@ export default function ProductDetailPage() {
                     ? `Free shipping${
                         shippingQuote.estimatedDeliveryDays != null ? ` · ETA ${shippingQuote.estimatedDeliveryDays} day(s)` : ''
                       }`
-                    : shippingQuote?.reason === 'not_serviceable'
+                    : isShippingServiceabilityError(shippingQuote) && shippingQuote.reason === 'not_serviceable'
                       ? 'Not serviceable for this pincode'
                       : pincode.replace(/[^\d]/g, '').length === 6
                         ? 'Shipping info currently unavailable'
