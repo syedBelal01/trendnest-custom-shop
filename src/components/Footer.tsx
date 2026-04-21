@@ -115,6 +115,16 @@ export default function Footer() {
       </div>
       <div className="border-t py-3 text-center text-[10px] sm:text-xs text-muted-foreground">
         © 2026 TrendNest99. All rights reserved.
+        <span className="mx-2 opacity-50">·</span>
+        Developed by{' '}
+        <a
+          href="https://webfisher.in"
+          target="_blank"
+          rel="noreferrer"
+          className="font-medium text-foreground hover:underline"
+        >
+          Webfisher
+        </a>
       </div>
     </footer>
   );
