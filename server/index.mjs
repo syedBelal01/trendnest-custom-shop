@@ -2972,6 +2972,7 @@ function serializeUser(userDoc) {
     email: userDoc.email,
     phone: userDoc.phone,
     name: userDoc.name,
+    addresses: Array.isArray(userDoc.addresses) ? userDoc.addresses : [],
     mustResetPassword: !!userDoc.mustResetPassword,
     createdAt: userDoc.createdAt instanceof Date ? userDoc.createdAt.toISOString() : userDoc.createdAt,
   };

@@ -4,6 +4,7 @@ import { toast } from 'sonner';
 import { addAddressApi, deleteAddressApi, fetchMyAddressesApi, updateAddressApi, type Address } from '@/lib/authApi';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   ArrowLeft,
   ChevronRight,
@@ -46,6 +47,7 @@ function matchesAddressSearch(a: Address, q: string): boolean {
 }
 
 export default function AccountAddressesPage() {
+  const { refreshAuth } = useAuth();
   const [addresses, setAddresses] = useState<Address[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -181,6 +183,7 @@ export default function AccountAddressesPage() {
           isDefault: editDefault,
         });
         setAddresses(next);
+        void refreshAuth();
         toast.success('Address added');
       } else {
         const next = await updateAddressApi(editingId, {
@@ -194,6 +197,7 @@ export default function AccountAddressesPage() {
           isDefault: editDefault,
         });
         setAddresses(next);
+        void refreshAuth();
         toast.success('Address updated');
       }
       setDialogOpen(false);
@@ -209,6 +213,7 @@ export default function AccountAddressesPage() {
     try {
       const next = await updateAddressApi(id, { isDefault: true });
       setAddresses(next);
+      void refreshAuth();
       toast.success('Default address updated');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not update');
@@ -222,6 +227,7 @@ export default function AccountAddressesPage() {
     try {
       const next = await deleteAddressApi(id);
       setAddresses(next);
+      void refreshAuth();
       toast.success('Address deleted');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not delete');
