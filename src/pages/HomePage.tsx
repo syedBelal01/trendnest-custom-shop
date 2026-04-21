@@ -61,7 +61,7 @@ export default function HomePage() {
       <section className="border-y bg-card">
         <div className="max-w-7xl mx-auto px-3 sm:px-4 py-3 sm:py-4 grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
           {[
-            { icon: Truck, label: 'Free Delivery', desc: 'Orders above ₹499' },
+            { icon: Truck, label: 'Free Delivery', desc: '₹0 Delivery Charges' },
             { icon: Shield, label: 'Secure Payments', desc: 'Cash on Delivery' },
             { icon: Headphones, label: '24/7 Support', desc: 'WhatsApp support' },
           ].map(f => (
