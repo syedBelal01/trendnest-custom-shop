@@ -495,7 +495,7 @@ export default function ProductDetailPage() {
                     ? `Free shipping${
                         shippingQuote.estimatedDeliveryDays != null ? ` · ETA ${shippingQuote.estimatedDeliveryDays} day(s)` : ''
                       }`
-                    : shippingQuote?.reason === 'not_serviceable'
+                    : shippingQuote && !shippingQuote.ok && shippingQuote.reason === 'not_serviceable'
                       ? 'Not serviceable for this pincode'
                       : pincode.replace(/[^\d]/g, '').length === 6
                         ? 'Shipping info currently unavailable'
