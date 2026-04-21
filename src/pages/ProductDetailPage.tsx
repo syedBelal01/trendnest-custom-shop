@@ -786,7 +786,6 @@ export default function ProductDetailPage() {
             </div>
           </div>
         </div>
-        </div>
 
         {/* Reviews section */}
         {(reviewsLoading || reviews.length > 0) && (
