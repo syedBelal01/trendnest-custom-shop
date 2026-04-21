@@ -896,43 +896,38 @@ export default function ProductDetailPage() {
       </div>
 
       {/* Sticky bottom bar – mobile only */}
-      <div className="fixed bottom-0 left-0 right-0 z-40 md:hidden bg-background/95 backdrop-blur-md border-t border-border shadow-[0_-4px_20px_-4px_rgba(0,0,0,0.1)]">
-        <div className="flex items-center gap-3 px-4 py-3 max-w-6xl mx-auto">
-          {/* Qty controls */}
-          <div className="inline-flex items-stretch overflow-hidden rounded-xl border border-border bg-background text-sm font-medium shrink-0">
-            <button type="button" className="px-3 py-2.5 active:bg-muted" onClick={() => setQty(Math.max(1, qty - 1))}>
-              <Minus className="h-3.5 w-3.5" />
-            </button>
-            <span className="flex min-w-[2rem] items-center justify-center border-x border-border tabular-nums text-sm">{qty}</span>
-            <button type="button" className="px-3 py-2.5 active:bg-muted" onClick={() => setQty(qty + 1)}>
-              <Plus className="h-3.5 w-3.5" />
-            </button>
+      <div className="fixed bottom-0 left-0 right-0 z-40 md:hidden bg-background/95 backdrop-blur-md border-t border-border shadow-[0_-4px_20px_-4px_rgba(0,0,0,0.1)] pb-[env(safe-area-inset-bottom)]">
+        <div className="flex items-center gap-2 px-3 py-2.5 max-w-6xl mx-auto">
+          {/* Qty + Price stacked compactly */}
+          <div className="flex flex-col gap-1 shrink-0 min-w-0">
+            <div className="inline-flex items-stretch overflow-hidden rounded-lg border border-border bg-background text-xs font-medium">
+              <button type="button" className="px-2 py-1 active:bg-muted" onClick={() => setQty(Math.max(1, qty - 1))} aria-label="Decrease quantity">
+                <Minus className="h-3 w-3" />
+              </button>
+              <span className="flex min-w-[1.75rem] items-center justify-center border-x border-border tabular-nums text-xs">{qty}</span>
+              <button type="button" className="px-2 py-1 active:bg-muted" onClick={() => setQty(qty + 1)} aria-label="Increase quantity">
+                <Plus className="h-3 w-3" />
+              </button>
+            </div>
+            <span className="text-sm font-bold text-foreground tabular-nums leading-none">₹{selectedPrice * qty}</span>
           </div>
 
-          {/* Price */}
-          <div className="flex flex-col min-w-0 shrink-0">
-            <span className="text-lg font-bold text-foreground tabular-nums leading-tight">₹{selectedPrice * qty}</span>
-            {mrp != null && mrp > 0 && discount > 0 && (
-              <span className="text-[10px] text-muted-foreground line-through tabular-nums">₹{mrp * qty}</span>
-            )}
-          </div>
-
-          <div className="flex flex-1 gap-2">
+          <div className="flex flex-1 gap-1.5 min-w-0">
             <Button
               variant="secondary"
-              className="flex-1 rounded-xl h-11 text-sm font-semibold"
+              className="flex-1 min-w-0 rounded-lg h-11 px-2 text-xs font-semibold"
               onClick={handleBuyNow}
               disabled={!inStock}
             >
               Buy Now
             </Button>
             <Button
-              className="flex-1 gap-2 rounded-xl h-11 text-sm font-semibold"
+              className="flex-1 min-w-0 gap-1 rounded-lg h-11 px-2 text-xs font-semibold"
               onClick={handleAddToCart}
               disabled={!inStock}
             >
-              <ShoppingCart className="h-4 w-4" />
-              {inStock ? 'Add to Cart' : 'Out of Stock'}
+              <ShoppingCart className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">{inStock ? 'Add to Cart' : 'Out of Stock'}</span>
             </Button>
           </div>
         </div>
