@@ -3,6 +3,7 @@ import { useProducts } from '@/contexts/ProductsContext';
 import { useCart } from '@/contexts/CartContext';
 import { Button } from '@/components/ui/button';
 import ProductImageGallery from '@/components/ProductImageGallery';
+import RatingSummaryInline from '@/components/reviews/RatingSummaryInline';
 import { useEffect, useMemo, useState } from 'react';
 import { ShoppingCart, ArrowLeft, Minus, Plus, Check, ChevronDown, ChevronUp, Truck, ShieldCheck, BadgeCheck, Package } from 'lucide-react';
 import type { CartItem, Product } from '@/types';
@@ -385,7 +386,6 @@ export default function ProductDetailPage() {
   const summary = ratingSummary[product.id];
   const avg = summary?.avgRating ?? 0;
   const count = summary?.reviewCount ?? 0;
-  const filled = Math.round(avg);
 
   const handleAddToCart = () => addItem({
     product, quantity: qty,
@@ -509,22 +509,20 @@ export default function ProductDetailPage() {
             </h1>
 
             {/* Rating */}
-            {count > 0 && (
-              <button
-                type="button"
-                onClick={() => document.getElementById('customer-reviews')?.scrollIntoView({ behavior: 'smooth' })}
-                className="flex items-center gap-2 group"
-              >
-                <div className="flex gap-0.5">
-                  {Array.from({ length: 5 }, (_, i) => (
-                    <span key={i} className={`text-base ${i < filled ? 'text-yellow-500' : 'text-muted-foreground/25'}`}>★</span>
-                  ))}
-                </div>
-                <span className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
-                  {avg.toFixed(1)} ({count})
-                </span>
-              </button>
-            )}
+            <div className="flex items-center">
+              <RatingSummaryInline
+                avgRating={avg}
+                reviewCount={count}
+                onClick={
+                  count > 0
+                    ? () => document.getElementById('customer-reviews')?.scrollIntoView({ behavior: 'smooth' })
+                    : undefined
+                }
+                starClassName="text-base leading-none"
+                textClassName="text-sm text-muted-foreground group-hover:text-foreground transition-colors"
+                className={count > 0 ? 'group' : undefined}
+              />
+            </div>
 
             {/* Price block */}
             <div className="rounded-2xl border border-border bg-card p-4 space-y-3">

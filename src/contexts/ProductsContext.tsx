@@ -23,6 +23,7 @@ type ProductsContextValue = {
   /** Why the API is not usable (null when connected). */
   apiIssue: ProductApiIssue | null;
   refreshProducts: () => Promise<void>;
+  refreshRatingSummary: (productIds?: string[]) => Promise<void>;
   addProduct: (p: Product) => Promise<void>;
   updateProduct: (id: string, patch: Partial<Product>) => Promise<void>;
   deleteProduct: (id: string) => Promise<void>;
@@ -36,6 +37,26 @@ export function ProductsProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [apiAvailable, setApiAvailable] = useState(false);
   const [apiIssue, setApiIssue] = useState<ProductApiIssue | null>(null);
+
+  const refreshRatingSummary = useCallback(
+    async (productIds?: string[]) => {
+      if (!apiAvailable) {
+        setRatingSummary({});
+        return;
+      }
+      const ids =
+        productIds && productIds.length
+          ? productIds
+          : products.map((p) => p.id);
+      try {
+        const summary = await fetchReviewsSummaryApi(ids);
+        setRatingSummary((prev) => ({ ...prev, ...summary }));
+      } catch {
+        // Keep previous summary; ratings are non-critical UI.
+      }
+    },
+    [apiAvailable, products]
+  );
 
   const refreshProducts = useCallback(async () => {
     try {
@@ -173,6 +194,7 @@ export function ProductsProvider({ children }: { children: ReactNode }) {
         apiAvailable,
         apiIssue,
         refreshProducts,
+        refreshRatingSummary,
         addProduct,
         updateProduct,
         deleteProduct,

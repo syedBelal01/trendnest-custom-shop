@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { createReviewApi, uploadReviewMediaApi, type ReviewMedia } from '@/lib/reviewsApi';
 import { prepareReviewImageFile } from '@/lib/processProductImage';
+import { useProducts } from '@/contexts/ProductsContext';
 
 type LocalReviewMedia = {
   id: string;
@@ -23,6 +24,7 @@ export default function ReviewDialog(props: {
   initialRating?: number;
   lockRating?: boolean;
 }) {
+  const { refreshRatingSummary } = useProducts();
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState('');
   const [media, setMedia] = useState<LocalReviewMedia[]>([]);
@@ -97,6 +99,7 @@ export default function ReviewDialog(props: {
         comment: comment.trim(),
         media: uploaded,
       });
+      await refreshRatingSummary([props.productId]);
       toast.success('Thanks! Your review was submitted.');
       props.onOpenChange(false);
       setComment('');

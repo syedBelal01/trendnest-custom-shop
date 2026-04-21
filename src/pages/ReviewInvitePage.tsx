@@ -3,6 +3,7 @@ import { useNavigate, useParams, Link } from 'react-router-dom';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { verifyReviewInviteApi, submitReviewInviteApi, type ReviewInviteVerifyStatus } from '@/lib/reviewsApi';
+import { useProducts } from '@/contexts/ProductsContext';
 
 type VerifyState =
   | { kind: 'loading' }
@@ -17,6 +18,7 @@ type VerifyState =
 export default function ReviewInvitePage() {
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
+  const { refreshRatingSummary } = useProducts();
   const [state, setState] = useState<VerifyState>({ kind: 'loading' });
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState('');
@@ -65,6 +67,9 @@ export default function ReviewInvitePage() {
     setBusy(true);
     try {
       await submitReviewInviteApi({ token: t, rating, comment: comment.trim() });
+      if (state.kind === 'ready' && state.product?.id) {
+        await refreshRatingSummary([state.product.id]);
+      }
       toast.success('Thanks! Your review was submitted.');
       navigate('/account/orders');
     } catch (e) {
