@@ -31,6 +31,8 @@ const RETURN_WINDOW_DAYS = Math.max(1, Math.floor(Number(process.env.RETURN_WIND
 const SHIPROCKET_EMAIL = process.env.SHIPROCKET_EMAIL;
 const SHIPROCKET_PASSWORD = process.env.SHIPROCKET_PASSWORD;
 const SHIPROCKET_WEBHOOK_SECRET = process.env.SHIPROCKET_WEBHOOK_SECRET;
+// Shiprocket "Webhook Token" field is sent as x-api-key header.
+const SHIPROCKET_WEBHOOK_TOKEN = process.env.SHIPROCKET_WEBHOOK_TOKEN;
 const SHIPROCKET_PICKUP_LOCATION_NAME = process.env.SHIPROCKET_PICKUP_LOCATION_NAME;
 const SHIPROCKET_PICKUP_PINCODE = process.env.SHIPROCKET_PICKUP_PINCODE;
 const SHIPROCKET_HTTP_TIMEOUT_MS = Number(process.env.SHIPROCKET_HTTP_TIMEOUT_MS || 12_000);
@@ -2754,12 +2756,41 @@ app.post('/api/shipping/serviceability', async (req, res) => {
 });
 
 // Shiprocket tracking webhook (best-effort; keeps storefront status minimal).
-app.post('/api/webhooks/shiprocket', async (req, res) => {
+async function handleShiprocketTrackingWebhook(req, res) {
   try {
+    // Auth: Shiprocket UI supports a webhook token, sent as x-api-key.
+    // Also supports an optional signature header when a secret is configured.
+    const expectedToken = String(SHIPROCKET_WEBHOOK_TOKEN || '').trim();
+    const sentToken = String(req.get('x-api-key') || req.get('X-Api-Key') || '').trim();
     const secret = String(SHIPROCKET_WEBHOOK_SECRET || '').trim();
+    const sig = String(req.get('x-shiprocket-signature') || req.get('X-Shiprocket-Signature') || '').trim();
+
+    // Temporary debug (redacted): helps confirm what Shiprocket is sending in Render logs.
+    // Remove/disable once webhook is stable.
+    logJson('info', 'shiprocket.webhook_debug', {
+      path: String(req.originalUrl || req.url || ''),
+      hasToken: !!sentToken,
+      tokenPrefix: sentToken ? sentToken.slice(0, 3) : undefined,
+      expectedTokenSet: !!expectedToken,
+      expectedTokenPrefix: expectedToken ? expectedToken.slice(0, 3) : undefined,
+      hasSignature: !!sig,
+      secretSet: !!secret,
+      contentType: String(req.get('content-type') || ''),
+      userAgent: String(req.get('user-agent') || ''),
+      bodyKeys: req.body && typeof req.body === 'object' ? Object.keys(req.body).slice(0, 40) : typeof req.body,
+    });
+
+    // Enforce token check when configured.
+    if (expectedToken) {
+      if (!sentToken || sentToken !== expectedToken) {
+        logJson('warn', 'shiprocket.webhook_rejected', { reason: 'bad_token' });
+        res.status(401).json({ ok: false });
+        return;
+      }
+    }
+
+    // Enforce signature when secret is configured.
     if (secret) {
-      // Signature check: HMAC-SHA256 over raw request body.
-      const sig = String(req.get('x-shiprocket-signature') || req.get('X-Shiprocket-Signature') || '').trim();
       if (!sig) {
         logJson('warn', 'shiprocket.webhook_rejected', { reason: 'missing_signature' });
         res.status(401).json({ ok: false });
@@ -2897,13 +2928,23 @@ app.post('/api/webhooks/shiprocket', async (req, res) => {
       return;
     }
 
-    // Minimal storefront status mapping (do not regress).
+    // Status mapping (do not regress). Shiprocket may send either event names or human statuses.
     let nextStatus = null;
     if (status.includes('delivered')) nextStatus = 'delivered';
-    else if (status.includes('shipped') || status.includes('in transit') || status.includes('in_transit')) nextStatus = 'shipped';
-    else if (status.includes('out for delivery') || status.includes('out_for_delivery')) nextStatus = 'shipped';
-    else if (status.includes('picked') || status.includes('pickup') || status.includes('manifest')) nextStatus = 'shipped';
+    else if (status.includes('shipment_created') || status.includes('shipment_request') || status.includes('packed')) nextStatus = 'packed';
+    else if (
+      status.includes('shipped') ||
+      status.includes('picked_up') ||
+      status.includes('picked') ||
+      status.includes('pickup') ||
+      status.includes('manifest') ||
+      status.includes('in transit') ||
+      status.includes('in_transit') ||
+      status.includes('out for delivery') ||
+      status.includes('out_for_delivery')
+    ) nextStatus = 'shipped';
     else if (status.includes('rto')) nextStatus = null; // keep shipped; store in shipping.rto
+    else if (status.includes('cancel') || status.includes('cancelled') || status.includes('canceled')) nextStatus = null;
     else if (status.includes('undelivered') || status.includes('delivery failed') || status.includes('failed')) nextStatus = null;
 
     const $set = {
@@ -2955,7 +2996,12 @@ app.post('/api/webhooks/shiprocket', async (req, res) => {
     // Webhooks should not be retried aggressively by failing hard.
     res.json({ ok: true });
   }
-});
+}
+
+// Shiprocket blocks webhook URLs containing keywords like "shiprocket"/"sr"/"kr".
+// Keep the old route for compatibility, but configure Shiprocket to use /api/webhooks/tracking.
+app.post('/api/webhooks/shiprocket', handleShiprocketTrackingWebhook);
+app.post('/api/webhooks/tracking', handleShiprocketTrackingWebhook);
 
 function requireAuth(req, res, next) {
   if (!req.session?.userId) {
