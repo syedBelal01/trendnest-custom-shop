@@ -2040,10 +2040,6 @@ async function ensureShiprocketShipmentForOrderId(orderId, source = 'system') {
       hasCourierName: Boolean(created.courierName),
     });
 
-    await Order.updateOne(
-      { _id: id, status: { $in: ['pending', 'confirmed'] } },
-      { $set: { status: 'packed' } }
-    );
     logJson('info', 'shiprocket.shipment_ok', {
       orderId: id,
       shipmentId: created.shipmentId,
@@ -6199,7 +6195,7 @@ app.post('/api/orders', mongoReady, async (req, res) => {
       amountDue: total,
       amountPaid: 0,
       hasCustomPrint: !!body.hasCustomPrint,
-      status: 'confirmed',
+      status: 'pending',
       stockDeductedAt: new Date(),
     });
     await syncOrderAdminFlags(orderId);
@@ -6211,13 +6207,10 @@ app.post('/api/orders', mongoReady, async (req, res) => {
         try {
           await finalizePendingOrderShipping(orderId);
           const leanForMail = (await Order.findById(orderId).lean()) || {};
-          await Promise.all([
-            (async () => {
-              await sendOrderEmails({ ...leanForMail, _id: orderId });
-              await Order.updateOne({ _id: orderId }, { $set: { emailSentAt: new Date(), emailError: null } });
-            })(),
-            ensureShiprocketShipmentForOrderId(orderId, 'cod'),
-          ]);
+          await (async () => {
+            await sendOrderEmails({ ...leanForMail, _id: orderId });
+            await Order.updateOne({ _id: orderId }, { $set: { emailSentAt: new Date(), emailError: null } });
+          })();
         } catch (mailErr) {
           const emailErr = mailErr instanceof Error ? mailErr.message : String(mailErr);
           console.error('Order email failed:', mailErr);
@@ -6604,7 +6597,7 @@ app.post('/api/payments/razorpay/verify', mongoReady, async (req, res) => {
       razorpayPaymentId,
       razorpaySignature,
       hasCustomPrint: !!session.hasCustomPrint,
-      status: 'confirmed',
+      status: 'pending',
       stockDeductedAt: new Date(),
     });
     await syncOrderAdminFlags(orderId);
@@ -6631,13 +6624,10 @@ app.post('/api/payments/razorpay/verify', mongoReady, async (req, res) => {
         try {
           await finalizePendingOrderShipping(orderId);
           const leanForMail = (await Order.findById(orderId).lean()) || {};
-          await Promise.all([
-            (async () => {
-              await sendOrderEmails({ ...leanForMail, _id: orderId });
-              await Order.updateOne({ _id: orderId }, { $set: { emailSentAt: new Date(), emailError: null } });
-            })(),
-            ensureShiprocketShipmentForOrderId(orderId, 'razorpay'),
-          ]);
+          await (async () => {
+            await sendOrderEmails({ ...leanForMail, _id: orderId });
+            await Order.updateOne({ _id: orderId }, { $set: { emailSentAt: new Date(), emailError: null } });
+          })();
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           await Order.updateOne({ _id: orderId }, { $set: { emailError: msg } });
@@ -7140,6 +7130,9 @@ app.post('/api/admin/orders/:id/shipping/retry', mongoReady, adminKeyRequired, a
       });
       return;
     }
+
+    // Admin-triggered Shiprocket action: move pending → confirmed.
+    await Order.updateOne({ _id: id, status: 'pending' }, { $set: { status: 'confirmed' } });
 
     await Order.updateOne(
       { _id: id },
