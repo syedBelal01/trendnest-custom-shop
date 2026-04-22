@@ -1820,8 +1820,51 @@ async function createShiprocketShipmentForOrderDoc(orderLean) {
     throw err;
   }
 
-  const awb = String(awbData?.awb_code || awbData?.data?.awb_code || '').trim();
-  const courierName = String(awbData?.courier_name || selected?.courierName || '').trim() || undefined;
+  logJson('info', 'shiprocket.awb_assign_response', {
+    orderId,
+    shipmentId,
+    status: awbRes.status,
+    ok: awbRes.ok,
+    responseKeys: awbData && typeof awbData === 'object' ? Object.keys(awbData) : typeof awbData,
+    dataKeys:
+      awbData && typeof awbData === 'object' && awbData.data && typeof awbData.data === 'object'
+        ? Object.keys(awbData.data)
+        : undefined,
+    // Safe subset only (do not log full payload)
+    hasAwbCode: Boolean(awbData?.awb_code || awbData?.data?.awb_code || awbData?.data?.response?.awb_code || awbData?.payload?.awb_code),
+    hasCourierName: Boolean(
+      awbData?.courier_name || awbData?.data?.courier_name || awbData?.data?.response?.courier_name || awbData?.payload?.courier_name
+    ),
+  });
+
+  const awb = String(
+    awbData?.awb_code ??
+      awbData?.data?.awb_code ??
+      awbData?.data?.response?.awb_code ??
+      awbData?.payload?.awb_code ??
+      awbData?.payload?.data?.awb_code ??
+      awbData?.awb ??
+      awbData?.data?.awb ??
+      ''
+  ).trim();
+  const courierNameRaw = String(
+    awbData?.courier_name ??
+      awbData?.data?.courier_name ??
+      awbData?.data?.response?.courier_name ??
+      awbData?.payload?.courier_name ??
+      awbData?.payload?.data?.courier_name ??
+      selected?.courierName ??
+      ''
+  ).trim();
+  const courierName = courierNameRaw || undefined;
+
+  logJson('info', 'shiprocket.awb_assign_extracted', {
+    orderId,
+    shipmentId,
+    courierId: selected?.courierId,
+    awbPrefix: awb ? awb.slice(0, 6) : undefined,
+    courierName,
+  });
 
   // Pickup request (non-fatal if it fails; can be retried by admin ops).
   try {
@@ -1954,25 +1997,29 @@ async function ensureShiprocketShipmentForOrderId(orderId, source = 'system') {
     const created = await createShiprocketShipmentForOrderDoc({ ...orderLean, _id: id });
     const $set = {
       'shipping.provider': 'shiprocket',
-      'shipping.shiprocketOrderId': created.shiprocketOrderId,
       'shipping.shipmentId': created.shipmentId,
-      'shipping.awb': created.awb,
-      'shipping.courierId': created.courierId,
-      'shipping.courierName': created.courierName,
-      'shipping.estimatedDeliveryDate': created.estimatedDeliveryDate || undefined,
-      'shipping.serviceability': created.serviceability,
       'shipping.shipmentCreatedAt': new Date(),
       'shipping.lastUpdatedAt': new Date(),
       'shipping.manualRequired': false,
-      'shipping.manualReason': undefined,
-      'shipping.error': undefined,
+      'shipping.serviceability': created.serviceability,
       'shipping.shipmentAttemptCount': 0,
-      'shipping.shipmentLastFailureAt': undefined,
     };
-    await Order.updateOne(
+    // Never overwrite good existing shipping fields with empty/undefined values.
+    if (created.shiprocketOrderId) $set['shipping.shiprocketOrderId'] = created.shiprocketOrderId;
+    if (created.awb) $set['shipping.awb'] = created.awb;
+    if (created.courierId) $set['shipping.courierId'] = created.courierId;
+    if (created.courierName) $set['shipping.courierName'] = created.courierName;
+    if (created.estimatedDeliveryDate) $set['shipping.estimatedDeliveryDate'] = created.estimatedDeliveryDate;
+
+    const persistRes = await Order.updateOne(
       { _id: id, 'shipping.shipmentCreatedAt': { $exists: false } },
       {
         $set,
+        $unset: {
+          'shipping.manualReason': 1,
+          'shipping.error': 1,
+          'shipping.shipmentLastFailureAt': 1,
+        },
         $push: {
           'shipping.timeline': {
             at: new Date().toISOString(),
@@ -1984,6 +2031,14 @@ async function ensureShiprocketShipmentForOrderId(orderId, source = 'system') {
         },
       }
     );
+    logJson('info', 'shiprocket.shipment_persisted', {
+      orderId: id,
+      source,
+      matchedCount: persistRes?.matchedCount,
+      modifiedCount: persistRes?.modifiedCount,
+      hasAwb: Boolean(created.awb),
+      hasCourierName: Boolean(created.courierName),
+    });
 
     await Order.updateOne(
       { _id: id, status: { $in: ['pending', 'confirmed'] } },
@@ -2838,7 +2893,7 @@ async function handleShiprocketTrackingWebhook(req, res) {
         : shipmentId
           ? { 'shipping.shipmentId': shipmentId }
           : orderRef
-            ? { _id: orderRef }
+            ? { $or: [{ _id: orderRef }, { 'shipping.orderRef': orderRef }] }
             : null;
 
     if (!qForward && !awb) {
@@ -7115,6 +7170,164 @@ app.post('/api/admin/orders/:id/shipping/retry', mongoReady, adminKeyRequired, a
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Failed to retry shipment' });
+  }
+});
+
+// Admin: backfill Shiprocket AWB/courier fields for existing orders.
+app.post('/api/admin/shipping/sync-awb', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    if (!shiprocketConfigured()) {
+      res.status(503).json({ ok: false, error: 'Shiprocket is not configured on the server' });
+      return;
+    }
+
+    const body = req.body || {};
+    const orderId = String(body?.orderId || '').trim();
+    const shipmentIdIn = body?.shipmentId ?? body?.shipment_id ?? null;
+    const shipmentIdNum = shipmentIdIn != null ? Number(shipmentIdIn) : null;
+    const shipmentId = Number.isFinite(shipmentIdNum) && shipmentIdNum > 0 ? shipmentIdNum : null;
+
+    if (!orderId && !shipmentId) {
+      res.status(400).json({ ok: false, error: 'Provide orderId or shipmentId' });
+      return;
+    }
+
+    const order =
+      orderId ? await Order.findById(orderId).lean() : await Order.findOne({ 'shipping.shipmentId': shipmentId }).lean();
+    if (!order) {
+      res.status(404).json({ ok: false, error: 'Order not found' });
+      return;
+    }
+
+    const effectiveShipmentId = shipmentId || (order?.shipping?.shipmentId != null ? Number(order.shipping.shipmentId) : null);
+    const shiprocketOrderId = String(order?.shipping?.shiprocketOrderId || '').trim() || null;
+    const courierIdExisting = order?.shipping?.courierId != null ? Number(order.shipping.courierId) : null;
+
+    logJson('info', 'shiprocket.sync_awb_start', {
+      orderId: String(order._id),
+      effectiveShipmentId,
+      shiprocketOrderId,
+      hasAwb: Boolean(order?.shipping?.awb),
+      hasCourierName: Boolean(order?.shipping?.courierName),
+    });
+
+    let extracted = {
+      awb: '',
+      courierName: '',
+      courierId: null,
+      shipmentId: effectiveShipmentId,
+    };
+
+    // Prefer reading details first (order show).
+    if (shiprocketOrderId) {
+      const { res: showRes, data: showData } = await shiprocketFetch(`/orders/show/${encodeURIComponent(shiprocketOrderId)}`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      logJson('info', 'shiprocket.sync_awb_response', {
+        orderId: String(order._id),
+        kind: 'order_show',
+        ok: showRes.ok,
+        status: showRes.status,
+        responseKeys: showData && typeof showData === 'object' ? Object.keys(showData) : typeof showData,
+      });
+
+      if (showRes.ok) {
+        const d = showData?.data ?? showData?.payload ?? showData;
+        const shipments =
+          Array.isArray(d?.shipments) ? d.shipments
+          : Array.isArray(d?.data?.shipments) ? d.data.shipments
+          : Array.isArray(d?.order?.shipments) ? d.order.shipments
+          : [];
+        const first = shipments?.[0] || d?.shipment || d?.data?.shipment || null;
+        const awbFromShow = String(first?.awb_code ?? first?.awb ?? first?.tracking_number ?? d?.awb_code ?? d?.awb ?? '').trim();
+        const courierNameFromShow = String(
+          first?.courier_name ??
+            first?.courier_company_name ??
+            first?.courierCompanyName ??
+            d?.courier_name ??
+            d?.courier_company_name ??
+            ''
+        ).trim();
+        const courierIdFromShowRaw =
+          first?.courier_company_id ?? first?.courier_id ?? first?.courierId ?? d?.courier_company_id ?? d?.courier_id ?? null;
+        const courierIdFromShow = courierIdFromShowRaw != null ? Number(courierIdFromShowRaw) : null;
+
+        extracted.awb = awbFromShow || extracted.awb;
+        extracted.courierName = courierNameFromShow || extracted.courierName;
+        extracted.courierId = Number.isFinite(courierIdFromShow) && courierIdFromShow > 0 ? courierIdFromShow : extracted.courierId;
+        const shipmentFromShow = extractShipmentIdFromOrderShow(showData);
+        if (shipmentFromShow) extracted.shipmentId = shipmentFromShow;
+      }
+    }
+
+    // Fallback: if still no AWB, try assign/awb again (best-effort).
+    const courierIdForAssign = extracted.courierId || (Number.isFinite(courierIdExisting) && courierIdExisting > 0 ? courierIdExisting : null);
+    if (!extracted.awb && extracted.shipmentId && courierIdForAssign) {
+      const assignBody = { shipment_id: extracted.shipmentId, courier_id: courierIdForAssign };
+      const { res: awbRes, data: awbData } = await shiprocketFetch('/courier/assign/awb', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(assignBody),
+      });
+      logJson('info', 'shiprocket.sync_awb_response', {
+        orderId: String(order._id),
+        kind: 'assign_awb_fallback',
+        ok: awbRes.ok,
+        status: awbRes.status,
+        responseKeys: awbData && typeof awbData === 'object' ? Object.keys(awbData) : typeof awbData,
+      });
+
+      if (awbRes.ok) {
+        extracted.awb = String(
+          awbData?.awb_code ??
+            awbData?.data?.awb_code ??
+            awbData?.data?.response?.awb_code ??
+            awbData?.payload?.awb_code ??
+            awbData?.payload?.data?.awb_code ??
+            awbData?.awb ??
+            awbData?.data?.awb ??
+            ''
+        ).trim();
+        extracted.courierName =
+          String(
+            awbData?.courier_name ??
+              awbData?.data?.courier_name ??
+              awbData?.data?.response?.courier_name ??
+              awbData?.payload?.courier_name ??
+              awbData?.payload?.data?.courier_name ??
+              extracted.courierName ??
+              ''
+          ).trim() || extracted.courierName;
+      }
+    }
+
+    const $set = {};
+    // Never overwrite existing good fields with empty.
+    if (!order?.shipping?.awb && extracted.awb) $set['shipping.awb'] = extracted.awb;
+    if (!order?.shipping?.courierName && extracted.courierName) $set['shipping.courierName'] = extracted.courierName;
+    if (!order?.shipping?.courierId && courierIdForAssign) $set['shipping.courierId'] = courierIdForAssign;
+    if (!order?.shipping?.shipmentId && extracted.shipmentId) $set['shipping.shipmentId'] = extracted.shipmentId;
+    if (!order?.shipping?.shiprocketOrderId && shiprocketOrderId) $set['shipping.shiprocketOrderId'] = shiprocketOrderId;
+    if (Object.keys($set).length > 0) $set['shipping.lastUpdatedAt'] = new Date();
+
+    const updateRes =
+      Object.keys($set).length > 0 ? await Order.updateOne({ _id: String(order._id) }, { $set }) : { matchedCount: 1, modifiedCount: 0 };
+
+    logJson('info', 'shiprocket.sync_awb_saved', {
+      orderId: String(order._id),
+      matched: updateRes?.matchedCount,
+      modified: updateRes?.modifiedCount,
+      savedAwb: Boolean($set['shipping.awb']),
+      awbPrefix: extracted.awb ? extracted.awb.slice(0, 6) : undefined,
+      savedCourierName: Boolean($set['shipping.courierName']),
+    });
+
+    const fresh = await Order.findById(String(order._id)).lean();
+    res.json({ ok: true, shipping: fresh?.shipping || {} });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: 'Failed to sync AWB' });
   }
 });
 
