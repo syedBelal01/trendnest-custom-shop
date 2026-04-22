@@ -927,6 +927,7 @@ const OrderLineSchema = new mongoose.Schema(
   {
     lineId: String,
     productId: { type: String, required: true },
+    sku: { type: String, default: '' },
     name: { type: String, required: true },
     price: { type: Number, required: true },
     quantity: { type: Number, required: true },
@@ -2378,10 +2379,11 @@ function streamInvoicePdf(order, res) {
   doc.moveDown(0.25);
   doc.fontSize(9);
   let y = doc.y;
-  doc.text('Description', 48, y, { width: 220 });
-  doc.text('Qty', 280, y, { width: 40 });
-  doc.text('Price', 330, y, { width: 60 });
-  doc.text('Amount', 400, y, { width: 80 });
+  doc.text('Description', 48, y, { width: 200 });
+  doc.text('SKU', 255, y, { width: 70 });
+  doc.text('Qty', 335, y, { width: 35 });
+  doc.text('Price', 375, y, { width: 60 });
+  doc.text('Amount', 445, y, { width: 80 });
   doc.moveDown(0.5);
   doc.moveTo(48, doc.y).lineTo(548, doc.y).stroke();
   doc.moveDown(0.25);
@@ -2389,11 +2391,13 @@ function streamInvoicePdf(order, res) {
     const amt = l.price * l.quantity;
     const opts = [l.selectedSize, l.selectedVariant, l.selectedSleeve].filter(Boolean).join(', ');
     const desc = opts ? `${l.name} (${opts})` : l.name;
+    const sku = String(l.sku || '').trim() || String(l.productId || '').trim();
     y = doc.y;
-    doc.text(desc, 48, y, { width: 220 });
-    doc.text(String(l.quantity), 280, y, { width: 40 });
-    doc.text(`₹${l.price}`, 330, y, { width: 60 });
-    doc.text(`₹${amt}`, 400, y, { width: 80 });
+    doc.text(desc, 48, y, { width: 200 });
+    doc.text(sku, 255, y, { width: 70 });
+    doc.text(String(l.quantity), 335, y, { width: 35 });
+    doc.text(`₹${l.price}`, 375, y, { width: 60 });
+    doc.text(`₹${amt}`, 445, y, { width: 80 });
     doc.moveDown(0.35);
   }
   doc.moveDown();
@@ -5971,11 +5975,14 @@ async function computeServerCheckoutPricing({ req, body, rawItems, paymentMethod
       throw err;
     }
     let unit = Number(p.price) || 0;
+    let sku = String(p?.sku || '').trim();
     const selectedVariantKey = line.selectedVariant ? String(line.selectedVariant) : '';
     const vm = p.variantModel && typeof p.variantModel === 'object' ? p.variantModel : null;
     if (vm && Array.isArray(vm.items) && selectedVariantKey) {
       const hit = vm.items.find((it) => String(it?.key) === selectedVariantKey);
       if (hit) {
+        const hitSku = String(hit?.sku || '').trim();
+        if (hitSku) sku = hitSku;
         if (paymentMethod === 'razorpay' && hit.onlinePrice != null) unit = Number(hit.onlinePrice);
         else if (paymentMethod === 'cod' && hit.codPrice != null) unit = Number(hit.codPrice);
         else unit = Number(hit.price);
@@ -5986,7 +5993,7 @@ async function computeServerCheckoutPricing({ req, body, rawItems, paymentMethod
       else unit = Number(p.price);
     }
     if (!Number.isFinite(unit) || unit < 0) unit = 0;
-    return { ...line, price: unit };
+    return { ...line, sku, price: unit };
   });
 
   const subtotal = pricedItems.reduce((acc, l) => acc + (Number(l.price) || 0) * (Number(l.quantity) || 0), 0);
