@@ -8,6 +8,8 @@ import { Upload, ShoppingCart, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { uploadCustomDesign } from '@/lib/api';
 import { productVariantNames } from '@/lib/productVariants';
+import CustomPrintPreview from '@/components/custom/CustomPrintPreview';
+import { resolveCustomPrintMockup } from '@/data/customPrintMockups';
 
 export default function CustomPrintPage() {
   const { products } = useProducts();
@@ -54,6 +56,12 @@ export default function CustomPrintPage() {
     setPreviewUrl(null);
   };
 
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
   const handleAddToCart = async () => {
     if (!designFile || !selectedProduct || uploading) return;
     setUploading(true);
@@ -83,6 +91,15 @@ export default function CustomPrintPage() {
       ? productVariantNames(selectedProduct)
       : ['White', 'Black', 'Gray'];
 
+  const fallbackMockupUrl = selectedProduct?.images?.[0] ? String(selectedProduct.images[0]) : '';
+  const styleKey = productType === 'tshirt' ? selectedSleeve : 'Default';
+  const mock = resolveCustomPrintMockup({
+    productType,
+    color: selectedVariant,
+    style: styleKey,
+    fallbackMockupUrl,
+  });
+
   return (
     <div className="max-w-4xl mx-auto px-3 sm:px-4 py-6 sm:py-8">
       <h1 className="text-2xl sm:text-3xl font-bold mb-1 sm:mb-2">🎨 Custom Print</h1>
@@ -99,8 +116,20 @@ export default function CustomPrintPage() {
           >
             {previewUrl ? (
               <>
-                <img src={previewUrl} alt="Preview" className="w-full h-full object-contain p-4" />
-                <button type="button" onClick={e => { e.stopPropagation(); clearFile(); }} className="absolute top-2 right-2 bg-foreground/80 text-background rounded-full p-1.5"><X className="h-4 w-4" /></button>
+                <CustomPrintPreview
+                  mockupUrl={mock.mockupUrl}
+                  designPreviewUrl={previewUrl}
+                  printArea={mock.printArea}
+                  productName={selectedProduct?.name || 'Custom product'}
+                  className="w-full h-full"
+                />
+                <button
+                  type="button"
+                  onClick={e => { e.stopPropagation(); clearFile(); }}
+                  className="absolute top-2 right-2 bg-foreground/80 text-background rounded-full p-1.5"
+                >
+                  <X className="h-4 w-4" />
+                </button>
               </>
             ) : designFile ? (
               <div className="text-center p-4">
