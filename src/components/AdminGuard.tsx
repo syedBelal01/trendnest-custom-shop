@@ -11,7 +11,7 @@ export default function AdminGuard({ children }: Props) {
 
   const login = (e: React.FormEvent) => {
     e.preventDefault();
-    if (pass === 'admin123') {
+    if (pass === 'salman@786') {
       sessionStorage.setItem('admin-auth', '1');
       setAuthed(true);
     }
@@ -29,7 +29,6 @@ export default function AdminGuard({ children }: Props) {
         </div>
         <Input type="password" value={pass} onChange={e => setPass(e.target.value)} placeholder="Password" />
         <Button type="submit" className="w-full">Login</Button>
-        <p className="text-xs text-muted-foreground text-center">Hint: admin123</p>
       </form>
     </div>
   );
