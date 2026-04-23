@@ -35,7 +35,7 @@ export const CUSTOM_PRINT_MOCKUPS: Record<
         printArea: { leftPct: 32, topPct: 28, widthPct: 36, heightPct: 42 },
       },
       'Full sleeve': {
-        mockupUrl: 'https://res.cloudinary.com/diclcqwnm/image/upload/v1776939597/full_white_kklaty.jpg',
+        mockupUrl: 'https://res.cloudinary.com/diclcqwnm/image/upload/v1776940475/ChatGPT_Image_Apr_23_2026_04_03_30_PM_gqzne1.png',
         printArea: { leftPct: 32, topPct: 28, widthPct: 36, heightPct: 42 },
       },
     },
@@ -45,7 +45,7 @@ export const CUSTOM_PRINT_MOCKUPS: Record<
         printArea: { leftPct: 32, topPct: 28, widthPct: 36, heightPct: 42 },
       },
       'Full sleeve': {
-        mockupUrl: 'https://res.cloudinary.com/diclcqwnm/image/upload/v1776939717/black_full_rmj797.jpg',
+        mockupUrl: 'https://res.cloudinary.com/diclcqwnm/image/upload/v1776940647/black_full_rmj797.png',
         printArea: { leftPct: 32, topPct: 28, widthPct: 36, heightPct: 42 },
       },
     },
