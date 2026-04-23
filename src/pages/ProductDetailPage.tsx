@@ -181,6 +181,7 @@ export default function ProductDetailPage() {
   const [reviews, setReviews] = useState<ApiReview[]>([]);
   const [reviewsCursor, setReviewsCursor] = useState<string | null>(null);
   const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [showAllReviews, setShowAllReviews] = useState(false);
   const [specsOpen, setSpecsOpen] = useState(false);
   const [pincode, setPincode] = useState('');
   const [shippingQuote, setShippingQuote] = useState<ShippingServiceabilityResult | null>(null);
@@ -788,48 +789,90 @@ export default function ProductDetailPage() {
         {/* Reviews section */}
         {(reviewsLoading || reviews.length > 0) && (
           <div id="customer-reviews" className="mt-10 scroll-mt-24">
-            <h2 className="text-lg sm:text-xl font-bold mb-4">Customer Reviews</h2>
-            <div className="space-y-3">
-              {reviews.map(r => (
-                <div key={r.id} className="rounded-2xl border border-border bg-card p-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-medium text-sm">{r.userName}</span>
-                    <span className="text-yellow-500 text-sm">{'★'.repeat(r.rating)}{'☆'.repeat(5 - r.rating)}</span>
-                  </div>
-                  <p className="text-sm text-muted-foreground leading-relaxed">{r.comment}</p>
-                  {r.media?.length ? (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {r.media.slice(0, 4).map((m, idx) => (
-                        <a key={idx} href={m.url} target="_blank" rel="noreferrer" className="block">
-                          {m.kind === 'video' ? (
-                            <video
-                              src={m.url}
-                              className="h-16 w-16 rounded-xl object-cover border border-border bg-muted"
-                              controls
-                              muted
-                            />
-                          ) : (
-                            <img src={m.url} alt="Review" className="h-16 w-16 rounded-xl object-cover border border-border" />
-                          )}
-                        </a>
-                      ))}
-                    </div>
-                  ) : r.images?.length ? (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {r.images.slice(0, 4).map((img, idx) => (
-                        <a key={idx} href={img.url} target="_blank" rel="noreferrer">
-                          <img src={img.url} alt="Review" className="h-16 w-16 rounded-xl object-cover border border-border" />
-                        </a>
-                      ))}
-                    </div>
-                  ) : null}
-                  <p className="text-[11px] text-muted-foreground mt-2">
-                    {r.createdAt ? new Date(r.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : ''}
-                  </p>
-                </div>
-              ))}
-              {reviewsLoading && <div className="text-sm text-muted-foreground py-2">Loading reviews…</div>}
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg sm:text-xl font-bold">Customer Reviews</h2>
+              {!showAllReviews && reviews.length > 5 ? (
+                <button
+                  type="button"
+                  className="text-xs font-medium text-primary hover:underline"
+                  onClick={() => setShowAllReviews(true)}
+                >
+                  View all reviews →
+                </button>
+              ) : null}
             </div>
+
+            <div className="rounded-2xl border border-border bg-card overflow-hidden">
+              {(showAllReviews ? reviews : reviews.slice(0, 5)).map((r) => {
+                const name = String(r.userName || 'User').trim() || 'User';
+                const initial = name.slice(0, 1).toUpperCase();
+                const created =
+                  r.createdAt
+                    ? new Date(r.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+                    : '';
+                const starFull = '★'.repeat(Math.max(0, Math.min(5, Math.floor(Number(r.rating) || 0))));
+                const starEmpty = '☆'.repeat(Math.max(0, 5 - starFull.length));
+                const palette = ['bg-violet-600', 'bg-fuchsia-600', 'bg-rose-600', 'bg-amber-600', 'bg-emerald-600', 'bg-sky-600'];
+                const color = palette[(name.charCodeAt(0) + name.length) % palette.length];
+
+                return (
+                  <div key={r.id} className="px-4 py-3 border-t first:border-t-0">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex items-start gap-3 min-w-0">
+                        <div className={`h-8 w-8 rounded-full ${color} text-white flex items-center justify-center text-xs font-semibold shrink-0`}>
+                          {initial}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm font-semibold text-foreground truncate">{name}</span>
+                            <span className="text-[11px] text-emerald-700 dark:text-emerald-300 font-medium">
+                              Verified Buyer
+                            </span>
+                          </div>
+                          <p className="text-xs text-muted-foreground leading-relaxed mt-0.5 line-clamp-2">
+                            {String(r.comment || '').trim()}
+                          </p>
+                          {created ? <div className="text-[11px] text-muted-foreground mt-1">{created}</div> : null}
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-yellow-500 text-sm leading-none mt-0.5">
+                        {starFull}
+                        <span className="text-muted-foreground/30">{starEmpty}</span>
+                      </div>
+                    </div>
+
+                    {r.media?.length ? (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {r.media.slice(0, 4).map((m, idx) => (
+                          <a key={idx} href={m.url} target="_blank" rel="noreferrer" className="block">
+                            {m.kind === 'video' ? (
+                              <video
+                                src={m.url}
+                                className="h-16 w-16 rounded-xl object-cover border border-border bg-muted"
+                                controls
+                                muted
+                              />
+                            ) : (
+                              <img src={m.url} alt="Review" className="h-16 w-16 rounded-xl object-cover border border-border" />
+                            )}
+                          </a>
+                        ))}
+                      </div>
+                    ) : r.images?.length ? (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {r.images.slice(0, 4).map((img, idx) => (
+                          <a key={idx} href={img.url} target="_blank" rel="noreferrer">
+                            <img src={img.url} alt="Review" className="h-16 w-16 rounded-xl object-cover border border-border" />
+                          </a>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+              {reviewsLoading ? <div className="px-4 py-3 text-sm text-muted-foreground">Loading reviews…</div> : null}
+            </div>
+
             {reviewsCursor && (
               <div className="mt-4">
                 <Button variant="outline" onClick={() => void loadMoreReviews()} disabled={reviewsLoading} className="w-full sm:w-auto rounded-xl">
