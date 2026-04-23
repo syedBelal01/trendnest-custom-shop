@@ -21,6 +21,8 @@ export interface Product {
   images: string[];
   category: ProductCategory;
   subcategory?: string;
+  /** Manual ordering within a category (lower comes first). */
+  displayOrder?: number;
   sizes?: string[];
   /**
    * When set, each option has its own `images`; PDP switches gallery by selected variant.

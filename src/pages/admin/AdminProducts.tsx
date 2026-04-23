@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useProducts } from '@/contexts/ProductsContext';
 import { Product, ProductVariantOption } from '@/types';
 import { Button } from '@/components/ui/button';
@@ -17,7 +17,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Trash2, Edit, Plus, Upload, ImageIcon } from 'lucide-react';
+import { Trash2, Edit, Plus, Upload, ImageIcon, GripVertical } from 'lucide-react';
 import { toast } from 'sonner';
 import { processProductImageFile } from '@/lib/processProductImage';
 import { ProductSpecificationsCard } from '@/components/admin/ProductSpecificationsCard';
@@ -30,9 +30,20 @@ import {
   ensureVariantOptionsImageUrls,
   DEFAULT_PRODUCT_IMAGE,
   updateProductApi,
+  reorderProductsAdminApi,
 } from '@/lib/api';
 import { productPrimaryImage } from '@/lib/productImages';
 import { suggestedSpecLabelsForCategory } from '@/data/productSpecPresets';
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import { SortableContext, useSortable, arrayMove, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 type StockStatus = 'in' | 'low' | 'out';
 function stockStatus(n: number): StockStatus {
@@ -45,6 +56,21 @@ function stockStatus(n: number): StockStatus {
 type VariantModelType = { name: string; values: string[] };
 type VariantModelItem = NonNullable<Product['variantModel']>['items'][number];
 type VariantModel = { types: VariantModelType[]; items: VariantModelItem[] };
+
+function SortableTableRow(props: {
+  id: string;
+  disabled: boolean;
+  renderCells: (args: { handleProps: any; rowStyle: React.CSSProperties; rowRef: (el: HTMLTableRowElement | null) => void }) => React.ReactNode;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: props.id });
+  const rowStyle: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.85 : 1,
+  };
+  const handleProps = props.disabled ? {} : { ...attributes, ...listeners };
+  return <>{props.renderCells({ handleProps, rowStyle, rowRef: setNodeRef })}</>;
+}
 
 function toStr(v: unknown): string {
   return typeof v === 'string' ? v : v == null ? '' : String(v);
@@ -321,9 +347,60 @@ export default function AdminProducts() {
   const [sortKey, setSortKey] = useState<'name' | 'price' | 'stock' | 'updated'>('updated');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
 
+  const [reorderMode, setReorderMode] = useState(false);
+  const [reorderBusy, setReorderBusy] = useState(false);
+  const [reorderList, setReorderList] = useState<Product[] | null>(null);
+
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+
+  const canReorder = categoryFilter !== 'all' && categoryFilter !== 'trending' && q.trim().length === 0;
+
+  useEffect(() => {
+    if (!reorderMode) {
+      setReorderList(null);
+      return;
+    }
+    if (!canReorder) {
+      setReorderMode(false);
+      setReorderList(null);
+      return;
+    }
+    const list = products
+      .filter((p) => String(p.category) === String(categoryFilter))
+      .slice()
+      .sort((a, b) => (Number(a.displayOrder) || 0) - (Number(b.displayOrder) || 0) || a.id.localeCompare(b.id));
+    setReorderList(list);
+  }, [reorderMode, canReorder, products, categoryFilter, q]);
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+
+  const onReorderDragEnd = async (event: DragEndEvent) => {
+    if (!reorderMode || reorderBusy) return;
+    const activeId = String(event.active?.id || '');
+    const overId = String(event.over?.id || '');
+    if (!activeId || !overId || activeId === overId) return;
+    const current = reorderList || [];
+    const from = current.findIndex((p) => p.id === activeId);
+    const to = current.findIndex((p) => p.id === overId);
+    if (from < 0 || to < 0) return;
+
+    const prev = current;
+    const next = arrayMove(current, from, to);
+    setReorderList(next);
+    setReorderBusy(true);
+    try {
+      await reorderProductsAdminApi({ category: String(categoryFilter), orderedIds: next.map((p) => p.id) });
+      toast.success('Order saved');
+      await refreshProducts();
+    } catch (e) {
+      setReorderList(prev);
+      toast.error(e instanceof Error ? e.message : 'Failed to save order');
+    } finally {
+      setReorderBusy(false);
+    }
+  };
 
   const openVariantUpload = (vidx: number) => {
     variantUploadIdxRef.current = vidx;
@@ -883,7 +960,25 @@ export default function AdminProducts() {
     }
   };
 
-  const filtered = products;
+  const categoryOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of products) {
+      const c = String(p?.category || '').trim();
+      if (c && c !== 'trending') set.add(c);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [products]);
+
+  const filtered = useMemo(() => {
+    const query = q.trim().toLowerCase();
+    return products
+      .filter((p) => (categoryFilter === 'all' ? true : String(p.category) === String(categoryFilter)))
+      .filter((p) => {
+        if (!query) return true;
+        const hay = `${p.name || ''} ${p.subcategory || ''} ${p.sku || ''}`.toLowerCase();
+        return hay.includes(query);
+      });
+  }, [products, categoryFilter, q]);
 
   return (
     <div>
@@ -939,6 +1034,38 @@ export default function AdminProducts() {
           Images upload to Cloudinary; products persist in MongoDB.
         </p>
       )}
+      {reorderMode && canReorder && (
+        <div className="mb-4 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+          Drag the <span className="font-medium">handle</span> to reorder products in <span className="font-medium">{categoryFilter}</span>.
+          This saves immediately after you drop.
+        </div>
+      )}
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+          <Input
+            placeholder="Search products…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            className="h-9 w-full sm:w-72"
+          />
+          <Select value={categoryFilter} onValueChange={(v) => setCategoryFilter(v)}>
+            <SelectTrigger className="h-9 w-full sm:w-56">
+              <SelectValue placeholder="Category" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All categories</SelectItem>
+              {categoryOptions.map((c) => (
+                <SelectItem key={c} value={c}>
+                  {c}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="text-xs text-muted-foreground">
+          Showing <span className="font-medium">{filtered.length}</span> of <span className="font-medium">{products.length}</span>
+        </div>
+      </div>
       <div className="flex items-center justify-between mb-6">
         <div className="space-y-1">
           <h1 className="text-2xl font-bold">Products</h1>
@@ -947,6 +1074,16 @@ export default function AdminProducts() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant={reorderMode ? 'default' : 'outline'}
+            size="sm"
+            disabled={!canReorder || reorderBusy}
+            onClick={() => setReorderMode((v) => !v)}
+            title={!canReorder ? 'Select a category (not all) and clear search to reorder' : 'Toggle reorder mode'}
+          >
+            {reorderBusy ? 'Saving…' : reorderMode ? 'Reorder: ON' : 'Reorder'}
+          </Button>
           <Button
             type="button"
             variant="outline"
@@ -1210,67 +1347,153 @@ export default function AdminProducts() {
             </tr>
           </thead>
           <tbody>
-            {filtered.map(p => {
-              const sum = optionsSummary(p);
-              const subtitle = [p.subcategory, sum !== '—' ? sum : null].filter(Boolean).join(' · ') || '—';
-              return (
-              <tr key={p.id} className="border-t">
-                <td className="p-3 flex items-center gap-2">
-                  <img src={productPrimaryImage(p)} alt="" className="w-8 h-8 rounded object-cover" />
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 min-w-0 max-w-[260px]">
-                      <span className="truncate font-medium">{p.name}</span>
-                      {p.isTrending ? (
-                        <span className="shrink-0 rounded-md bg-primary/10 text-primary text-[10px] px-1.5 py-0.5 font-semibold">
-                          Trending
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="text-[11px] text-muted-foreground truncate max-w-[260px]">
-                      {subtitle}
-                    </div>
-                  </div>
-                </td>
-                <td className="p-3 text-xs text-muted-foreground max-w-[220px] align-top">
-                  <span className="line-clamp-3" title={variantsDisplayText(p)}>
-                    {variantsDisplayText(p)}
-                  </span>
-                </td>
-                <td className="p-3 capitalize">
-                  <div className="capitalize">{p.category}</div>
-                  {p.subcategory ? <div className="text-[11px] text-muted-foreground">{p.subcategory}</div> : null}
-                </td>
-                <td className="p-3 tabular-nums">₹{p.price}</td>
-                <td className="p-3">
-                  <span className="tabular-nums font-medium">{p.stock}</span>
-                </td>
-                <td className="p-3 text-center space-x-1">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    onClick={() => {
-                      setEditing(normalizeProductForEditing(p));
-                      setVariantUrlDraft({});
-                      setOpen(true);
-                    }}
-                  >
-                    <Edit className="h-3 w-3" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-destructive"
-                    onClick={() => {
-                      setDeleteTarget({ id: p.id, name: p.name });
-                      setDeleteConfirmOpen(true);
-                    }}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </Button>
-                </td>
-              </tr>
-            )})}
+            {reorderMode && reorderList ? (
+              <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={(e) => void onReorderDragEnd(e)}>
+                <SortableContext items={reorderList.map((p) => p.id)} strategy={verticalListSortingStrategy}>
+                  {reorderList.map((p) => {
+                    const sum = optionsSummary(p);
+                    const subtitle = [p.subcategory, sum !== '—' ? sum : null].filter(Boolean).join(' · ') || '—';
+                    return (
+                      <SortableTableRow
+                        key={p.id}
+                        id={p.id}
+                        disabled={reorderBusy}
+                        renderCells={({ handleProps, rowStyle, rowRef }) => (
+                          <tr ref={rowRef} style={rowStyle} className="border-t">
+                            <td className="p-3">
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  className="text-muted-foreground hover:text-foreground cursor-grab active:cursor-grabbing"
+                                  aria-label="Drag to reorder"
+                                  disabled={reorderBusy}
+                                  {...handleProps}
+                                >
+                                  <GripVertical className="h-4 w-4" />
+                                </button>
+                                <img src={productPrimaryImage(p)} alt="" className="w-8 h-8 rounded object-cover" />
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2 min-w-0 max-w-[260px]">
+                                    <span className="truncate font-medium">{p.name}</span>
+                                    {p.isTrending ? (
+                                      <span className="shrink-0 rounded-md bg-primary/10 text-primary text-[10px] px-1.5 py-0.5 font-semibold">
+                                        Trending
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                  <div className="text-[11px] text-muted-foreground truncate max-w-[260px]">{subtitle}</div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="p-3 text-xs text-muted-foreground max-w-[220px] align-top">
+                              <span className="line-clamp-3" title={variantsDisplayText(p)}>
+                                {variantsDisplayText(p)}
+                              </span>
+                            </td>
+                            <td className="p-3 capitalize">
+                              <div className="capitalize">{p.category}</div>
+                              {p.subcategory ? <div className="text-[11px] text-muted-foreground">{p.subcategory}</div> : null}
+                            </td>
+                            <td className="p-3 tabular-nums">₹{p.price}</td>
+                            <td className="p-3">
+                              <span className="tabular-nums font-medium">{p.stock}</span>
+                            </td>
+                            <td className="p-3 text-center space-x-1">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7"
+                                disabled={reorderBusy}
+                                onClick={() => {
+                                  setEditing(normalizeProductForEditing(p));
+                                  setVariantUrlDraft({});
+                                  setOpen(true);
+                                }}
+                              >
+                                <Edit className="h-3 w-3" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 text-destructive"
+                                disabled={reorderBusy}
+                                onClick={() => {
+                                  setDeleteTarget({ id: p.id, name: p.name });
+                                  setDeleteConfirmOpen(true);
+                                }}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </td>
+                          </tr>
+                        )}
+                      />
+                    );
+                  })}
+                </SortableContext>
+              </DndContext>
+            ) : (
+              filtered.map((p) => {
+                const sum = optionsSummary(p);
+                const subtitle = [p.subcategory, sum !== '—' ? sum : null].filter(Boolean).join(' · ') || '—';
+                return (
+                  <tr key={p.id} className="border-t">
+                    <td className="p-3 flex items-center gap-2">
+                      <img src={productPrimaryImage(p)} alt="" className="w-8 h-8 rounded object-cover" />
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 min-w-0 max-w-[260px]">
+                          <span className="truncate font-medium">{p.name}</span>
+                          {p.isTrending ? (
+                            <span className="shrink-0 rounded-md bg-primary/10 text-primary text-[10px] px-1.5 py-0.5 font-semibold">
+                              Trending
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="text-[11px] text-muted-foreground truncate max-w-[260px]">{subtitle}</div>
+                      </div>
+                    </td>
+                    <td className="p-3 text-xs text-muted-foreground max-w-[220px] align-top">
+                      <span className="line-clamp-3" title={variantsDisplayText(p)}>
+                        {variantsDisplayText(p)}
+                      </span>
+                    </td>
+                    <td className="p-3 capitalize">
+                      <div className="capitalize">{p.category}</div>
+                      {p.subcategory ? <div className="text-[11px] text-muted-foreground">{p.subcategory}</div> : null}
+                    </td>
+                    <td className="p-3 tabular-nums">₹{p.price}</td>
+                    <td className="p-3">
+                      <span className="tabular-nums font-medium">{p.stock}</span>
+                    </td>
+                    <td className="p-3 text-center space-x-1">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
+                        onClick={() => {
+                          setEditing(normalizeProductForEditing(p));
+                          setVariantUrlDraft({});
+                          setOpen(true);
+                        }}
+                      >
+                        <Edit className="h-3 w-3" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-destructive"
+                        onClick={() => {
+                          setDeleteTarget({ id: p.id, name: p.name });
+                          setDeleteConfirmOpen(true);
+                        }}
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </Button>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
           </tbody>
         </table>
       </div>

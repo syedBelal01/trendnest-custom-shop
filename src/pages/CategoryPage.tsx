@@ -19,6 +19,15 @@ export default function CategoryPage() {
   const category = categories.find(c => c.id === id);
   let filtered =
     id === 'trending' ? products.filter(p => p.isTrending) : products.filter(p => p.category === id);
+  // Trending: newest-first (admin displayOrder is per-category and not used here).
+  if (id === 'trending') {
+    const ts = (pid: string) => {
+      const m = String(pid || '').match(/\d{10,}/);
+      const n = m ? Number(m[0]) : NaN;
+      return Number.isFinite(n) ? n : 0;
+    };
+    filtered = [...filtered].sort((a, b) => ts(b.id) - ts(a.id));
+  }
 
   const title = category?.name ? `${category.name} | TrendNest99` : 'Products | TrendNest99';
   const desc = category?.description

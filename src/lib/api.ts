@@ -139,6 +139,30 @@ export async function fetchProductsApi(): Promise<import('@/types').Product[]> {
   return res.json();
 }
 
+function getAdminApiKey(): string | null {
+  if (typeof window === 'undefined') return null;
+  return sessionStorage.getItem('trendnest-admin-api-key');
+}
+
+function adminHeaders(): HeadersInit {
+  const key = getAdminApiKey();
+  const h: Record<string, string> = {};
+  if (key) h['X-Admin-Key'] = key;
+  return h;
+}
+
+export async function reorderProductsAdminApi(input: { category: string; orderedIds: string[] }): Promise<void> {
+  const res = await fetch(apiUrl('/api/admin/products/reorder'), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...adminHeaders() },
+    body: JSON.stringify(input),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(typeof data.error === 'string' ? data.error : `Failed to reorder (${res.status})`);
+  }
+}
+
 const productFetchInit: RequestInit = {
   cache: 'no-store',
 };

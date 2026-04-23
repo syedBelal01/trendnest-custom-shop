@@ -331,6 +331,8 @@ const ProductSchema = new mongoose.Schema(
     images: { type: [String], default: [] },
     category: { type: String, required: true },
     subcategory: String,
+    /** Manual ordering within a category (lower comes first). */
+    displayOrder: { type: Number, default: undefined, index: true },
     sizes: [String],
     variantOptions: { type: [VariantOptionSchema], default: undefined },
     variants: [String],
@@ -4879,7 +4881,7 @@ app.post('/api/auth/password/reset', async (req, res) => {
 
 app.get('/api/products', mongoReady, async (_req, res) => {
   try {
-    const docs = await Product.find().lean();
+    const docs = await Product.find().sort({ category: 1, displayOrder: 1, _id: 1 }).lean();
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
     res.json(docs.map((d) => serializeProductDoc(d)));
   } catch (e) {
@@ -5322,7 +5324,13 @@ app.post('/api/admin/product-drafts/:draftId/publish', mongoReady, adminKeyRequi
       const $set = buildProductUpdateSet(payload);
       await Product.findByIdAndUpdate(productId, { $set }, { new: false });
     } else {
-      await Product.create({ _id: productId, ...payload });
+      const cat = String(payload.category || '').trim();
+      const maxRow = cat
+        ? await Product.find({ category: cat }).sort({ displayOrder: -1, _id: -1 }).select('displayOrder').limit(1).lean()
+        : [];
+      const maxVal = maxRow?.[0]?.displayOrder != null ? Number(maxRow[0].displayOrder) : 0;
+      const nextOrder = Number.isFinite(maxVal) ? maxVal + 10 : 10;
+      await Product.create({ _id: productId, ...payload, displayOrder: nextOrder });
     }
 
     await ProductDraft.updateOne({ _id: draftId }, { $set: { status, publishedProductId: productId } });
@@ -5340,6 +5348,12 @@ app.post('/api/products', mongoReady, async (req, res) => {
     const body = req.body;
     const id = body.id || `p${Date.now()}`;
     const forcedCodPrice = Number(body.price);
+    const cat = String(body.category || '').trim();
+    const maxRow = cat
+      ? await Product.find({ category: cat }).sort({ displayOrder: -1, _id: -1 }).select('displayOrder').limit(1).lean()
+      : [];
+    const maxVal = maxRow?.[0]?.displayOrder != null ? Number(maxRow[0].displayOrder) : 0;
+    const nextOrder = Number.isFinite(maxVal) ? maxVal + 10 : 10;
     const doc = await Product.create({
       _id: id,
       name: body.name,
@@ -5352,6 +5366,7 @@ app.post('/api/products', mongoReady, async (req, res) => {
       images: Array.isArray(body.images) && body.images.length ? body.images : ['https://images.unsplash.com/photo-1553062407-98d43420e9e7?w=600'],
       category: body.category,
       subcategory: body.subcategory,
+      displayOrder: nextOrder,
       sizes: body.sizes,
       variantOptions: normalizeVariantOptionsFromBody(body.variantOptions),
       variants: body.variants,
@@ -5385,6 +5400,59 @@ app.post('/api/products', mongoReady, async (req, res) => {
       return;
     }
     res.status(500).json({ error: 'Failed to create product' });
+  }
+});
+
+// Admin: bulk reorder products within a category (manual displayOrder).
+app.patch('/api/admin/products/reorder', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const category = String(body?.category || '').trim();
+    const orderedIdsRaw = Array.isArray(body?.orderedIds) ? body.orderedIds : [];
+    const orderedIds = orderedIdsRaw.map((x) => String(x || '').trim()).filter(Boolean);
+
+    if (!category) {
+      res.status(400).json({ error: 'category is required' });
+      return;
+    }
+    if (orderedIds.length < 2) {
+      res.status(400).json({ error: 'orderedIds must include at least 2 product ids' });
+      return;
+    }
+    if (orderedIds.length > 5000) {
+      res.status(400).json({ error: 'orderedIds is too large' });
+      return;
+    }
+
+    const unique = Array.from(new Set(orderedIds));
+    if (unique.length !== orderedIds.length) {
+      res.status(400).json({ error: 'orderedIds must be unique' });
+      return;
+    }
+
+    const existing = await Product.find({ _id: { $in: orderedIds } }).select('_id category').lean();
+    if (existing.length !== orderedIds.length) {
+      res.status(400).json({ error: 'Some product ids were not found' });
+      return;
+    }
+    const badCat = existing.find((p) => String(p?.category || '').trim() !== category);
+    if (badCat) {
+      res.status(400).json({ error: 'All products must belong to the provided category' });
+      return;
+    }
+
+    const ops = orderedIds.map((id, idx) => ({
+      updateOne: {
+        filter: { _id: id, category },
+        update: { $set: { displayOrder: (idx + 1) * 10 } },
+      },
+    }));
+
+    const r = await Product.bulkWrite(ops, { ordered: false });
+    res.json({ ok: true, updated: Number(r?.modifiedCount || 0) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to reorder products' });
   }
 });
 
@@ -5749,6 +5817,7 @@ async function syncOrderAdminFlags(orderId) {
 }
 
 const MIGRATION_FIX_PREPAID_AMOUNT_DUE_ID = 'fix_prepaid_amount_due_v1';
+const MIGRATION_PRODUCT_DISPLAY_ORDER_ID = 'product_display_order_v1';
 
 /**
  * Legacy bug: some Razorpay-paid orders stored amountDue === total (same as amountPaid).
@@ -5784,6 +5853,99 @@ async function runOneTimeOrderMigrations() {
   } catch (e) {
     if (e && e.code === 11000) return;
     console.error('Order migration failed:', e);
+  }
+}
+
+async function runOneTimeProductMigrations() {
+  if (mongoose.connection.readyState !== 1) return;
+  try {
+    const already = await AppMigration.findById(MIGRATION_PRODUCT_DISPLAY_ORDER_ID).lean();
+    if (already) return;
+
+    const cats = await Product.distinct('category');
+    const categories = (Array.isArray(cats) ? cats : []).map((c) => String(c || '').trim()).filter(Boolean);
+
+    let updated = 0;
+    let repaired = 0;
+
+    for (const cat of categories) {
+      const docs = await Product.find({ category: cat }).select('_id category displayOrder').lean();
+      if (!docs.length) continue;
+
+      const norm = docs.map((d) => {
+        const v = d?.displayOrder;
+        const n = v != null ? Number(v) : NaN;
+        const ok = Number.isFinite(n);
+        return { id: String(d._id), n: ok ? n : null };
+      });
+
+      const hasMissing = norm.some((x) => x.n == null);
+      const seen = new Set();
+      let hasDup = false;
+      for (const x of norm) {
+        if (x.n == null) continue;
+        const k = String(x.n);
+        if (seen.has(k)) {
+          hasDup = true;
+          break;
+        }
+        seen.add(k);
+      }
+
+      // Backfill only missing values, preserving existing order where possible.
+      if (hasMissing && !hasDup) {
+        const max = norm.reduce((m, x) => (x.n != null && x.n > m ? x.n : m), 0);
+        let next = Number.isFinite(max) ? max + 10 : 10;
+        const ops = [];
+        for (const x of norm) {
+          if (x.n != null) continue;
+          ops.push({
+            updateOne: {
+              filter: { _id: x.id, $or: [{ displayOrder: { $exists: false } }, { displayOrder: null }] },
+              update: { $set: { displayOrder: next } },
+            },
+          });
+          next += 10;
+        }
+        if (ops.length) {
+          const r = await Product.bulkWrite(ops, { ordered: false });
+          updated += Number(r?.modifiedCount || 0);
+        }
+        continue;
+      }
+
+      // Repair: resequence the whole category deterministically.
+      repaired += 1;
+      const stable = docs
+        .map((d) => {
+          const n = d?.displayOrder != null ? Number(d.displayOrder) : NaN;
+          return { id: String(d._id), n: Number.isFinite(n) ? n : null };
+        })
+        .sort((a, b) => {
+          if (a.n != null && b.n != null && a.n !== b.n) return a.n - b.n;
+          if (a.n != null && b.n == null) return -1;
+          if (a.n == null && b.n != null) return 1;
+          return a.id.localeCompare(b.id);
+        });
+
+      const ops = stable.map((x, idx) => ({
+        updateOne: {
+          filter: { _id: x.id },
+          update: { $set: { displayOrder: (idx + 1) * 10 } },
+        },
+      }));
+      if (ops.length) {
+        const r = await Product.bulkWrite(ops, { ordered: false });
+        updated += Number(r?.modifiedCount || 0);
+      }
+    }
+
+    await AppMigration.create({ _id: MIGRATION_PRODUCT_DISPLAY_ORDER_ID, ranAt: new Date() });
+    logJson('info', 'migration.product_display_order', { categories: categories.length, updated, repairedCategories: repaired });
+    console.log(`Migration ${MIGRATION_PRODUCT_DISPLAY_ORDER_ID}: done (updated=${updated}, repaired=${repaired})`);
+  } catch (e) {
+    if (e && e.code === 11000) return;
+    console.error('Product migration failed:', e);
   }
 }
 
@@ -7562,6 +7724,7 @@ async function main() {
       await seedIfEmpty();
       await seedDisposableDomainsIfEmpty();
       await runOneTimeOrderMigrations();
+      await runOneTimeProductMigrations();
     } catch (e) {
       console.error('MongoDB connection failed:', e.message);
     }
