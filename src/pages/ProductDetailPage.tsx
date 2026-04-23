@@ -453,6 +453,7 @@ export default function ProductDetailPage() {
             productId={product.id}
             images={galleryImages}
             productName={product.name}
+            outOfStock={!inStock}
             resetKey={hasVariantModel ? selectedVariantKey : selectedVariant}
           />
 

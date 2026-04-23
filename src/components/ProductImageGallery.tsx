@@ -7,6 +7,7 @@ type Props = {
   productId: string;
   images: string[] | undefined;
   productName: string;
+  outOfStock?: boolean;
   className?: string;
   resetKey?: string;
 };
@@ -15,6 +16,7 @@ export default function ProductImageGallery({
   productId,
   images,
   productName,
+  outOfStock = false,
   className,
   resetKey = '',
 }: Props) {
@@ -102,6 +104,24 @@ export default function ProductImageGallery({
             )}
             loading="eager"
           />
+
+          {/* Out of stock stamp */}
+          {outOfStock && (
+            <div className="absolute inset-0 pointer-events-none">
+              <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rotate-[-18deg]">
+                <div className="rounded-full border-4 border-red-600/80 bg-transparent w-40 h-40 sm:w-48 sm:h-48 flex items-center justify-center">
+                  <div className="absolute inset-2 rounded-full border-2 border-red-600/35" />
+                </div>
+                <div className="absolute left-1/2 top-1/2 w-[14rem] sm:w-[16rem] -translate-x-1/2 -translate-y-1/2">
+                  <div className="bg-white/80 backdrop-blur-sm border-2 border-red-600/80 px-4 py-2 rounded-md shadow-sm">
+                    <div className="text-center text-red-700 font-extrabold tracking-wider text-lg sm:text-xl">
+                      OUT OF STOCK
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Nav arrows – hidden on mobile (use swipe), shown on md+ */}
           {display.length > 1 && (
