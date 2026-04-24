@@ -570,9 +570,6 @@ export default function ProductDetailPage() {
               </div>
             </div>
 
-            {/* Description */}
-            <p className="text-muted-foreground text-sm leading-relaxed">{product.description}</p>
-
             {/* Size selector */}
             {product.sizes && product.sizes.length > 0 && (
               <div className="space-y-2">

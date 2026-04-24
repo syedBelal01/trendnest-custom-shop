@@ -53,7 +53,7 @@ export const CUSTOM_PRINT_MOCKUPS: Record<
   mug: {
     White: {
       Default: {
-        mockupUrl: '',
+        mockupUrl: 'https://res.cloudinary.com/diclcqwnm/image/upload/v1776671996/trendnest/products/qolirgv4eu0n7qfghihe.jpg',
         // Centered on mug body area.
         printArea: { leftPct: 28, topPct: 32, widthPct: 44, heightPct: 36 },
       },
