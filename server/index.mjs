@@ -303,6 +303,29 @@ async function shiprocketFetch(path, { method = 'GET', headers, body, retry401 =
   }
 }
 
+async function cancelShiprocketOrderById(shiprocketOrderId, source = 'system') {
+  const idNum = Number(shiprocketOrderId);
+  if (!Number.isFinite(idNum) || idNum <= 0) {
+    logJson('warn', 'shiprocket.cancel_skipped_missing_id', { shiprocketOrderId: shiprocketOrderId ?? null, source });
+    return { ok: false, skipped: true };
+  }
+  logJson('info', 'shiprocket.cancel_attempt', { shiprocketOrderId: idNum, source });
+  const { res, data } = await shiprocketFetch('/orders/cancel', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids: [idNum] }),
+  });
+  logJson('info', 'shiprocket.cancel_response', {
+    shiprocketOrderId: idNum,
+    source,
+    status: res.status,
+    ok: res.ok,
+    message: typeof data?.message === 'string' ? data.message : undefined,
+    responseKeys: data && typeof data === 'object' ? Object.keys(data) : typeof data,
+  });
+  return { ok: res.ok, status: res.status, data };
+}
+
 // Keep the dev API server alive even if Mongo drops/reconnects.
 // Routes guarded by `mongoReady` will return 503 while disconnected.
 process.on('unhandledRejection', (reason) => {
@@ -3958,151 +3981,148 @@ app.post('/api/me/orders/:id/cancel', mongoReady, requireAuth, async (req, res) 
       return;
     }
 
-    // COD: no refund processing.
-    const pm = String(fresh.paymentMethod || '');
-    const ps = String(fresh.paymentStatus || '');
-    if (pm !== 'razorpay') {
-      res.json({
-        ok: true,
-        order: serializeOrderForClient(fresh),
-        message: 'Order cancelled.',
-      });
-      return;
-    }
-
-    // Prepaid refund (Razorpay): only if paid.
-    if (ps !== 'paid') {
-      res.json({
-        ok: true,
-        order: serializeOrderForClient(fresh),
-        message: 'Order cancelled. No payment captured, so no refund is required.',
-      });
-      return;
-    }
-
-    // Avoid duplicate refunds.
-    const rf = fresh.cancellationRefund;
-    if (rf && typeof rf === 'object') {
-      const st = String(rf.status || '');
-      if (st === 'processing' || st === 'completed') {
-        res.json({
-          ok: true,
-          order: serializeOrderForClient(fresh),
-          message: 'Order cancelled. Refund is being processed.',
-        });
-        return;
-      }
-    }
-
-    const paymentId = String(fresh.razorpayPaymentId || '').trim();
-    if (!paymentId) {
-      await Order.updateOne(
-        { _id: id },
-        {
-          $set: {
-            cancellationRefund: {
-              kind: 'razorpay',
-              status: 'failed',
-              amount: Number(fresh.amountPaid || fresh.total || 0) || undefined,
-              currency: 'INR',
-              razorpayPaymentId: '',
-              razorpayRefundId: '',
-              error: 'Missing razorpayPaymentId on order',
-              processedAt: new Date(),
-            },
-          },
-        }
-      );
-      fresh = await Order.findById(id).lean();
-      res.status(502).json({ error: 'Refund could not be initiated (missing payment reference). Please contact support.', order: serializeOrderForClient(fresh) });
-      return;
-    }
-
-    const refundRupees = Math.max(0, Number(fresh.amountPaid || 0) || Number(fresh.total || 0) || 0);
-    const amountPaise = Math.round(refundRupees * 100);
-    if (!(amountPaise > 0)) {
-      res.json({
-        ok: true,
-        order: serializeOrderForClient(fresh),
-        message: 'Order cancelled. Refund amount is zero.',
-      });
-      return;
-    }
-
-    // Mark as processing before external call (idempotency).
-    await Order.updateOne(
-      { _id: id, 'cancellationRefund.status': { $ne: 'processing' } },
-      {
-        $set: {
-          cancellationRefund: {
-            kind: 'razorpay',
-            status: 'processing',
-            amount: refundRupees,
-            currency: 'INR',
-            razorpayPaymentId: paymentId,
-            razorpayRefundId: '',
-            error: '',
-            processedAt: undefined,
-          },
-        },
-      }
-    );
-
-    let refundResp;
-    try {
-      refundResp = await razorpay.payments.refund(paymentId, { amount: amountPaise, speed: 'normal' });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      logJson('error', 'order.cancel_refund_razorpay_failed', { orderId: id, paymentId, message: msg });
-      await Order.updateOne(
-        { _id: id },
-        {
-          $set: {
-            cancellationRefund: {
-              kind: 'razorpay',
-              status: 'failed',
-              amount: refundRupees,
-              currency: 'INR',
-              razorpayPaymentId: paymentId,
-              razorpayRefundId: '',
-              error: msg,
-              processedAt: new Date(),
-            },
-          },
-        }
-      );
-      fresh = await Order.findById(id).lean();
-      res.status(502).json({
-        error: 'Order cancelled, but refund initiation failed. Please contact support.',
-        order: serializeOrderForClient(fresh),
-      });
-      return;
-    }
-
-    const refundId = refundResp?.id ? String(refundResp.id) : '';
-    await Order.updateOne(
-      { _id: id },
-      {
-        $set: {
-          cancellationRefund: {
-            kind: 'razorpay',
-            status: 'completed',
-            amount: refundRupees,
-            currency: 'INR',
-            razorpayPaymentId: paymentId,
-            razorpayRefundId: refundId,
-            error: '',
-            processedAt: new Date(),
-          },
-        },
-      }
-    );
-
-    fresh = await Order.findById(id).lean();
+    // Respond immediately after local cancellation. Refund/Shiprocket actions run in background.
     res.json({
       ok: true,
       order: serializeOrderForClient(fresh),
-      message: 'Order cancelled. Refund initiated. Amount will be credited within 2–5 working days.',
+      message: 'Order cancelled successfully. If paid online, refund will be processed within 5–7 working days.',
+    });
+
+    setImmediate(() => {
+      void (async () => {
+        const orderId = id;
+        try {
+          const latest = await Order.findById(orderId).lean();
+          if (!latest) return;
+          if (String(latest.status || '') !== 'cancelled') return;
+
+          // --- Razorpay refund (initiate in background) ---
+          const pm = String(latest.paymentMethod || '');
+          const ps = String(latest.paymentStatus || '');
+          if (pm === 'razorpay' && ps === 'paid') {
+            const rf = latest.cancellationRefund;
+            const st = rf && typeof rf === 'object' ? String(rf.status || '') : '';
+            if (st !== 'processing' && st !== 'completed') {
+              const paymentId = String(latest.razorpayPaymentId || '').trim();
+              const refundRupees = Math.max(0, Number(latest.amountPaid || 0) || Number(latest.total || 0) || 0);
+              const amountPaise = Math.round(refundRupees * 100);
+
+              if (!paymentId) {
+                logJson('error', 'razorpay.refund_failed', { orderId, message: 'Missing razorpayPaymentId on order' });
+                await Order.updateOne(
+                  { _id: orderId },
+                  {
+                    $set: {
+                      cancellationRefund: {
+                        kind: 'razorpay',
+                        status: 'failed',
+                        amount: refundRupees || undefined,
+                        currency: 'INR',
+                        razorpayPaymentId: '',
+                        razorpayRefundId: '',
+                        error: 'Missing razorpayPaymentId on order',
+                        processedAt: new Date(),
+                      },
+                    },
+                  }
+                );
+              } else if (amountPaise > 0) {
+                // Mark processing before external call (idempotency).
+                await Order.updateOne(
+                  { _id: orderId, 'cancellationRefund.status': { $ne: 'processing' } },
+                  {
+                    $set: {
+                      cancellationRefund: {
+                        kind: 'razorpay',
+                        status: 'processing',
+                        amount: refundRupees,
+                        currency: 'INR',
+                        razorpayPaymentId: paymentId,
+                        razorpayRefundId: '',
+                        error: '',
+                        processedAt: undefined,
+                      },
+                    },
+                  }
+                );
+
+                logJson('info', 'razorpay.refund_attempt', {
+                  orderId,
+                  paymentIdPrefix: paymentId.slice(0, 8),
+                  amountPaise,
+                });
+
+                try {
+                  const razorpay = new Razorpay({ key_id: String(RAZORPAY_KEY_ID), key_secret: String(RAZORPAY_KEY_SECRET) });
+                  const refundResp = await razorpay.payments.refund(paymentId, {
+                    amount: amountPaise,
+                    speed: 'normal',
+                    notes: { orderId, source: 'user_cancel' },
+                  });
+                  const refundId = refundResp?.id ? String(refundResp.id) : '';
+                  logJson('info', 'razorpay.refund_success', { orderId, refundId: refundId || undefined });
+                  await Order.updateOne(
+                    { _id: orderId },
+                    {
+                      $set: {
+                        cancellationRefund: {
+                          kind: 'razorpay',
+                          status: 'completed',
+                          amount: refundRupees,
+                          currency: 'INR',
+                          razorpayPaymentId: paymentId,
+                          razorpayRefundId: refundId,
+                          error: '',
+                          processedAt: new Date(),
+                        },
+                      },
+                    }
+                  );
+                } catch (err) {
+                  const msg = err instanceof Error ? err.message : String(err);
+                  logJson('error', 'razorpay.refund_failed', { orderId, message: msg });
+                  await Order.updateOne(
+                    { _id: orderId },
+                    {
+                      $set: {
+                        cancellationRefund: {
+                          kind: 'razorpay',
+                          status: 'failed',
+                          amount: refundRupees,
+                          currency: 'INR',
+                          razorpayPaymentId: paymentId,
+                          razorpayRefundId: '',
+                          error: msg,
+                          processedAt: new Date(),
+                        },
+                      },
+                    }
+                  );
+                }
+              }
+            }
+          }
+
+          // --- Shiprocket cancel (best-effort) ---
+          const safe = await Order.findById(orderId).lean();
+          if (!safe) return;
+          if (String(safe.status || '') !== 'cancelled') return;
+          const shippedOrLater = String(safe.status || '') === 'shipped' || String(safe.status || '') === 'delivered';
+          if (shippedOrLater) return;
+          const srId = safe?.shipping?.shiprocketOrderId;
+          if (!srId) {
+            logJson('warn', 'shiprocket.cancel_skipped_missing_id', { orderId, source: 'user_cancel' });
+            return;
+          }
+          try {
+            await cancelShiprocketOrderById(srId, 'user_cancel');
+          } catch (e) {
+            logJson('error', 'shiprocket.cancel_failed', { orderId, message: e instanceof Error ? e.message : String(e) });
+          }
+        } catch (e) {
+          logJson('error', 'order.cancel_background_error', { orderId: id, message: e instanceof Error ? e.message : String(e) });
+        }
+      })();
     });
   } catch (e) {
     console.error(e);
