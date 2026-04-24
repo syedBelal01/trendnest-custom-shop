@@ -1771,6 +1771,15 @@ async function createShiprocketShipmentForOrderDoc(orderLean) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
+
+  logJson('info', 'shiprocket.adhoc_create_response', {
+    orderId,
+    status: createRes.status,
+    ok: createRes.ok,
+    message: typeof createData?.message === 'string' ? createData.message : undefined,
+    responseKeys: createData && typeof createData === 'object' ? Object.keys(createData) : typeof createData,
+  });
+
   if (!createRes.ok) {
     const msg = typeof createData?.message === 'string' ? createData.message : 'Shiprocket order creation failed';
     const err = new Error(msg);
@@ -6405,6 +6414,7 @@ app.post('/api/orders', mongoReady, async (req, res) => {
       void (async () => {
         try {
           await finalizePendingOrderShipping(orderId);
+          await ensureShiprocketShipmentForOrderId(orderId, 'system-cod');
           const leanForMail = (await Order.findById(orderId).lean()) || {};
           await (async () => {
             await sendOrderEmails({ ...leanForMail, _id: orderId });
@@ -6822,6 +6832,7 @@ app.post('/api/payments/razorpay/verify', mongoReady, async (req, res) => {
       void (async () => {
         try {
           await finalizePendingOrderShipping(orderId);
+          await ensureShiprocketShipmentForOrderId(orderId, 'system-razorpay');
           const leanForMail = (await Order.findById(orderId).lean()) || {};
           await (async () => {
             await sendOrderEmails({ ...leanForMail, _id: orderId });
