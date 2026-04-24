@@ -15,6 +15,36 @@ import MongoStore from 'connect-mongo';
 import { normalizeIndianMobileOrThrow, normalizeIndianMobileOptional } from './indianPhone.mjs';
 import { resolveMx } from 'dns/promises';
 import validator from 'validator';
+import sanitizeHtml from 'sanitize-html';
+
+function sanitizeProductDescription(raw) {
+  const s = String(raw ?? '');
+  if (!s.trim()) return '';
+  const looksLikeHtml = /<\/?[a-z][\s\S]*>/i.test(s);
+  if (!looksLikeHtml) return s.trim();
+  return sanitizeHtml(s, {
+    allowedTags: ['p', 'br', 'strong', 'em', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'blockquote', 'code', 'pre', 'a'],
+    allowedAttributes: {
+      a: ['href', 'rel', 'target'],
+    },
+    allowedSchemes: ['http', 'https', 'mailto'],
+    allowProtocolRelative: false,
+    transformTags: {
+      a: (tagName, attribs) => {
+        const href = String(attribs?.href ?? '').trim();
+        if (!href) return { tagName: 'a', attribs: { rel: 'noopener noreferrer nofollow', target: '_blank' } };
+        return {
+          tagName: 'a',
+          attribs: {
+            href,
+            rel: 'noopener noreferrer nofollow',
+            target: '_blank',
+          },
+        };
+      },
+    },
+  }).trim();
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Always load .env from project root (folder above server/), not only from process.cwd()
@@ -5089,7 +5119,7 @@ function draftToProductPayload(draft) {
 
   const base = {
     name: String(d.name ?? '').trim(),
-    description: String(d.description ?? '').trim(),
+    description: sanitizeProductDescription(d.description ?? ''),
     originalPrice: d.originalPrice != null && d.originalPrice !== '' ? Number(d.originalPrice) : undefined,
     category: String(draft.categoryMain ?? '').trim(),
     subcategory: String(draft.subcategory ?? '').trim(),
@@ -5357,7 +5387,7 @@ app.post('/api/products', mongoReady, async (req, res) => {
     const doc = await Product.create({
       _id: id,
       name: body.name,
-      description: body.description ?? '',
+      description: sanitizeProductDescription(body.description ?? ''),
       sku: body.sku != null ? String(body.sku) : '',
       price: Number(body.price),
       onlinePrice: body.onlinePrice != null ? Number(body.onlinePrice) : undefined,
@@ -5463,7 +5493,7 @@ app.patch('/api/admin/products/reorder', mongoReady, adminKeyRequired, async (re
 function buildProductUpdateSet(src) {
   const out = {};
   if (src.name !== undefined) out.name = String(src.name);
-  if (src.description !== undefined) out.description = String(src.description ?? '');
+  if (src.description !== undefined) out.description = sanitizeProductDescription(src.description ?? '');
   if (src.sku !== undefined) out.sku = String(src.sku ?? '');
   if (src.price !== undefined) {
     const n = Number(src.price);

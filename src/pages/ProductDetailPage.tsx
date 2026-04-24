@@ -19,6 +19,7 @@ import { Input } from '@/components/ui/input';
 import { Helmet } from 'react-helmet-async';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useDelayedFlag } from '@/hooks/useDelayedFlag';
+import { RichTextRenderer } from '@/components/RichTextRenderer';
 
 const CANONICAL_BASE = 'https://trendnest99.in';
 
@@ -706,9 +707,11 @@ export default function ProductDetailPage() {
                 <TabsTrigger value="shipping" className="text-xs sm:text-sm whitespace-nowrap">Shipping &amp; Returns</TabsTrigger>
               </TabsList>
               <TabsContent value="description" className="mt-4">
-                <p className="text-sm text-muted-foreground leading-relaxed">
-                  {product.description || 'No description provided.'}
-                </p>
+                {product.description ? (
+                  <RichTextRenderer value={product.description} className="text-sm text-muted-foreground leading-relaxed" />
+                ) : (
+                  <p className="text-sm text-muted-foreground leading-relaxed">No description provided.</p>
+                )}
               </TabsContent>
               <TabsContent value="specs" className="mt-4">
                 {specRows.length > 0 ? (

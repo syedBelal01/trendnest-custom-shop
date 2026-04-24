@@ -21,6 +21,7 @@ import { Trash2, Edit, Plus, Upload, ImageIcon, GripVertical } from 'lucide-reac
 import { toast } from 'sonner';
 import { processProductImageFile } from '@/lib/processProductImage';
 import { ProductSpecificationsCard } from '@/components/admin/ProductSpecificationsCard';
+import { RichTextEditor } from '@/components/admin/RichTextEditor';
 import { VariantOptionsCard } from '@/components/admin/VariantOptionsCard';
 import { createProductDraftApi } from '@/lib/adminDraftsApi';
 import { useNavigate } from 'react-router-dom';
@@ -1121,7 +1122,13 @@ export default function AdminProducts() {
                   <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => applyPreset('customCup')}>Custom cup</Button>
                 </div>
                 <Input placeholder="Product Name" value={editing.name || ''} onChange={e => setEditing(p => ({ ...p, name: e.target.value }))} />
-                <Input placeholder="Description" value={editing.description || ''} onChange={e => setEditing(p => ({ ...p, description: e.target.value }))} />
+                <div className="space-y-1">
+                  <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Description (formatted)</div>
+                  <RichTextEditor
+                    value={editing.description || ''}
+                    onChange={(html) => setEditing(p => ({ ...p, description: html }))}
+                  />
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <Input type="number" placeholder="Price (₹)" value={editing.price || ''} onChange={e => setEditing(p => ({ ...p, price: +e.target.value }))} />
                   <Input type="number" placeholder="Original Price" value={editing.originalPrice || ''} onChange={e => setEditing(p => ({ ...p, originalPrice: +e.target.value || undefined }))} />

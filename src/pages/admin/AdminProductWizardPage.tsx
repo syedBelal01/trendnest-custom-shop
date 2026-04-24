@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ProductSpecificationsCard } from '@/components/admin/ProductSpecificationsCard';
+import { RichTextEditor, stripHtmlToText } from '@/components/admin/RichTextEditor';
 import { uploadProductImage } from '@/lib/api';
 import { processProductImageFile } from '@/lib/processProductImage';
 import { ADMIN_CATEGORY_TREE, ADMIN_MAIN_CATEGORIES } from '@/data/adminCategories';
@@ -338,11 +339,13 @@ function WizardInner({ step }: { step: number }) {
                 {/* COD price removed: regular price is used for COD */}
               </div>
 
-              <Input
-                placeholder="Description (short and clear)"
-                value={description}
-                onChange={e => updateDraftLocal({ details: { ...details, description: e.target.value } })}
-              />
+              <div className="space-y-1">
+                <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Description (formatted)</div>
+                <RichTextEditor
+                  value={description}
+                  onChange={(html) => updateDraftLocal({ details: { ...details, description: html } })}
+                />
+              </div>
 
               <label className="flex items-center gap-2 text-sm cursor-pointer">
                 <input
@@ -727,7 +730,7 @@ function VariantsStep() {
   const hasVariants = !!variants.hasVariants;
   const details = (draft?.details ?? {}) as Record<string, unknown>;
   const inheritedName = String(details.name ?? '');
-  const inheritedDesc = String(details.description ?? '');
+  const inheritedDesc = stripHtmlToText(String(details.description ?? ''));
   const [navBusy, setNavBusy] = useState(false);
 
   const [typeName, setTypeName] = useState('Size');
