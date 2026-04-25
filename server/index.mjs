@@ -4419,21 +4419,30 @@ app.get('/api/products/:id/reviews', mongoReady, async (req, res) => {
     const q = { productId };
     let cursorDate = null;
     let cursorId = null;
+    let cursorRaw = '';
     if (cursor) {
       // Backwards compatible cursor parsing:
       // - Old: ISO date string only
       // - New: "<ISO>|<reviewId>" (tie-breaker for same timestamps)
       const [datePart, idPart] = cursor.split('|');
-      const d = new Date(datePart || cursor);
+      cursorRaw = String(datePart || cursor).trim();
+      const d = new Date(cursorRaw);
       if (!Number.isNaN(d.getTime())) cursorDate = d;
       if (idPart && String(idPart).trim()) cursorId = String(idPart).trim();
 
       if (cursorDate) {
         // Stable pagination even if many reviews share the same createdAt.
-        q.$or = [
+        // Also include string-based comparisons for legacy rows where createdAt may have been stored as a string.
+        const or = [
           { createdAt: { $lt: cursorDate } },
+          ...(cursorRaw ? [{ createdAt: { $lt: cursorRaw } }] : []),
           ...(cursorId ? [{ createdAt: cursorDate, _id: { $lt: cursorId } }] : []),
+          ...(cursorId && cursorRaw ? [{ createdAt: cursorRaw, _id: { $lt: cursorId } }] : []),
         ];
+        q.$or = or;
+      } else if (cursorRaw) {
+        // If date parsing fails, fall back to lexicographic ISO string compare.
+        q.createdAt = { $lt: cursorRaw };
       }
     }
 
