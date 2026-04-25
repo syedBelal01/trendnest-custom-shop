@@ -4417,18 +4417,33 @@ app.get('/api/products/:id/reviews', mongoReady, async (req, res) => {
     const cursor = req.query?.cursor ? String(req.query.cursor) : '';
 
     const q = { productId };
+    let cursorDate = null;
+    let cursorId = null;
     if (cursor) {
-      const d = new Date(cursor);
-      if (!Number.isNaN(d.getTime())) q.createdAt = { $lt: d };
+      // Backwards compatible cursor parsing:
+      // - Old: ISO date string only
+      // - New: "<ISO>|<reviewId>" (tie-breaker for same timestamps)
+      const [datePart, idPart] = cursor.split('|');
+      const d = new Date(datePart || cursor);
+      if (!Number.isNaN(d.getTime())) cursorDate = d;
+      if (idPart && String(idPart).trim()) cursorId = String(idPart).trim();
+
+      if (cursorDate) {
+        // Stable pagination even if many reviews share the same createdAt.
+        q.$or = [
+          { createdAt: { $lt: cursorDate } },
+          ...(cursorId ? [{ createdAt: cursorDate, _id: { $lt: cursorId } }] : []),
+        ];
+      }
     }
 
-    const docs = await Review.find(q).sort({ createdAt: -1 }).limit(limit + 1).lean();
+    const docs = await Review.find(q).sort({ createdAt: -1, _id: -1 }).limit(limit + 1).lean();
     const hasMore = docs.length > limit;
     const slice = hasMore ? docs.slice(0, limit) : docs;
     const last = slice[slice.length - 1];
     const nextCursor =
       hasMore && last
-        ? (last.createdAt instanceof Date ? last.createdAt.toISOString() : String(last.createdAt))
+        ? `${last.createdAt instanceof Date ? last.createdAt.toISOString() : String(last.createdAt)}|${String(last._id)}`
         : null;
 
     res.json({
