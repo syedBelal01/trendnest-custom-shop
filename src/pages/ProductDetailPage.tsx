@@ -876,7 +876,15 @@ export default function ProductDetailPage() {
 
             {reviewsCursor && (
               <div className="mt-4">
-                <Button variant="outline" onClick={() => void loadMoreReviews()} disabled={reviewsLoading} className="w-full sm:w-auto rounded-xl">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowAllReviews(true);
+                    void loadMoreReviews();
+                  }}
+                  disabled={reviewsLoading}
+                  className="w-full sm:w-auto rounded-xl"
+                >
                   {reviewsLoading ? 'Loading…' : 'See More Reviews'}
                 </Button>
               </div>
