@@ -298,16 +298,48 @@ export default function ProductDetailPage() {
     let mounted = true;
     setReviewsLoading(true);
     void (async () => {
-      try { const r = await fetchProductReviewsApi({ productId: product.id, limit: 5 }); if (!mounted) return; setReviews(r.reviews); setReviewsCursor(r.nextCursor); }
+      try {
+        const r = await fetchProductReviewsApi({ productId: product.id, limit: 5 });
+        console.log('[reviews:init]', { productId: product.id, got: r.reviews?.length ?? 0, nextCursor: r.nextCursor });
+        if (!mounted) return;
+        setReviews(r.reviews);
+        setReviewsCursor(r.nextCursor);
+      }
       finally { if (mounted) setReviewsLoading(false); }
     })();
     return () => { mounted = false; };
   }, [product?.id]);
 
   const loadMoreReviews = async () => {
-    if (!product?.id || !reviewsCursor || reviewsLoading) return;
+    console.log('[reviews:loadMore:clicked]', {
+      productId: product?.id,
+      reviewsCursor,
+      reviewsLoading,
+      currentCount: reviews.length,
+    });
+    if (!product?.id || !reviewsCursor || reviewsLoading) {
+      console.log('[reviews:loadMore:skipped]', {
+        reason: !product?.id ? 'missing_product' : !reviewsCursor ? 'missing_cursor' : 'already_loading',
+      });
+      return;
+    }
     setReviewsLoading(true);
-    try { const r = await fetchProductReviewsApi({ productId: product.id, limit: 10, cursor: reviewsCursor }); setReviews(prev => [...prev, ...r.reviews]); setReviewsCursor(r.nextCursor); }
+    try {
+      const before = reviews.length;
+      const r = await fetchProductReviewsApi({ productId: product.id, limit: 10, cursor: reviewsCursor });
+      console.log('[reviews:loadMore:response]', {
+        productId: product.id,
+        before,
+        got: r.reviews?.length ?? 0,
+        nextCursor: r.nextCursor,
+      });
+      setReviews(prev => {
+        const merged = [...prev, ...(r.reviews ?? [])];
+        console.log('[reviews:loadMore:merged]', { before: prev.length, after: merged.length });
+        return merged;
+      });
+      setReviewsCursor(r.nextCursor);
+    }
     finally { setReviewsLoading(false); }
   };
 
@@ -879,6 +911,12 @@ export default function ProductDetailPage() {
                 <Button
                   variant="outline"
                   onClick={() => {
+                    console.log('[reviews:seeMoreButton]', {
+                      productId: product?.id,
+                      cursor: reviewsCursor,
+                      loading: reviewsLoading,
+                      count: reviews.length,
+                    });
                     setShowAllReviews(true);
                     void loadMoreReviews();
                   }}

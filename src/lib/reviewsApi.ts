@@ -25,7 +25,9 @@ export async function fetchProductReviewsApi(params: {
   const qs = new URLSearchParams();
   qs.set('limit', String(params.limit ?? 5));
   if (params.cursor) qs.set('cursor', params.cursor);
-  const res = await fetch(apiUrl(`/api/products/${encodeURIComponent(params.productId)}/reviews?${qs.toString()}`));
+  const res = await fetch(apiUrl(`/api/products/${encodeURIComponent(params.productId)}/reviews?${qs.toString()}`), {
+    cache: 'no-store',
+  });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Failed to load reviews');
   return { reviews: (data.reviews ?? []) as Review[], nextCursor: (data.nextCursor ?? null) as string | null };
