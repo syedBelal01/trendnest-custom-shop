@@ -3,7 +3,7 @@ import { useOrders } from '@/contexts/OrdersContext';
 import { OrderLineSnapshot, OrderStatus } from '@/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { downloadOrderInvoicePdf } from '@/lib/ordersApi';
+import { downloadOrderInvoicePdf, syncOrderShippingStatusAdmin } from '@/lib/ordersApi';
 import { Button } from '@/components/ui/button';
 import { FileDown } from 'lucide-react';
 
@@ -28,9 +28,10 @@ function itemDetail(i: OrderLineSnapshot): string {
 }
 
 export default function AdminOrders() {
-  const { orders, adminKeySet, updateOrderStatus, ordersLoading } = useOrders();
+  const { orders, adminKeySet, updateOrderStatus, ordersLoading, refreshOrders } = useOrders();
   const [filter, setFilter] = useState<string>('all');
   const [pdfBusy, setPdfBusy] = useState<string | null>(null);
+  const [syncBusy, setSyncBusy] = useState<string | null>(null);
 
   const updateStatus = async (id: string, status: OrderStatus) => {
     try {
@@ -50,6 +51,19 @@ export default function AdminOrders() {
       toast.error(e instanceof Error ? e.message : 'Download failed');
     } finally {
       setPdfBusy(null);
+    }
+  };
+
+  const onSyncStatus = async (id: string) => {
+    setSyncBusy(id);
+    try {
+      const updated = await syncOrderShippingStatusAdmin(id);
+      toast.success(`Synced: ${updated.status}`);
+      await refreshOrders();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Sync failed');
+    } finally {
+      setSyncBusy(null);
     }
   };
 
@@ -121,6 +135,15 @@ export default function AdminOrders() {
                   >
                     <FileDown className="h-3.5 w-3.5" />
                     {pdfBusy === o.id ? 'PDF…' : 'Invoice PDF'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={syncBusy === o.id}
+                    onClick={() => void onSyncStatus(o.id)}
+                  >
+                    {syncBusy === o.id ? 'Sync…' : 'Sync Status'}
                   </Button>
                   <Select value={o.status} onValueChange={(v: OrderStatus) => void updateStatus(o.id, v)}>
                     <SelectTrigger className="w-36 h-8 text-xs">

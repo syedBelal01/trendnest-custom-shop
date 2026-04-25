@@ -133,6 +133,7 @@ export async function fetchMyOrdersApi(): Promise<Order[]> {
     method: 'GET',
     credentials: 'include',
     headers: withAuthHeaders(),
+    cache: 'no-store',
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -146,6 +147,7 @@ export async function fetchMyOrderByIdApi(orderId: string): Promise<Order> {
     method: 'GET',
     credentials: 'include',
     headers: withAuthHeaders(),
+    cache: 'no-store',
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {

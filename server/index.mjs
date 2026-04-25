@@ -63,6 +63,11 @@ const SHIPROCKET_PASSWORD = process.env.SHIPROCKET_PASSWORD;
 const SHIPROCKET_WEBHOOK_SECRET = process.env.SHIPROCKET_WEBHOOK_SECRET;
 // Shiprocket "Webhook Token" field is sent as x-api-key header.
 const SHIPROCKET_WEBHOOK_TOKEN = process.env.SHIPROCKET_WEBHOOK_TOKEN;
+// If true, require and verify the signature header for webhooks.
+// Default false for backwards compatibility: Shiprocket commonly authenticates webhooks via x-api-key.
+const SHIPROCKET_WEBHOOK_REQUIRE_SIGNATURE = String(process.env.SHIPROCKET_WEBHOOK_REQUIRE_SIGNATURE || '')
+  .trim()
+  .toLowerCase() === 'true';
 const SHIPROCKET_PICKUP_LOCATION_NAME = process.env.SHIPROCKET_PICKUP_LOCATION_NAME;
 const SHIPROCKET_PICKUP_PINCODE = process.env.SHIPROCKET_PICKUP_PINCODE;
 const SHIPROCKET_HTTP_TIMEOUT_MS = Number(process.env.SHIPROCKET_HTTP_TIMEOUT_MS || 12_000);
@@ -2875,6 +2880,142 @@ app.post('/api/shipping/serviceability', async (req, res) => {
 });
 
 // Shiprocket tracking webhook (best-effort; keeps storefront status minimal).
+function shiprocketFirstObjectLike(...vals) {
+  for (const v of vals) {
+    if (v && typeof v === 'object' && !Array.isArray(v)) return v;
+  }
+  return {};
+}
+
+function shiprocketFirstString(...vals) {
+  for (const v of vals) {
+    if (typeof v === 'string' && v.trim()) return v.trim();
+    if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+  }
+  return '';
+}
+
+function shiprocketFirstNumber(...vals) {
+  for (const v of vals) {
+    if (typeof v === 'number' && Number.isFinite(v)) return v;
+    if (typeof v === 'string' && v.trim() && Number.isFinite(Number(v))) return Number(v);
+  }
+  return null;
+}
+
+function shiprocketExtractTrackingIds(body) {
+  const root = shiprocketFirstObjectLike(body);
+  const data = shiprocketFirstObjectLike(root?.data, root?.payload);
+  const inner = shiprocketFirstObjectLike(data?.data, data?.payload);
+  const b = root;
+  const d = data;
+  const i = inner;
+
+  const awb = shiprocketFirstString(
+    b?.awb,
+    b?.awb_code,
+    b?.tracking_number,
+    b?.trackingNumber,
+    d?.awb,
+    d?.awb_code,
+    d?.tracking_number,
+    i?.awb,
+    i?.awb_code,
+    i?.tracking_number
+  );
+
+  const shipmentId = shiprocketFirstNumber(
+    b?.shipment_id,
+    b?.shipmentId,
+    b?.shipment,
+    d?.shipment_id,
+    d?.shipmentId,
+    d?.shipment,
+    i?.shipment_id,
+    i?.shipmentId,
+    i?.shipment
+  );
+
+  const shiprocketOrderId = shiprocketFirstString(
+    b?.order_id,
+    b?.orderId,
+    b?.order_reference,
+    d?.order_id,
+    d?.orderId,
+    d?.order_reference,
+    i?.order_id,
+    i?.orderId,
+    i?.order_reference
+  );
+
+  const statusRaw = shiprocketFirstString(
+    b?.current_status,
+    b?.status,
+    b?.shipment_status,
+    d?.current_status,
+    d?.status,
+    d?.shipment_status,
+    i?.current_status,
+    i?.status,
+    i?.shipment_status
+  );
+
+  const timestampRaw = shiprocketFirstString(
+    b?.current_timestamp,
+    b?.timestamp,
+    b?.event_time,
+    d?.current_timestamp,
+    d?.timestamp,
+    d?.event_time,
+    i?.current_timestamp,
+    i?.timestamp,
+    i?.event_time
+  );
+
+  return { awb, shipmentId, shiprocketOrderId, statusRaw, timestampRaw };
+}
+
+function shiprocketParseEventTimeIso(raw) {
+  if (!raw) return null;
+  const dt = new Date(raw);
+  if (Number.isNaN(dt.getTime())) return null;
+  return dt.toISOString();
+}
+
+function shiprocketMapStatus(statusRaw) {
+  const status = String(statusRaw || '').trim().toLowerCase();
+  if (!status) return null;
+  // Most important: delivered must map reliably.
+  if (status.includes('delivered')) return 'delivered';
+  if (status.includes('shipment_created') || status.includes('shipment_request') || status.includes('packed')) return 'packed';
+  if (
+    status.includes('shipped') ||
+    status.includes('picked_up') ||
+    status.includes('picked') ||
+    status.includes('pickup') ||
+    status.includes('manifest') ||
+    status.includes('in transit') ||
+    status.includes('in_transit') ||
+    status.includes('out for delivery') ||
+    status.includes('out_for_delivery')
+  ) return 'shipped';
+  return null;
+}
+
+function orderStatusRank(s) {
+  return s === 'pending'
+    ? 0
+    : s === 'confirmed'
+      ? 0
+      : s === 'packed'
+        ? 1
+        : s === 'shipped'
+          ? 2
+          : s === 'delivered'
+            ? 3
+            : 0;
+}
+
 async function handleShiprocketTrackingWebhook(req, res) {
   try {
     // Auth: Shiprocket UI supports a webhook token, sent as x-api-key.
@@ -2883,6 +3024,7 @@ async function handleShiprocketTrackingWebhook(req, res) {
     const sentToken = String(req.get('x-api-key') || req.get('X-Api-Key') || '').trim();
     const secret = String(SHIPROCKET_WEBHOOK_SECRET || '').trim();
     const sig = String(req.get('x-shiprocket-signature') || req.get('X-Shiprocket-Signature') || '').trim();
+    const requireSig = Boolean(SHIPROCKET_WEBHOOK_REQUIRE_SIGNATURE);
 
     // Temporary debug (redacted): helps confirm what Shiprocket is sending in Render logs.
     // Remove/disable once webhook is stable.
@@ -2894,6 +3036,7 @@ async function handleShiprocketTrackingWebhook(req, res) {
       expectedTokenPrefix: expectedToken ? expectedToken.slice(0, 3) : undefined,
       hasSignature: !!sig,
       secretSet: !!secret,
+      requireSignature: requireSig,
       contentType: String(req.get('content-type') || ''),
       userAgent: String(req.get('user-agent') || ''),
       bodyKeys: req.body && typeof req.body === 'object' ? Object.keys(req.body).slice(0, 40) : typeof req.body,
@@ -2908,8 +3051,13 @@ async function handleShiprocketTrackingWebhook(req, res) {
       }
     }
 
-    // Enforce signature when secret is configured.
-    if (secret) {
+    // Enforce signature only when explicitly required.
+    if (requireSig) {
+      if (!secret) {
+        logJson('warn', 'shiprocket.webhook_rejected', { reason: 'signature_required_but_secret_missing' });
+        res.status(500).json({ ok: false });
+        return;
+      }
       if (!sig) {
         logJson('warn', 'shiprocket.webhook_rejected', { reason: 'missing_signature' });
         res.status(401).json({ ok: false });
@@ -2927,38 +3075,38 @@ async function handleShiprocketTrackingWebhook(req, res) {
     }
 
     const body = req.body || {};
-    const awb = String(body?.awb || body?.awb_code || body?.tracking_number || '').trim();
-    const shipmentIdRaw = body?.shipment_id ?? body?.shipmentId ?? body?.shipment;
-    const shipmentId = shipmentIdRaw != null ? Number(shipmentIdRaw) : null;
-    const orderRef = String(body?.order_id || body?.orderId || body?.order_reference || '').trim();
-    const statusRaw = String(body?.current_status || body?.status || body?.shipment_status || '').trim();
-    const status = statusRaw.toLowerCase();
-    const eventAt =
-      (body?.current_timestamp && !Number.isNaN(new Date(body.current_timestamp).getTime()))
-        ? new Date(body.current_timestamp).toISOString()
-        : new Date().toISOString();
+    const { awb, shipmentId, shiprocketOrderId, statusRaw, timestampRaw } = shiprocketExtractTrackingIds(body);
+    const status = String(statusRaw || '').toLowerCase();
+    const eventAtPayloadIso = shiprocketParseEventTimeIso(timestampRaw);
+    const eventAt = eventAtPayloadIso || new Date().toISOString();
+    const eventAtKey = eventAtPayloadIso || '';
 
     const eventKey = crypto
       .createHash('sha256')
-      .update(JSON.stringify({ awb, shipmentId, orderRef, status, eventAt }))
+      .update(JSON.stringify({ awb, shipmentId, shiprocketOrderId, status, eventAt: eventAtKey }))
       .digest('hex')
       .slice(0, 32);
 
     // Basic payload validation: require a key and some status.
     if (!statusRaw) {
-      logJson('warn', 'shiprocket.webhook_ignored', { reason: 'missing_status', awb, shipmentId, orderRef });
+      logJson('warn', 'shiprocket.webhook_ignored', { reason: 'missing_status', awb, shipmentId, shiprocketOrderId });
       res.json({ ok: true });
       return;
     }
 
-    const qForward =
-      awb
-        ? { 'shipping.awb': awb }
-        : shipmentId
-          ? { 'shipping.shipmentId': shipmentId }
-          : orderRef
-            ? { $or: [{ _id: orderRef }, { 'shipping.orderRef': orderRef }] }
-            : null;
+    const looksLikeMongoId = (s) => typeof s === 'string' && /^[a-f0-9]{24}$/i.test(s.trim());
+    const qForward = awb
+      ? { 'shipping.awb': awb }
+      : shipmentId
+        ? { 'shipping.shipmentId': shipmentId }
+        : shiprocketOrderId
+          ? {
+              $or: [
+                { 'shipping.shiprocketOrderId': shiprocketOrderId },
+                ...(looksLikeMongoId(shiprocketOrderId) ? [{ _id: shiprocketOrderId }] : []),
+              ],
+            }
+          : null;
 
     if (!qForward && !awb) {
       res.json({ ok: true });
@@ -2981,7 +3129,7 @@ async function handleShiprocketTrackingWebhook(req, res) {
     }
 
     if (!order) {
-      logJson('info', 'shiprocket.webhook_no_order', { awb, shipmentId, orderRef, status: statusRaw });
+      logJson('info', 'shiprocket.webhook_no_order', { awb, shipmentId, shiprocketOrderId, status: statusRaw });
       res.json({ ok: true });
       return;
     }
@@ -3048,23 +3196,10 @@ async function handleShiprocketTrackingWebhook(req, res) {
     }
 
     // Status mapping (do not regress). Shiprocket may send either event names or human statuses.
-    let nextStatus = null;
-    if (status.includes('delivered')) nextStatus = 'delivered';
-    else if (status.includes('shipment_created') || status.includes('shipment_request') || status.includes('packed')) nextStatus = 'packed';
-    else if (
-      status.includes('shipped') ||
-      status.includes('picked_up') ||
-      status.includes('picked') ||
-      status.includes('pickup') ||
-      status.includes('manifest') ||
-      status.includes('in transit') ||
-      status.includes('in_transit') ||
-      status.includes('out for delivery') ||
-      status.includes('out_for_delivery')
-    ) nextStatus = 'shipped';
-    else if (status.includes('rto')) nextStatus = null; // keep shipped; store in shipping.rto
-    else if (status.includes('cancel') || status.includes('cancelled') || status.includes('canceled')) nextStatus = null;
-    else if (status.includes('undelivered') || status.includes('delivery failed') || status.includes('failed')) nextStatus = null;
+    let nextStatus = shiprocketMapStatus(statusRaw);
+    if (status.includes('rto')) nextStatus = null; // keep shipped; store in shipping.rto
+    if (status.includes('cancel') || status.includes('cancelled') || status.includes('canceled')) nextStatus = null;
+    if (status.includes('undelivered') || status.includes('delivery failed') || status.includes('failed')) nextStatus = null;
 
     const $set = {
       'shipping.provider': 'shiprocket',
@@ -3079,9 +3214,8 @@ async function handleShiprocketTrackingWebhook(req, res) {
       };
     }
 
-    const statusRank = (s) => (s === 'pending' ? 0 : s === 'packed' ? 1 : s === 'shipped' ? 2 : s === 'delivered' ? 3 : 0);
     const currentStatus = String(order?.status || 'pending');
-    if (nextStatus && statusRank(nextStatus) >= statusRank(currentStatus)) {
+    if (nextStatus && orderStatusRank(nextStatus) >= orderStatusRank(currentStatus)) {
       $set.status = nextStatus;
       const now = new Date();
       if (nextStatus === 'shipped' && !order.shippedAt) $set.shippedAt = now;
@@ -3105,7 +3239,9 @@ async function handleShiprocketTrackingWebhook(req, res) {
       modified: updateRes.modifiedCount,
       awb,
       shipmentId,
+      shiprocketOrderId: shiprocketOrderId || undefined,
       status: statusRaw,
+      nextStatus: nextStatus || undefined,
     });
 
     res.json({ ok: true });
@@ -3910,6 +4046,7 @@ app.post(
 
 app.get('/api/me/orders', mongoReady, requireAuth, async (req, res) => {
   try {
+    res.set('Cache-Control', 'no-store');
     const docs = await Order.find({ userId: req.session.userId }).sort({ createdAt: -1 }).lean();
     res.json(docs.map((d) => serializeOrderForClient(d)));
   } catch (e) {
@@ -3920,6 +4057,7 @@ app.get('/api/me/orders', mongoReady, requireAuth, async (req, res) => {
 
 app.get('/api/me/orders/:id', mongoReady, requireAuth, async (req, res) => {
   try {
+    res.set('Cache-Control', 'no-store');
     const id = String(req.params.id || '').trim();
     if (!id) {
       res.status(400).json({ error: 'Missing order id' });
@@ -6872,6 +7010,7 @@ app.post('/api/payments/razorpay/verify', mongoReady, async (req, res) => {
 
 app.get('/api/orders', mongoReady, adminKeyRequired, async (_req, res) => {
   try {
+    res.set('Cache-Control', 'no-store');
     const docs = await Order.find().sort({ createdAt: -1 }).lean();
     res.json(docs.map((d) => serializeOrder(d)));
   } catch (e) {
@@ -6897,6 +7036,7 @@ app.get('/api/orders/:id/invoice.pdf', mongoReady, adminKeyRequired, async (req,
 
 app.get('/api/orders/:id', mongoReady, adminKeyRequired, async (req, res) => {
   try {
+    res.set('Cache-Control', 'no-store');
     const { id } = req.params;
     const order = await Order.findById(id).lean();
     if (!order) {
@@ -7551,6 +7691,227 @@ app.post('/api/admin/shipping/sync-awb', mongoReady, adminKeyRequired, async (re
   } catch (e) {
     console.error(e);
     res.status(500).json({ ok: false, error: 'Failed to sync AWB' });
+  }
+});
+
+// Admin: manual fallback to sync latest tracking status from Shiprocket (useful when webhooks are missed).
+app.post('/api/admin/orders/:id/sync-shipping-status', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    if (!shiprocketConfigured()) {
+      res.status(503).json({ ok: false, error: 'Shiprocket is not configured on the server' });
+      return;
+    }
+
+    const id = String(req.params?.id || '').trim();
+    if (!id) {
+      res.status(400).json({ ok: false, error: 'Missing order id' });
+      return;
+    }
+
+    const order = await Order.findById(id).lean();
+    if (!order) {
+      res.status(404).json({ ok: false, error: 'Order not found' });
+      return;
+    }
+
+    const awb = String(order?.shipping?.awb || '').trim();
+    const shipmentIdRaw = order?.shipping?.shipmentId ?? null;
+    const shipmentIdNum = shipmentIdRaw != null ? Number(shipmentIdRaw) : null;
+    const shipmentId = Number.isFinite(shipmentIdNum) && shipmentIdNum > 0 ? shipmentIdNum : null;
+    const shiprocketOrderId = String(order?.shipping?.shiprocketOrderId || '').trim();
+
+    if (!awb && !shipmentId && !shiprocketOrderId) {
+      res.status(400).json({ ok: false, error: 'Order has no Shiprocket identifiers (AWB / shipmentId / shiprocketOrderId)' });
+      return;
+    }
+
+    logJson('info', 'shiprocket.admin_sync_start', {
+      orderId: String(order._id),
+      hasAwb: Boolean(awb),
+      awbPrefix: awb ? awb.slice(0, 6) : undefined,
+      shipmentId: shipmentId || undefined,
+      shiprocketOrderId: shiprocketOrderId || undefined,
+    });
+
+    // Prefer tracking by AWB, then shipmentId. Order show is a fallback to refresh identifiers.
+    let trackingRes = null;
+    let trackingData = null;
+    let trackingSource = '';
+
+    if (awb) {
+      const out = await shiprocketFetch(`/courier/track/awb/${encodeURIComponent(awb)}`, { method: 'GET' });
+      trackingRes = out.res;
+      trackingData = out.data;
+      trackingSource = 'track_awb';
+    } else if (shipmentId) {
+      const out = await shiprocketFetch(`/courier/track/shipment/${encodeURIComponent(String(shipmentId))}`, { method: 'GET' });
+      trackingRes = out.res;
+      trackingData = out.data;
+      trackingSource = 'track_shipment';
+    }
+
+    // If tracking failed and we have a Shiprocket order id, try order show to backfill AWB and retry once.
+    if ((!trackingRes || !trackingRes.ok) && shiprocketOrderId) {
+      const { res: showRes, data: showData } = await shiprocketFetch(`/orders/show/${encodeURIComponent(shiprocketOrderId)}`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      logJson('info', 'shiprocket.admin_sync_order_show', {
+        orderId: String(order._id),
+        ok: showRes.ok,
+        status: showRes.status,
+      });
+      if (showRes.ok) {
+        const d = showData?.data ?? showData?.payload ?? showData;
+        const shipments =
+          Array.isArray(d?.shipments) ? d.shipments
+          : Array.isArray(d?.data?.shipments) ? d.data.shipments
+          : Array.isArray(d?.order?.shipments) ? d.order.shipments
+          : [];
+        const first = shipments?.[0] || d?.shipment || d?.data?.shipment || null;
+        const awbFromShow = String(first?.awb_code ?? first?.awb ?? first?.tracking_number ?? d?.awb_code ?? d?.awb ?? '').trim();
+        const shipmentFromShow = extractShipmentIdFromOrderShow(showData);
+
+        const setFields = {};
+        if (!awb && awbFromShow) setFields['shipping.awb'] = awbFromShow;
+        if (!shipmentId && shipmentFromShow) setFields['shipping.shipmentId'] = shipmentFromShow;
+        if (Object.keys(setFields).length > 0) {
+          setFields['shipping.lastUpdatedAt'] = new Date();
+          await Order.updateOne({ _id: String(order._id) }, { $set: setFields });
+        }
+
+        const awbRetry = awb || awbFromShow;
+        const shipRetry = shipmentId || shipmentFromShow;
+        if (awbRetry) {
+          const out = await shiprocketFetch(`/courier/track/awb/${encodeURIComponent(awbRetry)}`, { method: 'GET' });
+          trackingRes = out.res;
+          trackingData = out.data;
+          trackingSource = 'track_awb_retry';
+        } else if (shipRetry) {
+          const out = await shiprocketFetch(`/courier/track/shipment/${encodeURIComponent(String(shipRetry))}`, { method: 'GET' });
+          trackingRes = out.res;
+          trackingData = out.data;
+          trackingSource = 'track_shipment_retry';
+        }
+      }
+    }
+
+    logJson('info', 'shiprocket.admin_sync_tracking_response', {
+      orderId: String(order._id),
+      source: trackingSource || undefined,
+      ok: Boolean(trackingRes?.ok),
+      status: trackingRes?.status,
+      responseKeys: trackingData && typeof trackingData === 'object' ? Object.keys(trackingData).slice(0, 40) : typeof trackingData,
+    });
+
+    if (!trackingRes || !trackingRes.ok) {
+      const msg =
+        typeof trackingData?.message === 'string'
+          ? trackingData.message
+          : typeof trackingData?.error === 'string'
+            ? trackingData.error
+            : 'Failed to fetch tracking status from Shiprocket';
+      res.status(502).json({ ok: false, error: msg });
+      return;
+    }
+
+    // Extract status + event time from Shiprocket tracking response (robust across variants).
+    const td = trackingData?.data ?? trackingData?.payload ?? trackingData;
+    const track = td?.tracking_data ?? td?.trackingData ?? td;
+    const shipmentTrack = Array.isArray(track?.shipment_track) ? track.shipment_track : Array.isArray(track?.shipmentTrack) ? track.shipmentTrack : [];
+    const first = shipmentTrack?.[0] || {};
+
+    const statusRaw =
+      shiprocketFirstString(
+        first?.current_status,
+        first?.currentStatus,
+        track?.current_status,
+        track?.currentStatus,
+        td?.current_status,
+        td?.status,
+        td?.shipment_status
+      ) || '';
+
+    const timestampRaw = shiprocketFirstString(
+      first?.current_timestamp,
+      first?.currentTimestamp,
+      track?.current_timestamp,
+      td?.current_timestamp,
+      td?.timestamp
+    );
+
+    if (!statusRaw) {
+      res.status(502).json({ ok: false, error: 'Shiprocket tracking response did not include a status' });
+      return;
+    }
+
+    const statusLower = statusRaw.toLowerCase();
+    let nextStatus = shiprocketMapStatus(statusRaw);
+    if (statusLower.includes('rto')) nextStatus = null;
+    if (statusLower.includes('cancel') || statusLower.includes('cancelled') || statusLower.includes('canceled')) nextStatus = null;
+    if (statusLower.includes('undelivered') || statusLower.includes('delivery failed') || statusLower.includes('failed')) nextStatus = null;
+
+    const eventAtPayloadIso = shiprocketParseEventTimeIso(timestampRaw);
+    const eventAt = eventAtPayloadIso || new Date().toISOString();
+    const eventAtKey = eventAtPayloadIso || '';
+    const eventKey = crypto
+      .createHash('sha256')
+      .update(JSON.stringify({ src: 'admin_sync', awb, shipmentId, shiprocketOrderId, status: statusLower, at: eventAtKey }))
+      .digest('hex')
+      .slice(0, 32);
+
+    const timelineEvent = {
+      at: eventAt,
+      kind: 'admin_tracking_sync',
+      status: statusRaw,
+      awb: awb || undefined,
+      shipmentId: shipmentId || undefined,
+      key: eventKey,
+      source: 'shiprocket-admin-sync',
+    };
+
+    const $set = {
+      'shipping.provider': 'shiprocket',
+      'shipping.trackingStatus': statusRaw || undefined,
+      'shipping.lastUpdatedAt': new Date(),
+    };
+
+    if (statusLower.includes('rto')) {
+      $set['shipping.rto'] = { status: statusRaw || 'RTO', updatedAt: eventAt };
+    }
+
+    const currentStatus = String(order?.status || 'pending');
+    if (nextStatus && orderStatusRank(nextStatus) >= orderStatusRank(currentStatus)) {
+      $set.status = nextStatus;
+      const now = new Date();
+      if (nextStatus === 'shipped' && !order.shippedAt) $set.shippedAt = now;
+      if (nextStatus === 'delivered' && !order.deliveredAt) $set.deliveredAt = now;
+    }
+
+    const updateRes = await Order.updateOne(
+      { _id: String(order._id), 'shipping.webhookDedupeKeys': { $ne: eventKey } },
+      {
+        $set,
+        $push: {
+          'shipping.timeline': timelineEvent,
+          'shipping.webhookDedupeKeys': { $each: [eventKey], $slice: -25 },
+        },
+      }
+    );
+
+    logJson('info', 'shiprocket.admin_sync_saved', {
+      orderId: String(order._id),
+      matched: updateRes?.matchedCount,
+      modified: updateRes?.modifiedCount,
+      status: statusRaw,
+      nextStatus: nextStatus || undefined,
+    });
+
+    const fresh = await Order.findById(String(order._id)).lean();
+    res.json({ ok: true, order: serializeOrder(fresh) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ ok: false, error: 'Failed to sync shipping status' });
   }
 });
 

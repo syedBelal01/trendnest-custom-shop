@@ -66,12 +66,25 @@ export async function createOrderApi(payload: CreateOrderPayload): Promise<Order
 }
 
 export async function fetchOrdersAdmin(): Promise<Order[]> {
-  const res = await fetch(apiUrl('/api/orders'), { headers: adminHeaders() });
+  const res = await fetch(apiUrl('/api/orders'), { headers: adminHeaders(), cache: 'no-store' });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(typeof data.error === 'string' ? data.error : `Failed to load orders (${res.status})`);
   }
   return data as Order[];
+}
+
+export async function syncOrderShippingStatusAdmin(orderId: string): Promise<Order> {
+  const res = await fetch(apiUrl(`/api/admin/orders/${encodeURIComponent(orderId)}/sync-shipping-status`), {
+    method: 'POST',
+    headers: { ...adminHeaders(), 'Content-Type': 'application/json' },
+    cache: 'no-store',
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(typeof data.error === 'string' ? data.error : `Sync failed (${res.status})`);
+  }
+  return (data.order ?? null) as Order;
 }
 
 export async function patchOrderStatusApi(id: string, status: OrderStatus): Promise<Order> {
