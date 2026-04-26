@@ -732,6 +732,7 @@ const ReviewSchema = new mongoose.Schema(
 );
 
 ReviewSchema.index({ productId: 1, userId: 1 }, { unique: true });
+ReviewSchema.index({ productId: 1, createdAt: -1, _id: -1 });
 
 const Review = mongoose.model('Review', ReviewSchema);
 
@@ -4431,15 +4432,22 @@ app.get('/api/products/:id/reviews', mongoReady, async (req, res) => {
       if (idPart && String(idPart).trim()) cursorId = String(idPart).trim();
 
       if (cursorDate) {
-        // Stable pagination even if many reviews share the same createdAt.
-        // Also include string-based comparisons for legacy rows where createdAt may have been stored as a string.
-        const or = [
-          { createdAt: { $lt: cursorDate } },
-          ...(cursorRaw ? [{ createdAt: { $lt: cursorRaw } }] : []),
-          ...(cursorId ? [{ createdAt: cursorDate, _id: { $lt: cursorId } }] : []),
-          ...(cursorId && cursorRaw ? [{ createdAt: cursorRaw, _id: { $lt: cursorId } }] : []),
-        ];
-        q.$or = or;
+        // Use $expr + $toDate so pagination works whether `createdAt` was stored as
+        // Date or as an ISO string (BSON $lt between Date and String often matches nothing).
+        const dt = cursorDate;
+        const id = cursorId;
+        if (id) {
+          q.$expr = {
+            $or: [
+              { $lt: [{ $toDate: '$createdAt' }, dt] },
+              {
+                $and: [{ $eq: [{ $toDate: '$createdAt' }, dt] }, { $lt: ['$_id', id] }],
+              },
+            ],
+          };
+        } else {
+          q.$expr = { $lt: [{ $toDate: '$createdAt' }, dt] };
+        }
       } else if (cursorRaw) {
         // If date parsing fails, fall back to lexicographic ISO string compare.
         q.createdAt = { $lt: cursorRaw };
