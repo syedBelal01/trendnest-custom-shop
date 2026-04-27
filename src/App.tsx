@@ -26,6 +26,7 @@ import AdminReturns from "@/pages/admin/AdminReturns";
 import AdminCoupons from "@/pages/admin/AdminCoupons";
 import AdminCustomPrints from "@/pages/admin/AdminCustomPrints";
 import AdminCustomers from "@/pages/admin/AdminCustomers";
+import AdminAnalytics from "@/pages/admin/AdminAnalytics";
 import UserGuard from "@/components/UserGuard";
 import AccountPage from "@/pages/AccountPage";
 import AccountOrdersPage from "@/pages/AccountOrdersPage";
@@ -144,6 +145,7 @@ const App = () => (
                 </Route>
                 <Route path="/admin" element={<AdminLayout />}>
                   <Route index element={<AdminDashboard />} />
+                  <Route path="analytics" element={<AdminAnalytics />} />
                   <Route path="products" element={<AdminProducts />} />
                   <Route path="products/drafts" element={<AdminProductDraftsPage />} />
                   <Route path="products/draft/:draftId/step/:step" element={<AdminProductWizardPage />} />
