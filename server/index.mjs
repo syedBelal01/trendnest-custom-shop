@@ -698,18 +698,6 @@ function normalizeCouponCode(code) {
   return String(code || '').trim().toUpperCase();
 }
 
-// --- Visitor analytics (admin-only visibility) ---
-const VisitorSchema = new mongoose.Schema(
-  {
-    visitorId: { type: String, required: true, unique: true, index: true },
-    firstSeenAt: { type: Date, required: true },
-    lastSeenAt: { type: Date, required: true },
-  },
-  { versionKey: false, collection: 'visitors' }
-);
-
-const Visitor = mongoose.model('Visitor', VisitorSchema);
-
 const ReviewSchema = new mongoose.Schema(
   {
     _id: { type: String, required: true },
@@ -2646,90 +2634,6 @@ app.use(
 
 app.use(attachClientBearerAuth);
 
-function parseCookieHeader(h) {
-  const out = {};
-  const raw = typeof h === 'string' ? h : '';
-  if (!raw) return out;
-  for (const part of raw.split(';')) {
-    const idx = part.indexOf('=');
-    if (idx < 0) continue;
-    const k = part.slice(0, idx).trim();
-    const v = part.slice(idx + 1).trim();
-    if (!k) continue;
-    try {
-      out[k] = decodeURIComponent(v);
-    } catch {
-      out[k] = v;
-    }
-  }
-  return out;
-}
-
-function looksLikeHex(s, minLen = 16) {
-  const v = String(s || '').trim();
-  if (v.length < minLen) return false;
-  return /^[a-f0-9]+$/i.test(v);
-}
-
-function isAdminRequest(req) {
-  const path = String(req.originalUrl || req.url || '').toLowerCase();
-  if (path.startsWith('/api/admin')) return true;
-  if (path.startsWith('/api/orders')) return true;
-  const expected = String(process.env.ADMIN_API_KEY || '');
-  const sent = String(req.get('x-admin-key') || req.get('X-Admin-Key') || '').trim();
-  if (expected && sent && sent === expected) return true;
-  return false;
-}
-
-// Best-effort unique visitor counter: assigns an anonymous cookie and upserts a Visitor record.
-// Never blocks requests; skips admin routes/requests.
-app.use(async (req, res, next) => {
-  try {
-    if (req.method !== 'GET') {
-      next();
-      return;
-    }
-    if (isAdminRequest(req)) {
-      next();
-      return;
-    }
-    // Avoid counting the webhook endpoints.
-    const p = String(req.path || req.url || '');
-    if (p.startsWith('/api/webhooks')) {
-      next();
-      return;
-    }
-
-    const cookies = parseCookieHeader(req.headers.cookie);
-    let vid = String(cookies.tn_vid || '').trim();
-    if (!looksLikeHex(vid, 24)) {
-      vid = crypto.randomBytes(16).toString('hex');
-      res.cookie('tn_vid', vid, {
-        httpOnly: true,
-        sameSite: cookieSameSite,
-        secure: cookieSecure,
-        maxAge: 365 * 24 * 60 * 60 * 1000,
-        path: '/',
-      });
-    }
-
-    const now = new Date();
-    // Upsert visitor row; unique visitor = first insert.
-    // Best-effort: errors should never impact the request.
-    void Visitor.updateOne(
-      { visitorId: vid },
-      { $setOnInsert: { visitorId: vid, firstSeenAt: now }, $set: { lastSeenAt: now } },
-      { upsert: true }
-    ).catch((e) => {
-      logJson('warn', 'visitor.upsert_failed', { message: e instanceof Error ? e.message : String(e) });
-    });
-  } catch (e) {
-    // ignore
-  } finally {
-    next();
-  }
-});
-
 function saveSession(req) {
   return new Promise((resolve, reject) => {
     if (!req.session) {
@@ -3762,17 +3666,6 @@ app.get('/api/admin/auth-metrics/daily', mongoReady, adminKeyRequired, async (re
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Failed to load auth metrics' });
-  }
-});
-
-// --- Admin analytics: unique visitors (all time) ---
-app.get('/api/admin/analytics/visitors', mongoReady, adminKeyRequired, async (_req, res) => {
-  try {
-    const totalUniqueVisitors = await Visitor.countDocuments({});
-    res.json({ totalUniqueVisitors, updatedAt: new Date().toISOString() });
-  } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: 'Failed to load visitor analytics' });
   }
 });
 
