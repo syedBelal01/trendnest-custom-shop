@@ -66,7 +66,7 @@ export async function createOrderApi(payload: CreateOrderPayload): Promise<Order
 }
 
 export async function fetchOrdersAdmin(): Promise<Order[]> {
-  const res = await fetch(apiUrl('/api/orders'), { headers: adminHeaders(), cache: 'no-store' });
+  const res = await fetch(apiUrl('/api/admin/orders'), { headers: adminHeaders(), cache: 'no-store' });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(typeof data.error === 'string' ? data.error : `Failed to load orders (${res.status})`);

@@ -17,6 +17,8 @@ import { resolveMx } from 'dns/promises';
 import validator from 'validator';
 import sanitizeHtml from 'sanitize-html';
 
+console.log('[api] boot', { file: import.meta.url, cwd: process.cwd() });
+
 function sanitizeProductDescription(raw) {
   const s = String(raw ?? '');
   if (!s.trim()) return '';
@@ -48,7 +50,9 @@ function sanitizeProductDescription(raw) {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Always load .env from project root (folder above server/), not only from process.cwd()
-dotenv.config({ path: join(__dirname, '..', '.env') });
+// In local/dev, prefer values from the repo .env even if the parent process already has env vars set.
+// In production, this has no effect because there is no repo .env file on the server.
+dotenv.config({ path: join(__dirname, '..', '.env'), override: true });
 
 const PORT = process.env.PORT || 5000;
 const MONGODB_URI = process.env.MONGODB_URI;
@@ -2605,6 +2609,24 @@ app.use(express.json({
   },
 }));
 
+// Request/response debug logger (best-effort).
+app.use((req, res, next) => {
+  const startedAt = Date.now();
+  const url = String(req.originalUrl || req.url || '');
+  const hasAdminKey = !!(req.get('x-admin-key') || req.get('X-Admin-Key'));
+  logJson('info', 'http.start', { method: req.method, url, hasAdminKey });
+  res.on('finish', () => {
+    logJson('info', 'http.finish', {
+      method: req.method,
+      url,
+      hasAdminKey,
+      statusCode: res.statusCode,
+      durationMs: Date.now() - startedAt,
+    });
+  });
+  next();
+});
+
 // Cookie-session auth for logged-in customers.
 const SESSION_SECRET = process.env.SESSION_SECRET;
 const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS || 1000 * 60 * 60 * 24 * 7);
@@ -2745,6 +2767,40 @@ function saveSession(req) {
 
 app.get('/', (_req, res) => {
   res.type('text/plain').send('Backend is running 🚀');
+});
+
+app.get('/api/__debug/routes', (_req, res) => {
+  try {
+    const stack = (app && app._router && Array.isArray(app._router.stack)) ? app._router.stack : [];
+    const routes = [];
+    for (const layer of stack) {
+      if (layer && layer.route && layer.route.path) {
+        routes.push({
+          path: layer.route.path,
+          methods: layer.route.methods || {},
+        });
+      }
+    }
+    res.json({ count: routes.length, routes: routes.slice(0, 200) });
+  } catch (e) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
+app.get('/api/__debug/delay', (_req, res) => {
+  setTimeout(() => {
+    if (!res.headersSent) res.json({ ok: true, waitedMs: 750 });
+  }, 750);
+});
+
+app.get('/api/__debug/orders-count', mongoReady, async (_req, res) => {
+  try {
+    const count = await Order.countDocuments({});
+    res.json({ ok: true, count });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'count_failed' });
+  }
 });
 
 app.get('/api/health', (_req, res) => {
@@ -3768,11 +3824,21 @@ app.get('/api/admin/auth-metrics/daily', mongoReady, adminKeyRequired, async (re
 // --- Admin analytics: unique visitors (all time) ---
 app.get('/api/admin/analytics/visitors', mongoReady, adminKeyRequired, async (_req, res) => {
   try {
+    res.status(200);
+    res.set('Cache-Control', 'no-store');
+    res.set('Content-Type', 'application/json; charset=utf-8');
+    if (typeof res.flushHeaders === 'function') res.flushHeaders();
     const totalUniqueVisitors = await Visitor.countDocuments({});
-    res.json({ totalUniqueVisitors, updatedAt: new Date().toISOString() });
+    if (!res.writableEnded) {
+      res.end(JSON.stringify({ totalUniqueVisitors, updatedAt: new Date().toISOString() }));
+    }
   } catch (e) {
     console.error(e);
-    res.status(500).json({ error: 'Failed to load visitor analytics' });
+    if (!res.writableEnded) {
+      res.statusCode = 500;
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      res.end(JSON.stringify({ error: 'Failed to load visitor analytics' }));
+    }
   }
 });
 
@@ -6711,7 +6777,6 @@ app.post('/api/orders', mongoReady, async (req, res) => {
       void (async () => {
         try {
           await finalizePendingOrderShipping(orderId);
-          await ensureShiprocketShipmentForOrderId(orderId, 'system-cod');
           const leanForMail = (await Order.findById(orderId).lean()) || {};
           await (async () => {
             await sendOrderEmails({ ...leanForMail, _id: orderId });
@@ -7129,7 +7194,6 @@ app.post('/api/payments/razorpay/verify', mongoReady, async (req, res) => {
       void (async () => {
         try {
           await finalizePendingOrderShipping(orderId);
-          await ensureShiprocketShipmentForOrderId(orderId, 'system-razorpay');
           const leanForMail = (await Order.findById(orderId).lean()) || {};
           await (async () => {
             await sendOrderEmails({ ...leanForMail, _id: orderId });
@@ -7147,14 +7211,46 @@ app.post('/api/payments/razorpay/verify', mongoReady, async (req, res) => {
   }
 });
 
-app.get('/api/orders', mongoReady, adminKeyRequired, async (_req, res) => {
+app.get('/api/orders', mongoReady, (req, res) => {
+  const expected = process.env.ADMIN_API_KEY;
+  if (!expected) {
+    res.status(503).json({ error: 'ADMIN_API_KEY is not configured on the server.' });
+    return;
+  }
+  const provided = req.get('x-admin-key') || req.get('X-Admin-Key') || '';
+  if (provided !== expected) {
+    res.status(401).json({ error: 'Invalid or missing admin key.' });
+    return;
+  }
+
+  res.set('Cache-Control', 'no-store');
+  Order.find()
+    .sort({ createdAt: -1 })
+    .lean()
+    .then((docs) => {
+      res.json((docs || []).map((d) => serializeOrder(d)));
+    })
+    .catch((e) => {
+      console.error(e);
+      if (!res.headersSent) res.status(500).json({ error: 'Failed to list orders' });
+    });
+});
+
+app.get('/api/admin/orders', mongoReady, adminKeyRequired, async (_req, res) => {
   try {
+    logJson('info', 'admin.orders_handler_enter', { headersSent: res.headersSent, statusCode: res.statusCode });
+    res.status(200);
     res.set('Cache-Control', 'no-store');
+    res.set('Content-Type', 'application/json; charset=utf-8');
+    // Workaround: in this environment something finalizes requests with 404
+    // while async handlers are in-flight. Flushing headers early prevents the 404.
+    if (typeof res.flushHeaders === 'function') res.flushHeaders();
     const docs = await Order.find().sort({ createdAt: -1 }).lean();
-    res.json(docs.map((d) => serializeOrder(d)));
+    logJson('info', 'admin.orders_handler_before_send', { headersSent: res.headersSent, statusCode: res.statusCode });
+    if (!res.writableEnded) res.end(JSON.stringify((docs || []).map((d) => serializeOrder(d))));
   } catch (e) {
     console.error(e);
-    res.status(500).json({ error: 'Failed to list orders' });
+    if (!res.writableEnded) res.end(JSON.stringify({ error: 'Failed to list orders' }));
   }
 });
 
@@ -7214,6 +7310,25 @@ app.patch('/api/orders/:id', mongoReady, adminKeyRequired, async (req, res) => {
       return;
     }
     await syncOrderAdminFlags(id);
+
+    // Manual fulfillment trigger: create Shiprocket shipment only when admin marks Packed.
+    // Best-effort; never block the status update response.
+    if (status === 'packed' && before.status !== 'packed') {
+      setImmediate(() => {
+        void (async () => {
+          try {
+            logJson('info', 'shiprocket.packed_trigger', { orderId: id, from: String(before.status), to: 'packed' });
+            await finalizePendingOrderShipping(id);
+            await ensureShiprocketShipmentForOrderId(id, 'admin-packed');
+          } catch (e) {
+            logJson('warn', 'shiprocket.packed_trigger_failed', {
+              orderId: id,
+              message: e instanceof Error ? e.message : String(e),
+            });
+          }
+        })();
+      });
+    }
 
     // Send post-order notifications (idempotent)
     try {
