@@ -25,7 +25,7 @@ export function ProductSpecificationsCard(props: {
           </p>
         </div>
         <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 text-xs" onClick={props.onAddSuggested}>
-          Add suggested fields for category
+          Add suggested fields for categorys
         </Button>
       </div>
       <div className="space-y-2">
