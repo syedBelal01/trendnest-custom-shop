@@ -1241,7 +1241,7 @@ export default function AdminProducts() {
                               ) : (
                                 imgs.map((src: string, j: number) => (
                                   <div key={`${src}-${j}`} className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg border border-border bg-muted/50">
-                                    <img src={src} alt="" className="h-full w-full object-contain p-1" />
+                                    <img src={src} alt="" className="h-full w-full object-cover" />
                                     <button
                                       type="button"
                                       className="absolute left-1 top-1 rounded-md bg-background/95 px-1.5 py-1 text-[10px] font-semibold shadow-sm ring-1 ring-border hover:bg-muted"
@@ -1385,7 +1385,7 @@ export default function AdminProducts() {
                                 >
                                   <GripVertical className="h-4 w-4" />
                                 </button>
-                                <img src={productPrimaryImage(p)} alt="" className="w-8 h-8 rounded object-contain bg-muted/20 p-0.5" />
+                                <img src={productPrimaryImage(p)} alt="" className="w-8 h-8 rounded object-cover" />
                                 <div className="min-w-0">
                                   <div className="flex items-center gap-2 min-w-0 max-w-[260px]">
                                     <span className="truncate font-medium">{p.name}</span>
@@ -1458,7 +1458,7 @@ export default function AdminProducts() {
                 return (
                   <tr key={p.id} className="border-t">
                     <td className="p-3 flex items-center gap-2">
-                      <img src={productPrimaryImage(p)} alt="" className="w-8 h-8 rounded object-contain bg-muted/20 p-0.5" />
+                      <img src={productPrimaryImage(p)} alt="" className="w-8 h-8 rounded object-cover" />
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 min-w-0 max-w-[260px]">
                           <span className="truncate font-medium">{p.name}</span>

@@ -131,7 +131,7 @@ export default function ReviewInvitePage() {
                   <img
                     src={state.product.image}
                     alt={state.product.name}
-                    className="h-12 w-12 rounded-lg object-contain border bg-muted/20 p-1"
+                    className="h-12 w-12 rounded-lg object-cover border"
                   />
                 ) : (
                   <div className="h-12 w-12 rounded-lg border bg-muted" />

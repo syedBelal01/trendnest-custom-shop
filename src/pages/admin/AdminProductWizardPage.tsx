@@ -544,7 +544,7 @@ function QuickPrimaryImageUpload() {
     <div className="rounded-lg border border-border bg-background p-3 flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
       <div className="flex items-center gap-3">
         <div className="h-16 w-16 rounded-md border bg-muted/30 overflow-hidden flex items-center justify-center">
-          {primary ? <img src={primary} alt="" className="h-full w-full object-contain p-2 bg-muted/20" /> : <div className="text-[10px] text-muted-foreground">No image</div>}
+          {primary ? <img src={primary} alt="" className="h-full w-full object-cover" /> : <div className="text-[10px] text-muted-foreground">No image</div>}
         </div>
         <div>
           <p className="text-sm font-medium">Primary image</p>
@@ -624,7 +624,7 @@ function ImagesInlineUploader() {
               onClick={() => updateDraftLocal({ images: { items: images, primaryIndex: idx } })}
               title={idx === primaryIndex ? 'Primary image' : 'Set as primary'}
             >
-              <img src={src} alt="" className="w-full h-28 object-contain bg-muted/20 p-2" />
+              <img src={src} alt="" className="w-full h-28 object-cover" />
               <div className="absolute bottom-1 left-1 text-[10px] bg-background/90 px-1.5 py-0.5 rounded">
                 {idx === primaryIndex ? 'Primary' : 'Tap to set primary'}
               </div>
@@ -710,7 +710,7 @@ function ImagesStep() {
                 onClick={() => updateDraftLocal({ images: { items: images, primaryIndex: idx } })}
                 title={idx === primaryIndex ? 'Primary image' : 'Set as primary'}
               >
-                <img src={src} alt="" className="w-full h-28 object-contain bg-muted/20 p-2" />
+                <img src={src} alt="" className="w-full h-28 object-cover" />
                 <div className="absolute bottom-1 left-1 text-[10px] bg-background/90 px-1.5 py-0.5 rounded">
                   {idx === primaryIndex ? 'Primary' : 'Tap to set primary'}
                 </div>
@@ -1023,7 +1023,7 @@ function VariantRow(props: {
                 }}
                 title={i === 0 ? 'Primary image' : 'Set as primary'}
               >
-                <img src={src} alt="" className={`h-14 w-14 object-contain rounded-md border bg-muted/20 p-1 ${i === 0 ? 'ring-2 ring-primary' : ''}`} />
+                <img src={src} alt="" className={`h-14 w-14 object-cover rounded-md border ${i === 0 ? 'ring-2 ring-primary' : ''}`} />
               </button>
             ))}
           </div>

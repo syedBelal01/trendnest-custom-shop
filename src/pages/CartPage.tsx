@@ -8,7 +8,6 @@ import { productImageForVariant } from '@/lib/productImages';
 import { toast } from 'sonner';
 import { validateCouponApi } from '@/lib/couponsApi';
 import { usePaymentMethod } from '@/contexts/PaymentMethodContext';
-import ProductImage from '@/components/ProductImage';
 
 export default function CartPage() {
   const { items, removeItem, updateQuantity, discount, couponCode, applyCoupon, unitPriceForItem, totalsForPaymentMethod } = useCart();
@@ -72,12 +71,7 @@ export default function CartPage() {
         <div className="md:col-span-2 space-y-3 sm:space-y-4">
           {items.map(item => (
             <div key={item.cartLineId} className="flex gap-3 sm:gap-4 border rounded-lg p-3 sm:p-4">
-              <ProductImage
-                src={productImageForVariant(item.product, item.selectedVariant)}
-                alt={item.product.name}
-                containerClassName="w-16 h-16 sm:w-20 sm:h-20 shrink-0 rounded-md"
-                paddingClassName="p-1.5"
-              />
+              <img src={productImageForVariant(item.product, item.selectedVariant)} alt={item.product.name} className="w-16 h-16 sm:w-20 sm:h-20 object-cover rounded-md shrink-0" />
               <div className="flex-1 min-w-0">
                 <Link to={`/product/${item.product.id}`} className="font-medium text-sm hover:text-primary truncate block">{item.product.name}</Link>
                 <p className="text-xs text-muted-foreground mt-0.5 truncate">

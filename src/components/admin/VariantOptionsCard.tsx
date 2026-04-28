@@ -7,7 +7,7 @@ import { Trash2, Plus, Upload, ImageIcon } from 'lucide-react';
 function VariantThumbImg({ src, onRemove }: { src: string; onRemove: () => void }) {
   return (
     <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-lg border border-border bg-muted/50">
-      <img src={src} alt="" className="h-full w-full object-contain p-1" />
+      <img src={src} alt="" className="h-full w-full object-cover" />
       <button
         type="button"
         aria-label="Remove image"
