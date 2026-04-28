@@ -12,6 +12,7 @@ import HomePage from "@/pages/HomePage";
 import CategoryPage from "@/pages/CategoryPage";
 import ProductDetailPage from "@/pages/ProductDetailPage";
 import CustomPrintPage from "@/pages/CustomPrintPage";
+import BestDealsPage from "@/pages/BestDealsPage";
 import CartPage from "@/pages/CartPage";
 import CheckoutPage from "@/pages/CheckoutPage";
 import CheckoutSuccessPage from "@/pages/CheckoutSuccessPage";
@@ -89,6 +90,7 @@ const App = () => (
                 <Route element={<Layout />}>
                   <Route path="/" element={<HomePage />} />
                   <Route path="/category/:id" element={<CategoryPage />} />
+                  <Route path="/best-deals" element={<BestDealsPage />} />
                   <Route path="/product/:id" element={<ProductDetailPage />} />
                   <Route path="/review/:token" element={<ReviewInvitePage />} />
                   <Route path="/custom-print" element={<CustomPrintPage />} />

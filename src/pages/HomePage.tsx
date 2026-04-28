@@ -16,7 +16,7 @@ export default function HomePage() {
   const { products, loading } = useProducts();
   const showSkeleton = useDelayedFlag(loading, 250);
   const trending = products.filter(p => p.isTrending).slice(0, 4);
-  const deals = products.filter(p => p.originalPrice).slice(0, 4);
+  const deals = products.slice(0, 4);
   const fashion = products.filter(p => p.category === 'fashion');
 
   return (
@@ -134,7 +134,7 @@ export default function HomePage() {
         <div className="max-w-7xl mx-auto px-3 sm:px-4">
           <div className="flex items-center justify-between mb-4 sm:mb-6">
             <h2 className="text-xl sm:text-2xl font-bold">💰 Best Deals</h2>
-            <Link to="/category/trending" className="text-primary text-xs sm:text-sm font-medium hover:underline">View All →</Link>
+            <Link to="/best-deals" className="text-primary text-xs sm:text-sm font-medium hover:underline">View All →</Link>
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
             {showSkeleton

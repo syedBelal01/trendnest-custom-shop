@@ -413,6 +413,7 @@ const ProductSchema = new mongoose.Schema(
     reviews: { type: [ProductEmbeddedReviewSchema], default: [] },
     isCustomPrint: Boolean,
     isTrending: Boolean,
+    isBestDeal: Boolean,
     tags: [String],
   },
   { versionKey: false }
@@ -5499,6 +5500,7 @@ function draftToProductPayload(draft) {
     specifications: normalizeSpecificationsFromBody(d.specifications),
     images: orderedImages.length ? orderedImages : undefined,
     isTrending: !!d.isTrending,
+    isBestDeal: !!d.isBestDeal,
     isCustomPrint: !!d.isCustomPrint,
     shipWeightKg: ship?.weightKg != null && ship.weightKg !== '' ? Number(ship.weightKg) : undefined,
     shipLengthCm: ship?.lengthCm != null && ship.lengthCm !== '' ? Number(ship.lengthCm) : undefined,
@@ -5949,6 +5951,7 @@ function buildProductUpdateSet(src) {
   }
   if (src.isCustomPrint !== undefined) out.isCustomPrint = !!src.isCustomPrint;
   if (src.isTrending !== undefined) out.isTrending = !!src.isTrending;
+  if (src.isBestDeal !== undefined) out.isBestDeal = !!src.isBestDeal;
   if (src.tags !== undefined) {
     out.tags = Array.isArray(src.tags) ? src.tags.map((t) => String(t)) : [];
   }

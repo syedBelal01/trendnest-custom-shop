@@ -126,6 +126,7 @@ const emptyProduct = (): Partial<Product> => ({
   specifications: [],
   isCustomPrint: false,
   isTrending: false,
+  isBestDeal: false,
   /** Same variant-card layout for every product: at least one row to add name + images. */
   variantOptions: [{ name: '', images: [] }],
 });
@@ -889,6 +890,7 @@ export default function AdminProducts() {
           reviews: snap.reviews || [],
           isCustomPrint: snap.isCustomPrint,
           isTrending: snap.isTrending,
+          isBestDeal: snap.isBestDeal,
           tags: snap.tags?.length ? snap.tags : undefined,
           specifications,
         };
@@ -925,6 +927,7 @@ export default function AdminProducts() {
           reviews: snap.reviews || [],
           isCustomPrint: !!snap.isCustomPrint,
           isTrending: !!snap.isTrending,
+          isBestDeal: !!snap.isBestDeal,
           tags: snap.tags?.length ? snap.tags : undefined,
           specifications: specifications.length ? specifications : undefined,
         };
@@ -1331,6 +1334,10 @@ export default function AdminProducts() {
                   <input type="checkbox" checked={!!editing.isTrending} onChange={e => setEditing(p => ({ ...p, isTrending: e.target.checked }))} />
                   Trending (shown on Trending category page)
                 </label>
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input type="checkbox" checked={!!editing.isBestDeal} onChange={e => setEditing(p => ({ ...p, isBestDeal: e.target.checked }))} />
+                  Best Deal (shown on home + /best-deals)
+                </label>
                 <Button type="button" onClick={() => void save()} className="w-full" disabled={saveBusy}>
                   {saveBusy ? 'Saving…' : 'Save'}
                 </Button>
@@ -1385,6 +1392,11 @@ export default function AdminProducts() {
                                     {p.isTrending ? (
                                       <span className="shrink-0 rounded-md bg-primary/10 text-primary text-[10px] px-1.5 py-0.5 font-semibold">
                                         Trending
+                                      </span>
+                                    ) : null}
+                                    {p.isBestDeal ? (
+                                      <span className="shrink-0 rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 text-[10px] px-1.5 py-0.5 font-semibold">
+                                        Deal
                                       </span>
                                     ) : null}
                                   </div>
@@ -1453,6 +1465,11 @@ export default function AdminProducts() {
                           {p.isTrending ? (
                             <span className="shrink-0 rounded-md bg-primary/10 text-primary text-[10px] px-1.5 py-0.5 font-semibold">
                               Trending
+                            </span>
+                          ) : null}
+                          {p.isBestDeal ? (
+                            <span className="shrink-0 rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 text-[10px] px-1.5 py-0.5 font-semibold">
+                              Deal
                             </span>
                           ) : null}
                         </div>

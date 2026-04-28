@@ -37,6 +37,8 @@ export interface Product {
   reviews: Review[];
   isCustomPrint?: boolean;
   isTrending?: boolean;
+  /** Admin-curated: shows under "Best Deals" and /best-deals. */
+  isBestDeal?: boolean;
   tags?: string[];
   specifications?: ProductSpecification[];
   /** Optional per-product SKU (simple products). */
