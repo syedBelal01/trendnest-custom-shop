@@ -5145,22 +5145,27 @@ app.post('/api/auth/login', async (req, res) => {
       res.status(400).json({ error: 'Invalid email or password' });
       return;
     }
+
     const user = await User.findOne({ email }).exec();
     if (!user || !user.passwordHash || !user.passwordSalt) {
       res.status(401).json({ error: 'Invalid email or password' });
       return;
     }
+
     const computed = hashPassword(password, user.passwordSalt);
     if (computed !== user.passwordHash) {
       res.status(401).json({ error: 'Invalid email or password' });
       return;
     }
+
     if (user.mustResetPassword) {
       res.status(403).json({ error: 'Password must be set before login' });
       return;
     }
+
     req.session.userId = user._id;
     await saveSession(req);
+
     const serialized = serializeUser(await User.findById(user._id).lean());
     let authToken;
     try {
@@ -5168,10 +5173,12 @@ app.post('/api/auth/login', async (req, res) => {
     } catch (err) {
       console.error(err);
     }
+
+    res.set('Cache-Control', 'no-store');
     res.json(authToken ? { user: serialized, authToken } : { user: serialized });
   } catch (e) {
     console.error(e);
-    res.status(500).json({ error: 'Login failed' });
+    if (!res.headersSent) res.status(500).json({ error: 'Login failed' });
   }
 });
 
@@ -8395,6 +8402,19 @@ async function seedDisposableDomainsIfEmpty() {
   console.log(`Seeded disposable domain blocklist (${list.length} domains)`);
   invalidateDisposableDomainCache();
 }
+
+// IMPORTANT: Do not let the framework's default final handler immediately return a 404.
+// In some environments, requests can be "finalized" with a 404 while async route handlers are still in-flight.
+// This middleware delays the 404 slightly, giving async handlers time to send their real response.
+app.use((req, res) => {
+  if (res.headersSent || res.writableEnded) return;
+  const t = setTimeout(() => {
+    if (res.headersSent || res.writableEnded) return;
+    res.status(404).type('text/plain').send('Not Found');
+  }, 1500);
+  res.on('finish', () => clearTimeout(t));
+  res.on('close', () => clearTimeout(t));
+});
 
 async function main() {
   if (MONGODB_URI) {
