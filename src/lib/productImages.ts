@@ -1,7 +1,8 @@
 import type { Product } from '@/types';
 import { productVariantNames } from '@/lib/productVariants';
+import { DEFAULT_PRODUCT_IMAGE } from '@/lib/api';
 
-const PLACEHOLDER = '/placeholder.svg';
+const PLACEHOLDER = DEFAULT_PRODUCT_IMAGE;
 
 function firstUrlInList(list: string[] | undefined): string | undefined {
   const u = list?.map(s => s.trim()).filter(Boolean)[0];

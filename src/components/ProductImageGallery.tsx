@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { productPrimaryImage } from '@/lib/productImages';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import ProductImage from '@/components/ProductImage';
 
 type Props = {
   productId: string;
@@ -83,7 +84,14 @@ export default function ProductImageGallery({
                     : 'border-transparent opacity-70 hover:opacity-100 hover:border-border'
                 )}
               >
-                <img src={src} alt="" className="h-full w-full object-cover" loading="lazy" />
+                <ProductImage
+                  src={src}
+                  alt=""
+                  boxed={false}
+                  paddingClassName="p-1"
+                  containerClassName="h-full w-full bg-muted/20"
+                  imgClassName="h-full w-full"
+                />
               </button>
             ))}
           </div>
@@ -95,15 +103,21 @@ export default function ProductImageGallery({
           onTouchStart={handleTouchStart}
           onTouchEnd={handleTouchEnd}
         >
-          <img
-            src={mainSrc}
-            alt={productName}
+          <div
             className={cn(
-              'h-full w-full object-cover transition-all duration-300',
+              'absolute inset-0 transition-all duration-300',
               isTransitioning ? 'opacity-0 scale-[1.02]' : 'opacity-100 scale-100'
             )}
-            loading="eager"
-          />
+          >
+            <ProductImage
+              src={mainSrc}
+              alt={productName}
+              boxed={false}
+              paddingClassName="p-4 sm:p-5"
+              containerClassName="h-full w-full bg-muted/20"
+              imgClassName="h-full w-full"
+            />
+          </div>
 
           {/* Out of stock stamp */}
           {outOfStock && (

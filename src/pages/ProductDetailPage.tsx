@@ -20,6 +20,7 @@ import { Helmet } from 'react-helmet-async';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useDelayedFlag } from '@/hooks/useDelayedFlag';
 import { RichTextRenderer } from '@/components/RichTextRenderer';
+import ProductImage from '@/components/ProductImage';
 
 const CANONICAL_BASE = 'https://trendnest99.in';
 
@@ -944,9 +945,13 @@ export default function ProductDetailPage() {
                   to={`/product/${encodeURIComponent(p.id)}`}
                   className="rounded-2xl border border-border bg-card overflow-hidden hover:shadow-sm transition-shadow"
                 >
-                  <div className="aspect-square bg-muted">
-                    <img src={p.images?.[0] ?? ''} alt={p.name} className="h-full w-full object-cover" loading="lazy" />
-                  </div>
+                  <ProductImage
+                    src={p.images?.[0] ?? ''}
+                    alt={p.name}
+                    containerClassName="aspect-square w-full bg-muted"
+                    paddingClassName="p-3"
+                    imgClassName="h-full w-full"
+                  />
                   <div className="p-3">
                     <div className="text-sm font-semibold line-clamp-2">{p.name}</div>
                     <div className="mt-1 text-sm font-bold tabular-nums">₹{p.price}</div>
