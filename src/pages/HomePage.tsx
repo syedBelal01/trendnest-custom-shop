@@ -116,11 +116,19 @@ function SectionHeader({ icon, title, linkTo }: { icon: string; title: string; l
     <div className="mb-5 flex items-center justify-between">
       <div className="flex items-center gap-2"><Icon className="text-orange-600" size={24}>{icon}</Icon><h2 className="text-xl font-extrabold tracking-tight text-slate-950 md:text-2xl">{title}</h2></div>
       {linkTo ? (
-        <Link to={linkTo} className="hidden items-center gap-1 text-sm font-bold text-orange-600 md:flex">
-          View All <span>→</span>
+        <Link
+          to={linkTo}
+          className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-extrabold text-orange-600 transition hover:bg-orange-50 sm:text-sm"
+        >
+          View All <span aria-hidden>→</span>
         </Link>
       ) : (
-        <button className="hidden items-center gap-1 text-sm font-bold text-orange-600 md:flex" type="button">View All <span>→</span></button>
+        <button
+          className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-extrabold text-orange-600 transition hover:bg-orange-50 sm:text-sm"
+          type="button"
+        >
+          View All <span aria-hidden>→</span>
+        </button>
       )}
     </div>
   );
