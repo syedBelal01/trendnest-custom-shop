@@ -1,115 +1,409 @@
-import { useCart } from '@/contexts/CartContext';
-import { Link } from 'react-router-dom';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Trash2, ShoppingBag } from 'lucide-react';
-import { useState } from 'react';
-import { productImageForVariant } from '@/lib/productImages';
-import { toast } from 'sonner';
-import { validateCouponApi } from '@/lib/couponsApi';
-import { usePaymentMethod } from '@/contexts/PaymentMethodContext';
+import React, { useState } from "react";
+import { Link } from "react-router-dom";
+import { useCart } from "@/contexts/CartContext";
+import { usePaymentMethod } from "@/contexts/PaymentMethodContext";
+import { productImageForVariant } from "@/lib/productImages";
+import { validateCouponApi } from "@/lib/couponsApi";
+import { toast } from "sonner";
+import type { CartItem } from "@/types";
+
+const Icon = ({ children, className = "", size = 18 }: { children: React.ReactNode; className?: string; size?: number }) => (
+  <span
+    className={`inline-flex items-center justify-center ${className}`}
+    style={{ width: size, height: size, fontSize: size, lineHeight: 1 }}
+    aria-hidden
+  >
+    {children}
+  </span>
+);
+
+const icons = {
+  trash: "🗑",
+  shield: "🛡️",
+  truck: "🚚",
+  coupon: "🏷️",
+  lock: "🔒",
+  plus: "+",
+  minus: "−",
+  arrow: "→",
+  bag: "🛍️",
+} as const;
+
+function QuantityControl({
+  quantity,
+  onDecrease,
+  onIncrease,
+}: {
+  quantity: number;
+  onDecrease: () => void;
+  onIncrease: () => void;
+}) {
+  return (
+    <div className="inline-flex overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+      <button
+        type="button"
+        onClick={onDecrease}
+        className="grid h-11 w-12 place-items-center text-xl font-black text-slate-700 transition hover:bg-orange-50 hover:text-orange-600"
+        aria-label="Decrease quantity"
+      >
+        {icons.minus}
+      </button>
+      <div className="grid h-11 min-w-12 place-items-center border-x border-slate-200 px-4 text-sm font-black text-slate-900">
+        {quantity}
+      </div>
+      <button
+        type="button"
+        onClick={onIncrease}
+        className="grid h-11 w-12 place-items-center text-xl font-black text-slate-700 transition hover:bg-orange-50 hover:text-orange-600"
+        aria-label="Increase quantity"
+      >
+        {icons.plus}
+      </button>
+    </div>
+  );
+}
+
+function CartItemCard({
+  item,
+  image,
+  unitPrice,
+  oldUnitPrice,
+  onIncrease,
+  onDecrease,
+  onRemove,
+}: {
+  item: CartItem;
+  image: string;
+  unitPrice: number;
+  oldUnitPrice?: number;
+  onIncrease: () => void;
+  onDecrease: () => void;
+  onRemove: () => void;
+}) {
+  const size = item.selectedSize || "";
+  const color = item.selectedVariant || "";
+  const sleeve = item.selectedSleeve || "";
+
+  const showOld = typeof oldUnitPrice === "number" && oldUnitPrice > unitPrice;
+
+  return (
+    <div className="group overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-orange-100 hover:shadow-xl">
+      <div className="flex flex-col sm:flex-row">
+        <div className="relative aspect-square w-full overflow-hidden bg-slate-100 sm:w-40 md:w-44">
+          <img src={image} alt={item.product.name} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
+          <span className="absolute left-3 top-3 rounded-md bg-orange-600 px-2.5 py-1 text-xs font-bold text-white">
+            In Cart
+          </span>
+        </div>
+
+        <div className="flex min-w-0 flex-1 flex-col p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="line-clamp-2 text-lg font-black text-slate-950 md:text-xl">{item.product.name}</h3>
+              <p className="mt-2 text-sm text-slate-500">
+                {size && (
+                  <>
+                    Size: <span className="font-bold text-slate-700">{size}</span>
+                    <span className="mx-2 text-slate-300">•</span>
+                  </>
+                )}
+                {color ? (
+                  <>
+                    Color: <span className="font-bold text-slate-700">{color}</span>
+                  </>
+                ) : (
+                  <span className="font-bold text-slate-700">Default</span>
+                )}
+                {sleeve ? (
+                  <>
+                    <span className="mx-2 text-slate-300">•</span>
+                    {sleeve}
+                  </>
+                ) : null}
+              </p>
+
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                <span className="rounded-full bg-orange-50 px-3 py-1 font-bold text-orange-600">Free delivery</span>
+                <span className="rounded-full bg-slate-50 px-3 py-1 font-bold text-slate-600">Secure checkout</span>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={onRemove}
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-slate-50 text-slate-500 transition hover:bg-red-50 hover:text-red-600"
+              aria-label="Remove item"
+            >
+              <Icon size={18}>{icons.trash}</Icon>
+            </button>
+          </div>
+
+          <div className="mt-6 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+            <QuantityControl quantity={item.quantity} onDecrease={onDecrease} onIncrease={onIncrease} />
+
+            <div className="text-left sm:text-right">
+              <p className="text-xs font-bold uppercase tracking-wide text-slate-400">Item Total</p>
+              <div className="mt-1 flex items-end gap-2 sm:justify-end">
+                <p className="text-2xl font-black text-slate-950">₹{unitPrice * item.quantity}</p>
+                {showOld ? <p className="pb-1 text-sm text-slate-400 line-through">₹{oldUnitPrice! * item.quantity}</p> : null}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PriceModeBox({
+  method,
+  onChange,
+}: {
+  method: "cod" | "razorpay";
+  onChange: (m: "cod" | "razorpay") => void;
+}) {
+  return (
+    <div className="rounded-3xl border border-orange-100 bg-gradient-to-br from-orange-50 via-white to-white p-5 shadow-sm">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="grid h-11 w-11 place-items-center rounded-2xl bg-white text-orange-600 shadow-sm">
+            <Icon size={20}>{icons.shield}</Icon>
+          </div>
+          <div>
+            <h2 className="font-black text-slate-950">Price mode</h2>
+            <p className="mt-1 text-sm text-slate-500">Choose COD or online payment.</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 rounded-2xl bg-white p-1 shadow-sm ring-1 ring-slate-100">
+          <button
+            type="button"
+            onClick={() => onChange("cod")}
+            className={`rounded-xl px-6 py-3 text-sm font-black transition ${
+              method === "cod" ? "bg-orange-600 text-white shadow-md shadow-orange-600/20" : "text-slate-600 hover:bg-orange-50 hover:text-orange-600"
+            }`}
+          >
+            COD
+          </button>
+          <button
+            type="button"
+            onClick={() => onChange("razorpay")}
+            className={`rounded-xl px-6 py-3 text-sm font-black transition ${
+              method === "razorpay" ? "bg-orange-600 text-white shadow-md shadow-orange-600/20" : "text-slate-600 hover:bg-orange-50 hover:text-orange-600"
+            }`}
+          >
+            Online
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EmptyCart() {
+  return (
+    <div className="rounded-3xl border border-orange-100 bg-gradient-to-br from-orange-50 via-white to-white p-10 text-center shadow-sm">
+      <div className="mx-auto grid h-20 w-20 place-items-center rounded-full bg-white text-4xl shadow-lg shadow-orange-100">
+        {icons.bag}
+      </div>
+      <h2 className="mt-5 text-2xl font-black text-slate-950">Your cart is empty</h2>
+      <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500">
+        Looks like you haven’t added anything yet. Explore trending products and start shopping.
+      </p>
+      <Link to="/" className="mt-6 inline-block">
+        <button
+          type="button"
+          className="rounded-2xl bg-orange-600 px-7 py-3 text-sm font-black text-white shadow-lg shadow-orange-600/20"
+        >
+          Continue Shopping
+        </button>
+      </Link>
+    </div>
+  );
+}
 
 export default function CartPage() {
-  const { items, removeItem, updateQuantity, discount, couponCode, applyCoupon, unitPriceForItem, totalsForPaymentMethod } = useCart();
+  const {
+    items,
+    removeItem,
+    updateQuantity,
+    discount,
+    couponCode,
+    applyCoupon,
+    unitPriceForItem,
+    totalsForPaymentMethod,
+  } = useCart();
   const { method: paymentMethod, setMethod: setPaymentMethod } = usePaymentMethod();
-  const [code, setCode] = useState('');
+
+  const [code, setCode] = useState("");
+
+  const computed = totalsForPaymentMethod(paymentMethod);
+  const subtotal = computed.subtotal;
+  const total = computed.total;
+  const savings = discount;
 
   const handleCoupon = async () => {
     const trimmed = code.trim();
     if (!trimmed) {
-      toast.error('Enter coupon code');
+      toast.error("Enter coupon code");
       return;
     }
+
     try {
-      const computed = totalsForPaymentMethod(paymentMethod);
       const r = await validateCouponApi({
         code: trimmed,
-        subtotal: computed.subtotal,
-        items: items.map(i => ({ productId: i.product.id, quantity: i.quantity, selectedVariant: i.selectedVariant })),
+        subtotal,
+        items: items.map((i) => ({ productId: i.product.id, quantity: i.quantity, selectedVariant: i.selectedVariant })),
       });
       applyCoupon(r.couponCode, r.discount);
       toast.success(`Coupon applied! You save ₹${r.discount}`);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Invalid or expired coupon');
+      toast.error(e instanceof Error ? e.message : "Invalid or expired coupon");
     }
   };
 
-  if (items.length === 0) {
+  const cartCount = items.reduce((sum, i) => sum + i.quantity, 0);
+
+  if (!items.length) {
     return (
-      <div className="max-w-7xl mx-auto px-3 sm:px-4 py-16 sm:py-20 text-center">
-        <ShoppingBag className="h-12 sm:h-16 w-12 sm:w-16 mx-auto text-muted-foreground mb-4" />
-        <h1 className="text-xl sm:text-2xl font-bold mb-2">Your cart is empty</h1>
-        <p className="text-sm sm:text-base text-muted-foreground mb-4">Add some products to get started!</p>
-        <Link to="/"><Button className="h-10 sm:h-11">Continue Shopping</Button></Link>
+      <div className="mx-auto max-w-7xl px-4 py-6 md:px-8">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h1 className="text-2xl font-black tracking-tight text-slate-950">Cart</h1>
+          <span className="inline-flex items-center gap-2 rounded-full border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-black text-orange-700">
+            <Icon size={15}>{icons.bag}</Icon> {cartCount} item{cartCount === 1 ? "" : "s"}
+          </span>
+        </div>
+
+        <EmptyCart />
+
+        <div className="mt-4 text-center text-sm text-slate-500">
+          Items in cart: <span className="font-bold">{cartCount}</span>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-3 sm:px-4 py-6 sm:py-8">
-      <h1 className="text-2xl sm:text-3xl font-bold mb-4 sm:mb-6">Shopping Cart</h1>
-      <div className="mb-4 rounded-lg border bg-card/40 p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-        <div className="text-sm font-medium">Price mode</div>
-        <div className="flex flex-wrap gap-3 text-sm">
-          <label className="flex items-center gap-2">
-            <input type="radio" name="cartPriceMode" checked={paymentMethod === 'cod'} onChange={() => setPaymentMethod('cod')} />
-            <span className="text-muted-foreground">COD</span>
-          </label>
-          <label className="flex items-center gap-2">
-            <input
-              type="radio"
-              name="cartPriceMode"
-              checked={paymentMethod === 'razorpay'}
-              onChange={() => setPaymentMethod('razorpay')}
-            />
-            <span className="text-muted-foreground">Online</span>
-          </label>
+    <div className="mx-auto max-w-7xl px-4 py-6 md:px-8">
+      <div className="mb-5 flex items-center justify-between gap-3">
+        <h1 className="text-2xl font-black tracking-tight text-slate-950">Cart</h1>
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-2 rounded-full border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-black text-orange-700">
+            <Icon size={15}>{icons.bag}</Icon> {cartCount} item{cartCount === 1 ? "" : "s"}
+          </span>
+          <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-black text-slate-700">
+            <Icon size={15}>{icons.truck}</Icon> Free Delivery
+          </span>
         </div>
       </div>
-      <div className="flex flex-col md:grid md:grid-cols-3 gap-6 sm:gap-8">
-        {/* Cart items */}
-        <div className="md:col-span-2 space-y-3 sm:space-y-4">
-          {items.map(item => (
-            <div key={item.cartLineId} className="flex gap-3 sm:gap-4 border rounded-lg p-3 sm:p-4">
-              <img src={productImageForVariant(item.product, item.selectedVariant)} alt={item.product.name} className="w-16 h-16 sm:w-20 sm:h-20 object-cover rounded-md shrink-0" />
-              <div className="flex-1 min-w-0">
-                <Link to={`/product/${item.product.id}`} className="font-medium text-sm hover:text-primary truncate block">{item.product.name}</Link>
-                <p className="text-xs text-muted-foreground mt-0.5 truncate">
-                  {item.selectedSize && `Size: ${item.selectedSize}`}
-                  {item.selectedVariant && ` • Color: ${item.selectedVariant}`}
-                  {item.selectedSleeve && ` • ${item.selectedSleeve}`}
-                </p>
-                {item.customDesignName && <p className="text-xs text-primary mt-0.5 truncate">🎨 Custom: {item.customDesignName}</p>}
-                <div className="flex items-center gap-2 sm:gap-3 mt-2">
-                  <div className="flex items-center border rounded">
-                    <button type="button" className="px-2.5 py-1.5 text-sm hover:bg-accent active:bg-accent/80 min-w-[2.25rem]" onClick={() => updateQuantity(item.cartLineId, item.quantity - 1)}>−</button>
-                    <span className="px-2.5 sm:px-3 py-1.5 text-sm border-x tabular-nums">{item.quantity}</span>
-                    <button type="button" className="px-2.5 py-1.5 text-sm hover:bg-accent active:bg-accent/80 min-w-[2.25rem]" onClick={() => updateQuantity(item.cartLineId, item.quantity + 1)}>+</button>
-                  </div>
-                  <span className="font-semibold text-sm">₹{unitPriceForItem(item, paymentMethod) * item.quantity}</span>
-                  <button type="button" className="ml-auto text-muted-foreground hover:text-destructive p-1" onClick={() => removeItem(item.cartLineId)}><Trash2 className="h-4 w-4" /></button>
-                </div>
-              </div>
-            </div>
-          ))}
+
+      <section className="grid gap-6 lg:grid-cols-[1fr_390px]">
+        <div className="space-y-5">
+          <PriceModeBox method={paymentMethod} onChange={setPaymentMethod} />
+
+          <div className="space-y-4">
+            {items.map((item) => {
+              const image = productImageForVariant(item.product, item.selectedVariant);
+              const unitPrice = unitPriceForItem(item, paymentMethod);
+              const oldUnitPrice = item.product.originalPrice;
+
+              return (
+                <CartItemCard
+                  key={item.cartLineId}
+                  item={item}
+                  image={image}
+                  unitPrice={unitPrice}
+                  oldUnitPrice={oldUnitPrice}
+                  onIncrease={() => updateQuantity(item.cartLineId, item.quantity + 1)}
+                  onDecrease={() => updateQuantity(item.cartLineId, item.quantity - 1)}
+                  onRemove={() => removeItem(item.cartLineId)}
+                />
+              );
+            })}
+          </div>
         </div>
 
-        {/* Order summary */}
-        <div className="border rounded-lg p-4 sm:p-5 h-fit space-y-4">
-          <h2 className="font-bold text-base">Order Summary</h2>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>₹{totalsForPaymentMethod(paymentMethod).subtotal}</span></div>
-            {discount > 0 && <div className="flex justify-between text-primary"><span>Discount ({couponCode})</span><span>-₹{discount}</span></div>}
-            <div className="flex justify-between"><span className="text-muted-foreground">Delivery</span><span className="text-primary">Free</span></div>
-            <div className="border-t pt-2 flex justify-between font-bold text-base"><span>Total</span><span>₹{totalsForPaymentMethod(paymentMethod).total}</span></div>
+        <aside className="overflow-hidden rounded-3xl border border-orange-100 bg-white shadow-xl shadow-orange-100/70 lg:sticky lg:top-24">
+          <div className="bg-gradient-to-br from-orange-50 via-white to-orange-100 p-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-black uppercase tracking-wide text-orange-600">Checkout</p>
+                <h2 className="mt-1 text-2xl font-black text-slate-950">Order Summary</h2>
+              </div>
+              <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-orange-600 shadow-sm">Secure</span>
+            </div>
           </div>
-          <div className="flex gap-2">
-            <Input value={code} onChange={e => setCode(e.target.value)} placeholder="Coupon code" className="h-10 sm:h-9 text-sm" />
-            <Button variant="outline" size="sm" onClick={handleCoupon} className="h-10 sm:h-9 px-4">Apply</Button>
+
+          <div className="p-6">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-slate-500">Subtotal</span>
+                <span className="font-black text-slate-950">₹{subtotal}</span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-slate-500">Delivery</span>
+                <span className="font-black text-orange-600">Free</span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-slate-500">You saved</span>
+                <span className="font-black text-emerald-600">₹{savings}</span>
+              </div>
+            </div>
+
+            <div className="my-5 border-t border-dashed border-slate-200" />
+
+            <div className="flex items-center justify-between rounded-2xl bg-slate-50 p-4">
+              <span className="text-lg font-black text-slate-950">Total</span>
+              <span className="text-3xl font-black text-slate-950">₹{total}</span>
+            </div>
+
+            <div className="mt-6 rounded-2xl bg-orange-50 p-3">
+              <div className="mb-3 flex items-center gap-2 text-sm font-black text-orange-700">
+                <Icon size={17}>{icons.coupon}</Icon> Apply coupon
+              </div>
+
+              <div className="flex gap-2">
+                <input
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  className="min-w-0 flex-1 rounded-xl border border-orange-100 bg-white px-4 py-3 text-sm outline-none transition focus:border-orange-400"
+                  placeholder="Coupon code"
+                />
+                <button
+                  type="button"
+                  onClick={() => void handleCoupon()}
+                  className="rounded-xl bg-white px-5 py-3 text-sm font-black text-slate-950 shadow-sm transition hover:bg-orange-600 hover:text-white"
+                >
+                  Apply
+                </button>
+              </div>
+
+              {couponCode ? (
+                <p className="mt-2 text-xs text-slate-600">
+                  Applied: <span className="font-bold">{couponCode}</span>
+                </p>
+              ) : null}
+            </div>
+
+            <Link to="/checkout" className="mt-5 block">
+              <button className="w-full mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-orange-600 px-5 py-4 text-base font-black text-white shadow-lg shadow-orange-600/25 transition hover:bg-orange-700 active:scale-[0.98]" type="button">
+                Proceed to Checkout <Icon size={17}>{icons.arrow}</Icon>
+              </button>
+            </Link>
+
+            <div className="mt-5 grid grid-cols-2 gap-3 text-xs text-slate-500">
+              <div className="flex items-center gap-2 rounded-2xl bg-slate-50 p-3">
+                <Icon size={18}>{icons.lock}</Icon>
+                <span>Secure checkout</span>
+              </div>
+              <div className="flex items-center gap-2 rounded-2xl bg-slate-50 p-3">
+                <Icon size={18}>{icons.truck}</Icon>
+                <span>Free delivery</span>
+              </div>
+            </div>
           </div>
-          <Link to="/checkout" className="block"><Button className="w-full h-11 sm:h-10 text-sm font-semibold">Proceed to Checkout</Button></Link>
-        </div>
-      </div>
+        </aside>
+      </section>
     </div>
   );
 }

@@ -815,48 +815,85 @@ export default function CheckoutPage() {
     return null;
   }
 
+  const placeOrderDisabled =
+    submitting || !deliveryValid || (otpRequired && !otpVerified) || !shippingGateReady || !healthShippingLoaded;
+
+  const placeOrderLabel =
+    submitting
+      ? 'Placing order…'
+      : !healthShippingLoaded
+        ? 'Loading checkout…'
+        : !deliveryPinValid
+          ? 'Enter 6-digit pincode'
+          : allowRelaxedShipping === true
+            ? `Place Order — ₹${payableGrandTotal}`
+            : shippingQuoteLoading
+              ? 'Checking delivery estimate…'
+              : isShippingServiceabilityError(shippingQuote)
+                ? shippingQuote.reason === 'not_serviceable'
+                  ? 'Delivery not available'
+                  : 'Shipping unavailable'
+                : !shippingGateReady
+                  ? 'Waiting for delivery estimate…'
+                  : `Place Order — ₹${payableGrandTotal}`;
+
   return (
-    <div className="max-w-3xl mx-auto px-3 sm:px-4 py-6 sm:py-8">
-      <h1 className="text-2xl sm:text-3xl font-bold mb-4 sm:mb-6">Checkout</h1>
-      {allowRelaxedShipping === true && (
-        <div
-          role="status"
-          className="mb-4 rounded-lg border border-amber-500/50 bg-amber-500/10 px-3 py-2.5 text-sm text-amber-950 dark:text-amber-100"
-        >
-          <strong className="font-semibold">Relaxed checkout (non-production).</strong> ALLOW_CHECKOUT_WITHOUT_SHIPPING_QUOTE
-          is enabled on the API. Payable totals use ₹0 shipping until a real Shiprocket quote exists; the backend finalizes
-          charges after order creation. Keep this flag <strong className="font-semibold">false</strong> in production unless
-          you explicitly need a fallback.
+    <div className="bg-white font-sans text-slate-900">
+      <section className="mx-auto max-w-7xl px-4 py-4 md:px-8 md:py-6">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <h1 className="text-2xl font-black tracking-tight text-slate-950">Checkout</h1>
+          <span className="inline-flex items-center gap-2 rounded-full border border-orange-200 bg-orange-50 px-3 py-1.5 text-xs font-black text-orange-700">
+            🔒 Secure
+          </span>
         </div>
-      )}
-      <div className="flex flex-col md:grid md:grid-cols-5 gap-6 sm:gap-8">
-        <form onSubmit={e => void handleVerifyOtp(e)} className="md:col-span-3 space-y-3 sm:space-y-4">
-          <h2 className="font-semibold text-base">Delivery Details</h2>
+
+        {allowRelaxedShipping === true && (
+          <div
+            role="status"
+            className="mb-5 rounded-2xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-950"
+          >
+            <strong className="font-semibold">Relaxed checkout (non-production).</strong> Shipping estimate gate is relaxed.
+          </div>
+        )}
+
+        <div className="grid gap-6 lg:grid-cols-[1fr_390px]">
+          <form onSubmit={e => void handleVerifyOtp(e)} className="space-y-6">
+            <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+              <div className="border-b border-slate-100 bg-gradient-to-br from-orange-50 via-white to-white p-5">
+                <div className="flex items-center gap-3">
+                  <div className="grid h-11 w-11 place-items-center rounded-2xl bg-white text-orange-600 shadow-sm">📍</div>
+                  <div>
+                    <h2 className="text-lg font-black text-slate-950">Delivery Details</h2>
+                    <p className="mt-1 text-sm text-slate-500">Where should we deliver your order?</p>
+                  </div>
+                </div>
+              </div>
+              <div className="p-5 space-y-4">
 
           {addressBookLoading && isLoggedInCheckout && (
-            <div className="text-sm text-muted-foreground py-2">Loading your addresses…</div>
+            <div className="text-sm text-slate-500">Loading your addresses…</div>
           )}
 
           {!isLoggedInCheckout || selectionKey === 'manual' ? (
             <>
-              <Input placeholder="Full Name" value={form.name} onChange={e => set('name', e.target.value)} required className="h-11 sm:h-10" />
-              <Input placeholder="Email" type="email" autoComplete="email" value={form.email} onChange={e => set('email', e.target.value)} required className="h-11 sm:h-10" />
+              <Input placeholder="Full Name" value={form.name} onChange={e => set('name', e.target.value)} required className="h-12 rounded-2xl" />
+              <Input placeholder="Email" type="email" autoComplete="email" value={form.email} onChange={e => set('email', e.target.value)} required className="h-12 rounded-2xl" />
               <div className="space-y-1">
                 <IndianPhoneInput
                   placeholder="10-digit mobile"
                   value={form.phone}
                   onChange={v => set('phone', v)}
                   required
-                  className="h-11 sm:h-10"
+                  className="h-12 rounded-2xl"
                 />
               </div>
             </>
           ) : (
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground" htmlFor="checkout-confirm-email">
+              <label className="text-xs font-black uppercase tracking-wide text-slate-500" htmlFor="checkout-confirm-email">
                 Order confirmation email
               </label>
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-slate-500">
                 Not stored on this address — used for receipts and OTP if needed.
               </p>
               <Input
@@ -866,7 +903,7 @@ export default function CheckoutPage() {
                 value={form.email}
                 onChange={e => set('email', e.target.value)}
                 required
-                className="h-11 sm:h-10"
+                className="h-12 rounded-2xl"
               />
             </div>
           )}
@@ -874,31 +911,31 @@ export default function CheckoutPage() {
           {isLoggedInCheckout && !addressBookLoading && (
             <div className="space-y-3">
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400 pointer-events-none" />
                 <Input
                   value={addressSearchQuery}
                   onChange={e => setAddressSearchQuery(e.target.value)}
                   placeholder="Search Address"
-                  className="h-11 pl-9 rounded-xl bg-background"
+                  className="h-12 pl-10 rounded-2xl bg-white"
                 />
               </div>
 
-              <div className="rounded-2xl border bg-card overflow-hidden divide-y divide-border">
+              <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden divide-y divide-slate-100 shadow-sm">
                 <button
                   type="button"
                   disabled={geoBusy}
                   onClick={() => void handleUseLocation()}
-                  className="w-full flex items-center gap-3 px-4 py-3.5 text-left text-sm font-medium hover:bg-muted/40 transition-colors disabled:opacity-60"
+                  className="w-full flex items-center gap-3 px-4 py-3.5 text-left text-sm font-black hover:bg-orange-50 transition-colors disabled:opacity-60"
                 >
-                  <Crosshair className="h-5 w-5 text-primary shrink-0" />
+                  <Crosshair className="h-5 w-5 text-orange-600 shrink-0" />
                   {geoBusy ? 'Getting location…' : 'Use my Current Location'}
                 </button>
                 <button
                   type="button"
                   onClick={() => openAddAddressDialog()}
-                  className="w-full flex items-center gap-3 px-4 py-3.5 text-left text-sm font-medium hover:bg-muted/40 transition-colors"
+                  className="w-full flex items-center gap-3 px-4 py-3.5 text-left text-sm font-black hover:bg-orange-50 transition-colors"
                 >
-                  <Plus className="h-5 w-5 text-primary shrink-0" />
+                  <Plus className="h-5 w-5 text-orange-600 shrink-0" />
                   <span className="flex-1">Add New Address</span>
                   <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
                 </button>
@@ -1126,16 +1163,16 @@ export default function CheckoutPage() {
           {(!useAddressPicker || selectionKey === 'manual') && (
             <>
               {isLoggedInCheckout && selectionKey === 'manual' && (
-                <p className="text-xs text-muted-foreground">Enter your delivery address below.</p>
+                <p className="text-xs text-slate-500">Enter your delivery address below.</p>
               )}
-              <Input placeholder="Full Address" value={form.address} onChange={e => set('address', e.target.value)} required className="h-11 sm:h-10" />
+              <Input placeholder="Full Address" value={form.address} onChange={e => set('address', e.target.value)} required className="h-12 rounded-2xl" />
               <div className="grid grid-cols-2 gap-3">
                 <Input
                   placeholder="Pincode"
                   value={form.pincode}
                   onChange={e => set('pincode', e.target.value.replace(/[^\d]/g, '').slice(0, 6))}
                   required
-                  className="h-11 sm:h-10"
+                  className="h-12 rounded-2xl"
                 />
                 <Input
                   placeholder="City"
@@ -1145,7 +1182,7 @@ export default function CheckoutPage() {
                     set('city', e.target.value);
                   }}
                   required
-                  className="h-11 sm:h-10"
+                  className="h-12 rounded-2xl"
                 />
               </div>
               <Input
@@ -1155,7 +1192,7 @@ export default function CheckoutPage() {
                   lastAutoState.current = null;
                   set('state', e.target.value);
                 }}
-                className="h-11 sm:h-10"
+                className="h-12 rounded-2xl"
               />
             </>
           )}
@@ -1272,60 +1309,68 @@ export default function CheckoutPage() {
             </div>
           )}
 
-          <div className="border rounded-lg p-3 sm:p-4 bg-muted/50">
-            <p className="text-sm font-medium mb-1">Payment Method</p>
-            <div className="flex flex-col gap-2">
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="radio"
-                  name="paymentMethod"
-                  value="cod"
-                  checked={paymentMethod === 'cod'}
-                  onChange={() => setPaymentMethod('cod')}
-                />
-                <span className="text-muted-foreground">💵 Cash on Delivery (COD)</span>
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="radio"
-                  name="paymentMethod"
-                  value="razorpay"
-                  checked={paymentMethod === 'razorpay'}
-                  onChange={() => setPaymentMethod('razorpay')}
-                />
-                <span className="text-muted-foreground">💳 Online payment (Razorpay)</span>
-              </label>
-            </div>
-          </div>
-          <Button
-            type="button"
-            size="lg"
-            className="w-full h-12 sm:h-11 text-sm sm:text-base font-semibold"
-            disabled={
-              submitting || !deliveryValid || (otpRequired && !otpVerified) || !shippingGateReady || !healthShippingLoaded
-            }
-            onClick={() => void handlePlaceOrder()}
-          >
-            {submitting
-              ? 'Placing order…'
-              : !healthShippingLoaded
-                ? 'Loading checkout…'
-                : !deliveryPinValid
-                  ? 'Enter 6-digit pincode'
-                  : allowRelaxedShipping === true
-                    ? `Place Order — ₹${payableGrandTotal}`
-                    : shippingQuoteLoading
-                      ? 'Checking delivery estimate…'
-                      : isShippingServiceabilityError(shippingQuote)
-                        ? shippingQuote.reason === 'not_serviceable'
-                          ? 'Delivery not available'
-                          : 'Shipping unavailable'
-                        : !shippingGateReady
-                          ? 'Waiting for delivery estimate…'
-                          : `Place Order — ₹${payableGrandTotal}`}
-          </Button>
+              </div>
+            </section>
+
+            <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+              <div className="border-b border-slate-100 bg-gradient-to-br from-orange-50 via-white to-white p-5">
+                <div className="flex items-center gap-3">
+                  <div className="grid h-11 w-11 place-items-center rounded-2xl bg-white text-orange-600 shadow-sm">🔒</div>
+                  <div>
+                    <h2 className="text-lg font-black text-slate-950">Payment Method</h2>
+                    <p className="mt-1 text-sm text-slate-500">Choose how you want to pay</p>
+                  </div>
+                </div>
+              </div>
+              <div className="p-5">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethod('cod')}
+                    className={`rounded-2xl border p-4 text-left transition ${
+                      paymentMethod === 'cod'
+                        ? 'border-orange-500 bg-orange-50 text-orange-700 shadow-sm'
+                        : 'border-slate-200 bg-white text-slate-700 hover:border-orange-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="flex items-center gap-3 text-sm font-black">💵 Cash on Delivery</span>
+                      {paymentMethod === 'cod' ? <span className="text-sm font-black">✓</span> : null}
+                    </div>
+                    <p className="mt-2 text-xs text-slate-500">Pay when your order arrives.</p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethod('razorpay')}
+                    className={`rounded-2xl border p-4 text-left transition ${
+                      paymentMethod === 'razorpay'
+                        ? 'border-orange-500 bg-orange-50 text-orange-700 shadow-sm'
+                        : 'border-slate-200 bg-white text-slate-700 hover:border-orange-200'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="flex items-center gap-3 text-sm font-black">💳 Online payment</span>
+                      {paymentMethod === 'razorpay' ? <span className="text-sm font-black">✓</span> : null}
+                    </div>
+                    <p className="mt-2 text-xs text-slate-500">Pay securely with Razorpay.</p>
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            <button
+              type="button"
+              onClick={() => void handlePlaceOrder()}
+              disabled={placeOrderDisabled}
+              className="hidden w-full items-center justify-center gap-2 rounded-2xl bg-orange-600 px-6 py-4 text-base font-black text-white shadow-lg shadow-orange-600/25 transition hover:bg-orange-700 active:scale-[0.98] lg:flex disabled:opacity-60 disabled:active:scale-100"
+            >
+              {placeOrderLabel}
+              <span aria-hidden className="ml-1">→</span>
+            </button>
+
           {deliveryValid && deliveryPinValid && healthShippingLoaded && !shippingGateReady && !submitting && (
-            <p className="text-xs text-muted-foreground mt-2 text-center">
+            <p className="text-xs text-slate-500 -mt-2 text-center">
               {shippingQuoteLoading
                 ? 'Checking delivery estimate…'
                 : isShippingServiceabilityError(shippingQuote)
@@ -1335,104 +1380,132 @@ export default function CheckoutPage() {
                   : 'Confirming delivery timeline…'}
             </p>
           )}
-        </form>
+          </form>
 
-        <div className="md:col-span-2 border rounded-lg p-4 h-fit order-first md:order-none">
-          <h2 className="font-semibold mb-3 text-base">Order Summary</h2>
-          <div className="space-y-2 text-sm">
-            {items.map(i => (
-              <div key={i.cartLineId} className="flex justify-between gap-2">
-                <span className="truncate pr-2">
-                  {i.product.name} ×{i.quantity}
-                  {itemSummary(i) && (
-                    <span className="text-muted-foreground block text-xs truncate">{itemSummary(i)}</span>
-                  )}
-                </span>
-                <span className="shrink-0">₹{unitPriceForItem(i, paymentMethod) * i.quantity}</span>
-              </div>
-            ))}
-            <div className="border-t pt-2 space-y-1">
-              <div className="flex justify-between text-muted-foreground">
-                <span>Subtotal</span>
-                <span>₹{checkoutMerchandise.subtotal}</span>
-              </div>
-              {discount > 0 && (
-                <div className="flex justify-between text-primary">
-                  <span>Discount {couponCode ? `(${couponCode})` : ''}</span>
-                  <span>-₹{discount}</span>
+          <aside className="overflow-hidden rounded-3xl border border-orange-100 bg-white shadow-xl shadow-orange-100/70 lg:sticky lg:top-24 h-fit">
+            <div className="bg-gradient-to-br from-orange-50 via-white to-orange-100 p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-wide text-orange-600">Checkout</p>
+                  <h2 className="mt-1 text-2xl font-black text-slate-950">Order Summary</h2>
                 </div>
-              )}
-              <div className="pt-2">
+                <span className="rounded-full bg-white px-3 py-1 text-xs font-black text-orange-600 shadow-sm">Secure</span>
+              </div>
+            </div>
+
+            <div className="p-6">
+              <div className="space-y-4">
+                {items.map((i) => (
+                  <div key={i.cartLineId} className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-sm font-black text-slate-950">
+                        {i.product.name} × {i.quantity}
+                      </p>
+                      {itemSummary(i) ? <p className="mt-1 text-xs text-slate-500">{itemSummary(i)}</p> : null}
+                    </div>
+                    <p className="text-sm font-black text-slate-950">₹{unitPriceForItem(i, paymentMethod) * i.quantity}</p>
+                  </div>
+                ))}
+              </div>
+
+              <div className="my-5 border-t border-dashed border-slate-200" />
+
+              <div className="rounded-2xl bg-orange-50 p-3">
+                <div className="mb-3 flex items-center gap-2 text-sm font-black text-orange-700">
+                  🏷️ Apply coupon
+                </div>
                 <div className="flex gap-2">
-                  <Input
+                  <input
+                    className="min-w-0 flex-1 rounded-xl border border-orange-100 bg-white px-4 py-3 text-sm outline-none focus:border-orange-400"
                     value={couponDraft}
-                    onChange={e => setCouponDraft(e.target.value.toUpperCase())}
+                    onChange={(e) => setCouponDraft(e.target.value.toUpperCase())}
                     placeholder="Coupon code"
-                    className="h-10 text-sm"
                     disabled={couponBusy}
                   />
-                  <Button type="button" variant="outline" className="h-10 px-4" onClick={() => void applyCheckoutCoupon()} disabled={couponBusy}>
+                  <button
+                    type="button"
+                    onClick={() => void applyCheckoutCoupon()}
+                    disabled={couponBusy}
+                    className="rounded-xl bg-white px-5 py-3 text-sm font-black text-slate-950 shadow-sm transition hover:bg-orange-600 hover:text-white disabled:opacity-60"
+                  >
                     {couponBusy ? 'Applying…' : 'Apply'}
-                  </Button>
+                  </button>
                 </div>
-                <p className="text-[11px] text-muted-foreground mt-1">
-                  Coupons are validated automatically for the items in your cart.
-                </p>
+                <p className="mt-2 text-xs text-slate-500">Coupons are validated automatically for items in your cart.</p>
               </div>
-              <div className="flex justify-between text-muted-foreground">
-                <span>
-                  Shipping {shippingQuoteLoading ? '(checking…)' : ''}
-                </span>
-                <span>
-                  {shippingQuoteLoading
-                    ? '…'
-                    : shippingQuote?.ok
-                      ? 'Free'
-                      : allowRelaxedShipping === true
-                        ? '—'
-                        : isShippingServiceabilityError(shippingQuote) && shippingQuote.reason === 'not_serviceable'
-                          ? 'N/A'
-                          : '—'}
-                </span>
-              </div>
-              {shippingQuote?.ok && (shippingQuote.estimatedDeliveryDays != null || shippingQuote.estimatedDeliveryDate) && (
-                <div className="flex justify-between text-muted-foreground text-xs">
-                  <span>Estimated delivery</span>
-                  <span>
-                    {shippingQuote.estimatedDeliveryDays != null
-                      ? `${shippingQuote.estimatedDeliveryDays} day(s)`
-                      : shippingQuote.estimatedDeliveryDate
-                        ? new Date(shippingQuote.estimatedDeliveryDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
-                        : '—'}
+
+              <div className="mt-5 space-y-3 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Subtotal</span>
+                  <span className="font-black text-slate-950">₹{checkoutMerchandise.subtotal}</span>
+                </div>
+                {discount > 0 && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Discount {couponCode ? `(${couponCode})` : ''}</span>
+                    <span className="font-black text-emerald-700">-₹{discount}</span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Shipping</span>
+                  <span className="font-black text-orange-600">
+                    {shippingQuoteLoading ? '…' : shippingQuote?.ok ? 'Free' : allowRelaxedShipping === true ? '—' : '—'}
                   </span>
                 </div>
-              )}
-              {allowRelaxedShipping === true && !shippingQuoteHasEta && deliveryPinValid && (
-                <p className="text-[11px] text-amber-900 dark:text-amber-200/90 leading-snug col-span-full">
-                  Delivery estimate is still loading. You can continue once it’s available.
-                </p>
-              )}
-              <div className="flex justify-between text-muted-foreground text-xs">
-                <span>Items after discount</span>
-                <span>₹{checkoutMerchandise.total}</span>
+                {shippingQuote?.ok && (shippingQuote.estimatedDeliveryDays != null || shippingQuote.estimatedDeliveryDate) && (
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500">Estimated delivery</span>
+                    <span className="font-bold text-slate-700">
+                      {shippingQuote.estimatedDeliveryDays != null
+                        ? `${shippingQuote.estimatedDeliveryDays} day(s)`
+                        : shippingQuote.estimatedDeliveryDate
+                          ? new Date(shippingQuote.estimatedDeliveryDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+                          : '—'}
+                    </span>
+                  </div>
+                )}
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Items after discount</span>
+                  <span className="font-bold text-slate-700">₹{checkoutMerchandise.total}</span>
+                </div>
               </div>
-              <div className="flex justify-between font-bold pt-1 border-t">
-                <span>Total payable</span>
-                <span className="tabular-nums">
+
+              <div className="my-5 border-t border-dashed border-slate-200" />
+
+              <div className="flex items-center justify-between rounded-2xl bg-slate-50 p-4">
+                <span className="text-lg font-black text-slate-950">Total payable</span>
+                <span className="text-3xl font-black text-slate-950 tabular-nums">
                   {!healthShippingLoaded
                     ? '…'
                     : !deliveryPinValid
                       ? '—'
-                      : shippingQuoteLoading && allowRelaxedShipping !== true
-                        ? 'Calculating…'
-                        : shippingGateReady
-                          ? `₹${payableGrandTotal}`
-                          : '—'}
+                      : shippingGateReady
+                        ? `₹${payableGrandTotal}`
+                        : '—'}
                 </span>
               </div>
+
+              <div className="mt-5 grid grid-cols-2 gap-3 text-xs text-slate-500">
+                <div className="flex items-center gap-2 rounded-2xl bg-slate-50 p-3">
+                  🔒 <span>Secure payment</span>
+                </div>
+                <div className="flex items-center gap-2 rounded-2xl bg-slate-50 p-3">
+                  🚚 <span>Free delivery</span>
+                </div>
+              </div>
             </div>
-          </div>
+          </aside>
         </div>
+      </section>
+
+      <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-slate-100 bg-white/95 p-4 shadow-2xl backdrop-blur-xl lg:hidden">
+        <button
+          type="button"
+          onClick={() => void handlePlaceOrder()}
+          disabled={placeOrderDisabled}
+          className="flex w-full items-center justify-center gap-2 rounded-2xl bg-orange-600 px-6 py-4 text-base font-black text-white shadow-lg shadow-orange-600/25 active:scale-[0.98] disabled:opacity-60 disabled:active:scale-100"
+        >
+          {placeOrderLabel} <span aria-hidden>→</span>
+        </button>
       </div>
 
       <Dialog open={editOpen} onOpenChange={setEditOpen}>

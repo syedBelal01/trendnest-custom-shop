@@ -1,166 +1,162 @@
-import { Link } from 'react-router-dom';
-import { categories } from '@/data/mockData';
-import { useProducts } from '@/contexts/ProductsContext';
-import ProductCard from '@/components/ProductCard';
-import { Button } from '@/components/ui/button';
-import { ArrowRight, Truck, Shield, Headphones } from 'lucide-react';
-import HeroCarousel from '@/components/HeroCarousel';
-import { Helmet } from 'react-helmet-async';
-import { DEFAULT_PRODUCT_IMAGE } from '@/lib/api';
-import ProductCardSkeleton from '@/components/ProductCardSkeleton';
-import { useDelayedFlag } from '@/hooks/useDelayedFlag';
+import React from "react";
+import { Link } from "react-router-dom";
+import HeroCarousel from "@/components/HeroCarousel";
+import { categories as mockCategories } from "@/data/mockData";
+import { useProducts } from "@/contexts/ProductsContext";
+import { useCart } from "@/contexts/CartContext";
+import { productPrimaryImage } from "@/lib/productImages";
+import { productVariantNames } from "@/lib/productVariants";
+import { type RatingSummary } from "@/lib/reviewsSummaryApi";
+import type { Product } from "@/types";
 
-const CANONICAL_BASE = 'https://trendnest99.in';
+const Icon = ({ children, className = "", size = 20 }) => (
+  <span
+    className={`inline-flex items-center justify-center ${className}`}
+    style={{ width: size, height: size, fontSize: size }}
+  >
+    {children}
+  </span>
+);
 
-export default function HomePage() {
-  const { products, loading } = useProducts();
-  const showSkeleton = useDelayedFlag(loading, 250);
-  const trending = products.filter(p => p.isTrending).slice(0, 4);
-  const deals = products.slice(0, 4);
-  const fashion = products.filter(p => p.category === 'fashion');
+const icons = {
+  search: "⌕",
+  cart: "🛒",
+  user: "👤",
+  heart: "♡",
+  star: "★",
+  truck: "🚚",
+  shield: "🛡️",
+  headset: "🎧",
+  return: "↻",
+  home: "🏠",
+  shirt: "👕",
+  flame: "🔥",
+  gift: "🎁",
+  send: "➤",
+  instagram: "◎",
+  facebook: "f",
+  youtube: "▶",
+  whatsapp: "☘",
+  package: "📦",
+  percent: "%",
+  tag: "🏷️",
+  phone: "📱",
+};
+
+function discountPercent(product: Product) {
+  const mrp = product.originalPrice;
+  if (!mrp || mrp <= 0) return 0;
+  if (mrp <= product.price) return 0;
+  return Math.round(((mrp - product.price) / mrp) * 100);
+}
+
+function ProductCard({ product, ratingSummary }: { product: Product; ratingSummary: Record<string, RatingSummary> }) {
+  const { addItem } = useCart();
+  const summary = ratingSummary?.[product.id];
+  const avg = summary?.avgRating ?? product.rating ?? 0;
+  const reviewCount = summary?.reviewCount ?? product.reviews?.length ?? 0;
+  const dp = discountPercent(product);
 
   return (
-    <div>
-      <Helmet>
-        <title>TrendNest99 | Trendy Fashion, Home Essentials & Custom Prints</title>
-        <meta
-          name="description"
-          content="Shop trending fashion, home essentials, and custom print products at great prices. Cash on delivery available across India."
+    <div className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl">
+      <Link to={`/product/${product.id}`} className="block relative aspect-square overflow-hidden rounded-t-2xl bg-slate-100">
+        <img
+          src={productPrimaryImage(product)}
+          alt={product.name}
+          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
         />
-        <link rel="canonical" href={`${CANONICAL_BASE}/`} />
-        <meta property="og:type" content="website" />
-        <meta property="og:title" content="TrendNest99 | Trendy Fashion, Home Essentials & Custom Prints" />
-        <meta
-          property="og:description"
-          content="Shop trending fashion, home essentials, and custom print products at great prices. Cash on delivery available across India."
-        />
-        <meta property="og:url" content={`${CANONICAL_BASE}/`} />
-        <meta property="og:image" content={`${CANONICAL_BASE}/img3.jpeg`} />
-        <meta name="twitter:card" content="summary_large_image" />
-        <meta name="twitter:image" content={`${CANONICAL_BASE}/img3.jpeg`} />
-      </Helmet>
-      {/* Hero */}
-      <section className="relative bg-gradient-to-br from-primary/10 via-background to-accent overflow-hidden">
-        <div className="max-w-7xl mx-auto px-3 sm:px-4 py-8 sm:py-16 md:py-24 flex flex-col md:flex-row items-center gap-6 sm:gap-8">
-          <div className="flex-1 space-y-4 sm:space-y-6 text-center md:text-left">
-            <span className="inline-block bg-primary/10 text-primary text-xs sm:text-sm font-semibold px-3 sm:px-4 py-1 sm:py-1.5 rounded-full">🔥 New Arrivals</span>
-            <h1 className="text-3xl sm:text-4xl md:text-6xl font-bold leading-tight">Style Meets <br /><span className="text-primary">Affordability</span></h1>
-            <p className="text-muted-foreground text-sm sm:text-lg max-w-md mx-auto md:mx-0">Discover trending fashion, home essentials & custom prints — all at unbeatable prices.</p>
-            <div className="flex gap-3 justify-center md:justify-start">
-              <Link to="/category/trending"><Button size="lg" className="gap-2 h-10 sm:h-11 text-sm sm:text-base px-4 sm:px-6">Shop Trending <ArrowRight className="h-4 w-4" /></Button></Link>
-              <Link to="#fashion-picks"><Button size="lg" variant="outline" className="h-10 sm:h-11 text-sm sm:text-base px-4 sm:px-6">Shop Style</Button></Link>
-            </div>
+        {dp > 0 && (
+          <span className="absolute left-3 top-3 rounded-md bg-orange-600 px-2.5 py-1 text-xs font-bold text-white">{dp}% OFF</span>
+        )}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          className="absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-full bg-white/95 text-slate-700 shadow-sm transition hover:text-orange-600"
+        >
+          <Icon size={18}>{icons.heart}</Icon>
+        </button>
+      </Link>
+      <div className="p-4">
+        <Link to={`/product/${product.id}`} className="block">
+          <h3 className="line-clamp-1 text-sm font-bold text-slate-900 transition-colors hover:text-orange-600">{product.name}</h3>
+        </Link>
+        <div className="mt-2 flex items-end gap-2">
+          <span className="text-lg font-extrabold text-slate-900">₹{product.price}</span>
+          {product.originalPrice ? <span className="text-xs text-slate-400 line-through">₹{product.originalPrice}</span> : null}
+        </div>
+        <div className="mt-2 flex items-center gap-1 text-xs text-slate-500">
+          <div className="flex text-amber-400">
+            {Array.from({ length: 5 }).map((_, i) => <Icon key={i} size={12}>{icons.star}</Icon>)}
           </div>
-          <div className="flex-1 relative w-full max-w-xs sm:max-w-sm md:max-w-md mx-auto">
-            <HeroCarousel />
+          <span>{avg.toFixed(1)} ({reviewCount} reviews)</span>
+        </div>
+        <button
+          type="button"
+          onClick={() => addItem({
+            product,
+            quantity: 1,
+            selectedSize: product.sizes?.[0],
+            selectedVariant: product.variantModel?.items?.[0]?.key ?? productVariantNames(product)[0],
+            selectedSleeve: product.sleeveTypes?.[0],
+          })}
+          className="mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-orange-600 text-sm font-bold text-white transition hover:bg-orange-700 active:scale-[0.98]"
+        >
+          <Icon size={15}>{icons.cart}</Icon> Add to Cart
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SectionHeader({ icon, title, linkTo }: { icon: string; title: string; linkTo?: string }) {
+  return (
+    <div className="mb-5 flex items-center justify-between">
+      <div className="flex items-center gap-2"><Icon className="text-orange-600" size={24}>{icon}</Icon><h2 className="text-xl font-extrabold tracking-tight text-slate-950 md:text-2xl">{title}</h2></div>
+      {linkTo ? (
+        <Link to={linkTo} className="hidden items-center gap-1 text-sm font-bold text-orange-600 md:flex">
+          View All <span>→</span>
+        </Link>
+      ) : (
+        <button className="hidden items-center gap-1 text-sm font-bold text-orange-600 md:flex" type="button">View All <span>→</span></button>
+      )}
+    </div>
+  );
+}
+
+export default function HomePage() {
+  const { products, ratingSummary } = useProducts();
+  const trendingNow = products.filter(p => p.isTrending).slice(0, 4);
+  const bestDeals = products.filter(p => p.isBestDeal).slice(0, 4);
+  const dealsFallback = products.slice(0, 4);
+  const deals = bestDeals.length ? bestDeals : dealsFallback;
+
+  return (
+    <div className="bg-white font-sans text-slate-900">
+      <div className="mx-auto max-w-7xl px-4 py-6 md:px-8">
+        <section className="relative overflow-hidden rounded-3xl border border-orange-100 bg-gradient-to-br from-orange-50 via-white to-orange-100 p-6 shadow-sm md:p-14">
+          <div className="absolute right-12 top-8 h-28 w-28 rounded-full bg-orange-200/40 blur-2xl" />
+          <div className="absolute bottom-8 left-1/3 h-20 w-20 rounded-full bg-orange-300/20 blur-2xl" />
+          <div className="grid items-center gap-10 md:grid-cols-2">
+            <div className="relative z-10"><span className="inline-flex items-center gap-2 rounded-full border border-orange-200 bg-white px-4 py-2 text-sm font-bold text-orange-600 shadow-sm"><Icon size={15}>{icons.flame}</Icon> New Arrivals</span><h1 className="mt-6 max-w-xl text-5xl font-black leading-[0.95] tracking-tight text-slate-950 md:text-7xl">Style Meets <span className="text-orange-600">Affordability</span></h1><p className="mt-5 max-w-md text-base leading-7 text-slate-600">Discover trending fashion, home essentials and custom prints — all at unbeatable prices.</p><div className="mt-8 flex flex-wrap gap-3"><Link to="/category/trending" className="rounded-xl bg-orange-600 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-orange-600/20 transition hover:bg-orange-700">Shop Trending →</Link><Link to="/category/home" className="rounded-xl border border-slate-200 bg-white px-6 py-3 text-sm font-bold text-slate-800 shadow-sm transition hover:bg-slate-50">Shop Style</Link></div></div>
+            <div className="relative z-10 flex justify-center"><div className="relative flex aspect-square w-full max-w-md items-stretch justify-center rounded-full bg-gradient-to-br from-orange-200 to-orange-100 shadow-2xl shadow-orange-200/50"><div className="absolute bottom-8 h-20 w-64 rounded-[50%] bg-slate-900/10 blur-xl" /><div className="relative z-10 w-full h-full"><HeroCarousel /></div></div></div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      {/* Features bar */}
-      <section className="border-y bg-card">
-        <div className="max-w-7xl mx-auto px-3 sm:px-4 py-3 sm:py-4 grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4">
-          {[
-            { icon: Truck, label: 'Free Delivery', desc: '₹0 Delivery Charges' },
-            { icon: Shield, label: 'Secure Payments', desc: 'Cash on Delivery' },
-            { icon: Headphones, label: '24/7 Support', desc: 'WhatsApp support' },
-          ].map(f => (
-            <div key={f.label} className="flex items-center gap-3 justify-center">
-              <f.icon className="h-5 w-5 text-primary shrink-0" />
-              <div>
-                <p className="text-sm font-semibold">{f.label}</p>
-                <p className="text-xs text-muted-foreground">{f.desc}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
+        <section className="mx-auto -mt-1 grid max-w-6xl grid-cols-2 gap-3 rounded-2xl bg-white p-4 shadow-xl shadow-slate-200/70 md:-mt-2 md:grid-cols-4 md:p-5">
+          {[[icons.truck, "Free Delivery", "Free delivery on all orders"], [icons.shield, "Secure Payments", "100% safe & secure"], [icons.headset, "24/7 Support", "We're here to help"], [icons.return, "Easy Returns", "Hassle-free returns"]].map(([icon, title, sub]) => <div key={title} className="flex items-center gap-3 border-slate-100 md:border-r last:md:border-r-0"><Icon size={28} className="shrink-0 text-orange-600">{icon}</Icon><div><p className="text-sm font-extrabold">{title}</p><p className="text-xs text-slate-500">{sub}</p></div></div>)}
+        </section>
 
-      {/* Fashion */}
-      <section id="fashion-picks" className="max-w-7xl mx-auto px-3 sm:px-4 py-8 sm:py-12 scroll-mt-20">
-        <div className="flex items-center justify-between mb-4 sm:mb-6">
-          <h2 className="text-xl sm:text-2xl font-bold">👔 Style & Apparel</h2>
-          <span className="text-xs sm:text-sm text-muted-foreground hidden sm:inline">Curated on your home page</span>
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
-          {showSkeleton
-            ? Array.from({ length: 4 }, (_, i) => <ProductCardSkeleton key={`fashion-skel-${i}`} />)
-            : fashion.map(p => <ProductCard key={p.id} product={p} />)}
-        </div>
-      </section>
+        <section className="mt-12"><SectionHeader icon={icons.flame} title="Trending Now" linkTo="/category/trending" /><div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">{trendingNow.map((product) => <ProductCard key={product.id} product={product} ratingSummary={ratingSummary} />)}</div></section>
 
-      {/* Categories */}
-      <section className="max-w-7xl mx-auto px-3 sm:px-4 py-8 sm:py-12">
-        <h2 className="text-xl sm:text-2xl font-bold mb-4 sm:mb-6">Shop by Category</h2>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 sm:gap-4 max-w-5xl">
-          {categories.map(c => (
-            <Link key={c.id} to={`/category/${c.id}`} className="group relative aspect-[4/3] rounded-xl overflow-hidden border">
-              <img
-                src={c.image}
-                alt={c.name}
-                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                loading="lazy"
-                onError={(e) => {
-                  const img = e.currentTarget;
-                  img.onerror = null;
-                  img.src = DEFAULT_PRODUCT_IMAGE;
-                }}
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-foreground/70 to-transparent" />
-              <div className="absolute bottom-2 sm:bottom-3 left-2 sm:left-3 text-background">
-                <p className="text-sm sm:text-lg font-bold">{c.icon} {c.name}</p>
-                <p className="text-[10px] sm:text-xs opacity-80 line-clamp-1">{c.description}</p>
-              </div>
-            </Link>
-          ))}
-        </div>
-      </section>
+        <section className="mt-12"><SectionHeader icon={icons.tag} title="Shop by Category" /><div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-5">{mockCategories.map(({ id, name, description, image, icon }) => <Link key={id} to={`/category/${id}`} className="group relative h-44 overflow-hidden rounded-2xl shadow-sm"><img src={image} alt={name} className="h-full w-full object-cover transition duration-500 group-hover:scale-110" /><div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/25 to-transparent" /><div className="absolute bottom-4 left-4 right-4 text-white"><Icon size={22} className="mb-2">{icon}</Icon><h3 className="font-extrabold">{name}</h3><p className="text-xs text-white/80">{description}</p></div></Link>)}</div></section>
 
-      {/* Trending */}
-      <section className="max-w-7xl mx-auto px-3 sm:px-4 py-8 sm:py-12">
-        <div className="flex items-center justify-between mb-4 sm:mb-6">
-          <h2 className="text-xl sm:text-2xl font-bold">🔥 Trending Now</h2>
-          <Link to="/category/trending" className="text-primary text-xs sm:text-sm font-medium hover:underline">View All →</Link>
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
-          {showSkeleton
-            ? Array.from({ length: 4 }, (_, i) => <ProductCardSkeleton key={`trending-skel-${i}`} />)
-            : trending.map(p => <ProductCard key={p.id} product={p} />)}
-        </div>
-      </section>
+        <section className="mt-12 rounded-3xl bg-orange-50/70 p-5 md:p-8"><SectionHeader icon={icons.gift} title="Best Deals" linkTo="/best-deals" /><div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">{deals.map((product) => <ProductCard key={`deal-${product.id}`} product={product} ratingSummary={ratingSummary} />)}</div></section>
 
-      {/* Deals */}
-      <section className="bg-primary/5 py-8 sm:py-12">
-        <div className="max-w-7xl mx-auto px-3 sm:px-4">
-          <div className="flex items-center justify-between mb-4 sm:mb-6">
-            <h2 className="text-xl sm:text-2xl font-bold">💰 Best Deals</h2>
-            <Link to="/best-deals" className="text-primary text-xs sm:text-sm font-medium hover:underline">View All →</Link>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
-            {showSkeleton
-              ? Array.from({ length: 4 }, (_, i) => <ProductCardSkeleton key={`deals-skel-${i}`} />)
-              : deals.map(p => <ProductCard key={p.id} product={p} />)}
-          </div>
-        </div>
-      </section>
-
-      {/* Custom Print CTA */}
-      <section className="max-w-7xl mx-auto px-3 sm:px-4 py-8 sm:py-12">
-        <div className="border-2 border-dashed border-primary/30 rounded-2xl p-5 sm:p-8 md:p-12 text-center bg-primary/5">
-          <h2 className="text-xl sm:text-2xl md:text-3xl font-bold mb-2">🎨 Upload Your Own Design</h2>
-          <p className="text-muted-foreground text-sm sm:text-lg mb-4">Get your custom design printed on T-shirts & cups — starting at ₹499!</p>
-          <Link to="/custom-print"><Button size="lg" className="gap-2 h-10 sm:h-11 text-sm sm:text-base">Start Designing <ArrowRight className="h-4 w-4" /></Button></Link>
-        </div>
-      </section>
-
-      {/* Offer Banner */}
-      <section className="max-w-7xl mx-auto px-3 sm:px-4 py-8 sm:py-12">
-        <div className="bg-primary rounded-2xl p-5 sm:p-8 md:p-12 text-primary-foreground text-center">
-          <h2 className="text-xl sm:text-2xl md:text-3xl font-bold mb-2">Use Code WELCOME10</h2>
-          <p className="text-sm sm:text-lg opacity-90 mb-4">Get 10% off on your first order!</p>
-          <Link to="/category/trending"><Button variant="secondary" size="lg" className="h-10 sm:h-11 text-sm sm:text-base">Shop Now</Button></Link>
-        </div>
-      </section>
+        <section className="mt-12 grid gap-6 lg:grid-cols-2"><div className="relative overflow-hidden rounded-3xl border border-orange-100 bg-gradient-to-br from-orange-50 to-white p-8 shadow-sm"><div className="flex items-center gap-5"><div className="grid h-24 w-24 place-items-center rounded-3xl bg-white shadow-lg"><Icon size={46} className="text-orange-600">{icons.shirt}</Icon></div><div><h3 className="text-2xl font-black">Upload Your Own Design</h3><p className="mt-2 text-sm leading-6 text-slate-600">Get your custom design printed on T-shirts & cups — starting at ₹499!</p><Link to="/custom-print" className="mt-4 inline-flex items-center justify-center w-fit rounded-xl bg-orange-600 px-5 py-3 text-sm font-bold text-white">Start Designing <span className="ml-1">→</span></Link></div></div></div><div className="relative overflow-hidden rounded-3xl bg-orange-600 p-8 text-white shadow-xl shadow-orange-500/20"><div className="absolute -right-10 -top-10 h-36 w-36 rounded-full bg-white/10" /><div className="flex items-center gap-5"><div className="grid h-24 w-24 place-items-center rounded-3xl bg-white/15"><Icon size={48}>{icons.percent}</Icon></div><div><h3 className="text-2xl font-black">Use Code WELCOME10</h3><p className="mt-2 text-sm text-white/85">Get 10% off on your first order!</p><Link to="/category/trending" className="mt-4 inline-flex items-center justify-center w-fit rounded-xl bg-white px-5 py-3 text-sm font-bold text-orange-600">Shop Now <span className="ml-1">→</span></Link></div></div></div></section>
+      </div>
     </div>
   );
 }

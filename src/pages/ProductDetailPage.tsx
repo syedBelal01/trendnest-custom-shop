@@ -2,7 +2,6 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import { useProducts } from '@/contexts/ProductsContext';
 import { useCart } from '@/contexts/CartContext';
 import { Button } from '@/components/ui/button';
-import ProductImageGallery from '@/components/ProductImageGallery';
 import RatingSummaryInline from '@/components/reviews/RatingSummaryInline';
 import { useEffect, useMemo, useState } from 'react';
 import { ShoppingCart, ArrowLeft, Minus, Plus, Check, ChevronDown, ChevronUp, Truck, ShieldCheck, BadgeCheck, Package } from 'lucide-react';
@@ -46,7 +45,7 @@ function productJsonLd(args: {
     category,
   } = args;
 
-  const product: any = {
+  const product: Record<string, unknown> = {
     '@context': 'https://schema.org',
     '@type': 'Product',
     name,
@@ -76,7 +75,7 @@ function productJsonLd(args: {
 
 function breadcrumbJsonLd(args: { url: string; categoryId?: string; categoryName?: string; productName: string }) {
   const { url, categoryId, categoryName, productName } = args;
-  const itemListElement: any[] = [
+  const itemListElement: Array<Record<string, unknown>> = [
     { '@type': 'ListItem', position: 1, name: 'Home', item: `${CANONICAL_BASE}/` },
   ];
   if (categoryId && categoryName) {
@@ -187,6 +186,7 @@ export default function ProductDetailPage() {
   const [pincode, setPincode] = useState('');
   const [shippingQuote, setShippingQuote] = useState<ShippingServiceabilityResult | null>(null);
   const [shippingBusy, setShippingBusy] = useState(false);
+  const [selectedImage, setSelectedImage] = useState<string>('');
 
   const hasVariantModel = !!(product?.variantModel?.items?.length);
 
@@ -358,6 +358,10 @@ export default function ProductDetailPage() {
     return galleryImagesForSelection(product, selectedVariant);
   }, [product, selectedVariant, hasVariantModel, selectedVariantItem]);
 
+  useEffect(() => {
+    setSelectedImage(galleryImages[0] ? String(galleryImages[0]) : '');
+  }, [galleryImages, selectedVariantKey, selectedVariant]);
+
   const specRows = useMemo(() => {
     if (!product) return [];
     return parseProductSpecifications(fetchedProduct ?? product);
@@ -482,68 +486,74 @@ export default function ProductDetailPage() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-10 md:items-start">
           {/* Image gallery */}
-          <ProductImageGallery
-            productId={product.id}
-            images={galleryImages}
-            productName={product.name}
-            outOfStock={!inStock}
-            resetKey={hasVariantModel ? selectedVariantKey : selectedVariant}
-          />
+          <div className="grid gap-3 md:gap-4 md:grid-cols-[78px_1fr]">
+            <div className="order-2 flex gap-2 overflow-x-auto md:order-1 md:flex-col md:overflow-visible">
+              {galleryImages.map((img) => {
+                const image = String(img || '').trim();
+                if (!image) return null;
+                const active = selectedImage === image;
+                return (
+                  <button
+                    key={image}
+                    type="button"
+                    onClick={() => setSelectedImage(image)}
+                    className={`h-14 w-14 shrink-0 overflow-hidden rounded-2xl border bg-white p-0.5 shadow-sm transition md:h-20 md:w-20 md:p-1 ${
+                      active ? 'border-orange-500 ring-2 ring-orange-100' : 'border-slate-200 hover:border-orange-200'
+                    }`}
+                  >
+                    <img src={image} alt="Product thumbnail" className="h-full w-full rounded-xl object-cover" loading="lazy" />
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="order-1 overflow-hidden rounded-3xl border border-slate-200 bg-slate-100 shadow-sm md:order-2">
+              <div className="relative aspect-square">
+                {selectedImage ? (
+                  <img src={selectedImage} alt={product.name} className="h-full w-full object-cover" />
+                ) : (
+                  <div className="h-full w-full bg-slate-200" />
+                )}
+
+                {!inStock ? (
+                  <span className="absolute left-4 top-4 rounded-full bg-slate-950/90 px-4 py-2 text-xs font-black text-white shadow-sm">
+                    Out of Stock
+                  </span>
+                ) : discount > 0 ? (
+                  <span className="absolute left-4 top-4 rounded-full bg-orange-600 px-4 py-2 text-xs font-black text-white shadow-sm">
+                    {discount}% OFF
+                  </span>
+                ) : null}
+
+                <button
+                  type="button"
+                  className="absolute right-4 top-4 grid h-11 w-11 place-items-center rounded-full bg-white/95 text-orange-600 shadow-sm"
+                >
+                  ♡
+                </button>
+              </div>
+            </div>
+          </div>
 
           {/* Product info */}
-          <div className="space-y-5">
-            {/* Badges row */}
-            <div className="flex flex-wrap items-center gap-2">
+          <div className="rounded-3xl border border-orange-100 bg-white p-5 shadow-xl shadow-orange-100/60 md:p-6 space-y-5">
+            <div className="flex flex-wrap gap-2">
               {product.isTrending && (
-                <span className="inline-flex items-center gap-1 bg-primary/10 text-primary text-xs font-semibold px-2.5 py-1 rounded-full">
+                <span className="inline-flex items-center gap-1 rounded-full bg-orange-50 px-3 py-1 text-xs font-black text-orange-600">
                   🔥 Trending
                 </span>
               )}
-              {inStock ? (
-                <span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full">
-                  <Check className="h-3 w-3" /> In Stock
-                </span>
-              ) : (
-                <span className="text-xs font-medium text-destructive bg-destructive/10 px-2.5 py-1 rounded-full">Out of Stock</span>
-              )}
+              <span
+                className={`inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-black ${
+                  inStock ? 'bg-green-50 text-green-600' : 'bg-rose-50 text-rose-600'
+                }`}
+              >
+                <span className="text-[11px]">{inStock ? '✓' : '!'}</span> {stockMessage}
+              </span>
             </div>
 
-            {/* Delivery check */}
-            <div className="rounded-2xl border bg-card p-4 space-y-2">
-              <div className="flex items-center gap-2 text-sm font-semibold">
-                <Truck className="h-4 w-4 text-primary" />
-                Check delivery
-              </div>
-              <div className="flex gap-2">
-                <Input
-                  value={pincode}
-                  onChange={e => setPincode(e.target.value.replace(/[^\d]/g, '').slice(0, 6))}
-                  placeholder="Enter pincode"
-                  className="h-10"
-                  inputMode="numeric"
-                />
-              </div>
-              <div className="text-xs text-muted-foreground">
-                {shippingBusy
-                  ? 'Checking serviceability…'
-                  : shippingQuote?.ok
-                    ? `Free shipping${
-                        shippingQuote.estimatedDeliveryDays != null ? ` · ETA ${shippingQuote.estimatedDeliveryDays} day(s)` : ''
-                      }`
-                    : isShippingServiceabilityError(shippingQuote) && shippingQuote.reason === 'not_serviceable'
-                      ? 'Not serviceable for this pincode'
-                      : pincode.replace(/[^\d]/g, '').length === 6
-                        ? 'Shipping info currently unavailable'
-                        : 'Enter your pincode to see charges and ETA'}
-              </div>
-            </div>
+            <h1 className="text-2xl font-black leading-tight tracking-tight text-slate-950 md:text-4xl">{product.name}</h1>
 
-            {/* Title */}
-            <h1 className="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight leading-tight text-foreground">
-              {product.name}
-            </h1>
-
-            {/* Rating */}
             <div className="flex items-center">
               <RatingSummaryInline
                 avgRating={avg}
@@ -554,36 +564,32 @@ export default function ProductDetailPage() {
                     : undefined
                 }
                 starClassName="text-base leading-none"
-                textClassName="text-sm text-muted-foreground group-hover:text-foreground transition-colors"
-                className={count > 0 ? 'group' : undefined}
+                textClassName="text-sm text-slate-500"
+                className={count > 0 ? 'cursor-pointer' : undefined}
               />
             </div>
 
-            {/* Price block */}
-            <div className="rounded-2xl border border-border bg-card p-4 space-y-3">
-              <div className="flex flex-wrap items-end gap-x-3 gap-y-1">
-                <span className="text-3xl sm:text-4xl font-bold text-foreground tabular-nums">₹{selectedPrice}</span>
-                {mrp != null && mrp > 0 && mrp !== selectedPrice && (
-                  <span className="text-base text-muted-foreground line-through tabular-nums mb-0.5">MRP ₹{mrp}</span>
-                )}
-                {discount > 0 && (
-                  <span className="bg-primary/15 text-primary text-xs font-bold px-2.5 py-1 rounded-lg mb-0.5">
-                    {discount}% OFF
-                  </span>
-                )}
+            <div className="rounded-3xl bg-gradient-to-br from-orange-50 via-white to-orange-50 p-5 ring-1 ring-orange-100">
+              <div className="flex flex-wrap items-end gap-3">
+                <span className="text-4xl font-black text-slate-950 tabular-nums">₹{selectedPrice}</span>
+                {mrp != null && mrp > 0 && mrp !== selectedPrice ? (
+                  <span className="pb-1 text-sm font-bold text-slate-400 line-through tabular-nums">₹{mrp}</span>
+                ) : null}
+                {discount > 0 ? (
+                  <span className="mb-1 rounded-full bg-orange-600 px-3 py-1 text-xs font-black text-white">{discount}% OFF</span>
+                ) : null}
               </div>
-              <p className="text-xs text-muted-foreground">Inclusive of all taxes</p>
+              <p className="mt-2 text-sm text-slate-500">Inclusive of all taxes.</p>
 
-              {/* Payment method toggle */}
-              <div className="flex gap-2">
+              <div className="mt-4 grid grid-cols-2 gap-2 rounded-2xl bg-white p-1 shadow-sm ring-1 ring-orange-100">
                 <button
                   type="button"
                   onClick={() => setPaymentMethod('cod')}
                   disabled={!inStock}
-                  className={`flex-1 text-center text-sm py-2.5 rounded-xl border-2 font-medium transition-all duration-200 ${
+                  className={`rounded-xl px-4 py-3 text-sm font-black transition ${
                     paymentMethod === 'cod'
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border text-muted-foreground hover:border-foreground/20'
+                      ? 'bg-orange-600 text-white shadow-md shadow-orange-600/20'
+                      : 'text-slate-600 hover:bg-orange-50 hover:text-orange-600'
                   }`}
                 >
                   COD · ₹{codPrice}
@@ -592,15 +598,47 @@ export default function ProductDetailPage() {
                   type="button"
                   onClick={() => setPaymentMethod('razorpay')}
                   disabled={!inStock}
-                  className={`flex-1 text-center text-sm py-2.5 rounded-xl border-2 font-medium transition-all duration-200 ${
+                  className={`rounded-xl px-4 py-3 text-sm font-black transition ${
                     paymentMethod === 'razorpay'
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border text-muted-foreground hover:border-foreground/20'
+                      ? 'bg-orange-600 text-white shadow-md shadow-orange-600/20'
+                      : 'text-slate-600 hover:bg-orange-50 hover:text-orange-600'
                   }`}
                 >
                   Online · ₹{onlinePrice}
                 </button>
               </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-4">
+              <div className="mb-3 flex items-center gap-2 text-sm font-black text-slate-950">📍 Check delivery</div>
+              <div className="flex gap-2">
+                <Input
+                  value={pincode}
+                  onChange={e => setPincode(e.target.value.replace(/[^\d]/g, '').slice(0, 6))}
+                  placeholder="Enter pincode"
+                  className="h-12 rounded-xl border-slate-200 focus-visible:ring-orange-200"
+                  inputMode="numeric"
+                />
+                <button
+                  type="button"
+                  className="rounded-xl bg-orange-600 px-5 py-3 text-sm font-black text-white"
+                >
+                  Check
+                </button>
+              </div>
+              <p className="mt-2 text-xs text-slate-500">
+                {shippingBusy
+                  ? 'Checking serviceability…'
+                  : shippingQuote?.ok
+                    ? `Free shipping${
+                        shippingQuote.estimatedDeliveryDays != null ? ` · ETA ${shippingQuote.estimatedDeliveryDays} day(s)` : ''
+                      }`
+                    : isShippingServiceabilityError(shippingQuote) && shippingQuote.reason === 'not_serviceable'
+                      ? 'Not serviceable for this pincode'
+                      : pincode.replace(/[^\d]/g, '').length === 6
+                        ? 'Shipping info currently unavailable'
+                        : 'Enter your pincode to see delivery ETA.'}
+              </p>
             </div>
 
             {/* Size selector */}
@@ -680,50 +718,49 @@ export default function ProductDetailPage() {
               </Link>
             )}
 
-            {/* Quantity + Add to Cart – desktop only (mobile uses sticky bar) */}
-            <div className="hidden md:flex items-stretch gap-3">
-              <div className="inline-flex items-stretch overflow-hidden rounded-xl border border-border bg-background text-sm font-medium">
-                <button type="button" className="px-3.5 py-3 hover:bg-muted/80 active:bg-muted" onClick={() => setQty(Math.max(1, qty - 1))}>
-                  <Minus className="h-4 w-4" />
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+              <div className="inline-flex w-fit overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                <button
+                  type="button"
+                  onClick={() => setQty(Math.max(1, qty - 1))}
+                  className="grid h-12 w-12 place-items-center text-xl font-black hover:bg-orange-50 hover:text-orange-600"
+                  aria-label="Decrease quantity"
+                >
+                  −
                 </button>
-                <span className="flex min-w-[2.5rem] items-center justify-center border-x border-border tabular-nums">{qty}</span>
-                <button type="button" className="px-3.5 py-3 hover:bg-muted/80 active:bg-muted" onClick={() => setQty(qty + 1)}>
-                  <Plus className="h-4 w-4" />
+                <div className="grid h-12 min-w-12 place-items-center border-x border-slate-200 px-4 font-black tabular-nums">
+                  {qty}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setQty(qty + 1)}
+                  className="grid h-12 w-12 place-items-center text-xl font-black hover:bg-orange-50 hover:text-orange-600"
+                  aria-label="Increase quantity"
+                >
+                  +
                 </button>
               </div>
-              <Button
-                size="lg"
-                variant="secondary"
-                className="flex-1 gap-2 rounded-xl text-base font-semibold h-12"
-                onClick={handleBuyNow}
-                disabled={!inStock}
-              >
-                Buy Now
-              </Button>
-              <Button
-                size="lg"
-                className="flex-1 gap-2 rounded-xl text-base font-semibold h-12"
+
+              <button
+                type="button"
                 onClick={handleAddToCart}
                 disabled={!inStock}
+                className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl border border-orange-200 bg-white px-5 text-sm font-black text-orange-700 shadow-sm transition hover:bg-orange-50 disabled:opacity-60 sm:flex-1"
               >
-                <ShoppingCart className="h-5 w-5" /> Add to Cart
-              </Button>
+                <span aria-hidden className="inline-flex leading-none">
+                  🛒
+                </span>
+                <span className="leading-none">Add to Cart</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleBuyNow}
+                disabled={!inStock}
+                className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-2xl bg-orange-600 px-5 text-sm font-black text-white shadow-lg shadow-orange-600/20 transition hover:bg-orange-700 disabled:opacity-60 sm:flex-1"
+              >
+                <span className="leading-none">Buy Now</span>
+              </button>
             </div>
-
-            {/* Stock info (no exact quantities on storefront) */}
-            <p className="text-xs hidden md:block">
-              <span
-                className={
-                  inStock
-                    ? stock <= 5
-                      ? 'text-amber-700 dark:text-amber-300'
-                      : 'text-emerald-700 dark:text-emerald-300'
-                    : 'text-destructive'
-                }
-              >
-                {stockMessage}
-              </span>
-            </p>
 
           </div>
         </div>
@@ -945,7 +982,7 @@ export default function ProductDetailPage() {
                   className="rounded-2xl border border-border bg-card overflow-hidden hover:shadow-sm transition-shadow"
                 >
                   <div className="aspect-square bg-muted">
-                    <img src={p.images?.[0] ?? ''} alt={p.name} className="h-full w-full object-cover" loading="lazy" />
+                    <img src={galleryImagesForSelection(p, productVariantNames(p)[0] || '')[0] ?? (p.images?.[0] ?? '')} alt={p.name} className="h-full w-full object-cover" loading="lazy" />
                   </div>
                   <div className="p-3">
                     <div className="text-sm font-semibold line-clamp-2">{p.name}</div>

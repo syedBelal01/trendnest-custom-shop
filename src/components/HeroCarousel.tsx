@@ -31,8 +31,9 @@ function SlideImage({ src, alt, active }: { src: string; alt: string; active: bo
   );
 }
 
-export default function HeroCarousel() {
-  const n = HERO_SLIDE_SRCS.length;
+export default function HeroCarousel({ images }: { images?: string[] }) {
+  const slideSrcs = (images?.length ? images : HERO_SLIDE_SRCS as unknown as string[]).filter(Boolean);
+  const n = slideSrcs.length || 1;
   const [index, setIndex] = useState(0);
   const pausedRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -68,7 +69,7 @@ export default function HeroCarousel() {
 
   return (
     <div
-      className="w-full max-w-md mx-auto"
+      className="w-full h-full"
       onMouseEnter={() => {
         pausedRef.current = true;
       }}
@@ -76,8 +77,8 @@ export default function HeroCarousel() {
         pausedRef.current = false;
       }}
     >
-      <div className="relative aspect-square rounded-2xl overflow-hidden shadow-2xl bg-muted">
-        {HERO_SLIDE_SRCS.map((src, i) => (
+      <div className="relative h-full w-full rounded-full overflow-hidden shadow-2xl bg-muted">
+        {slideSrcs.map((src, i) => (
           <SlideImage
             key={`${src}-${i}`}
             src={src}
@@ -87,7 +88,7 @@ export default function HeroCarousel() {
         ))}
       </div>
       <div className="mt-3 flex justify-center gap-2" role="tablist" aria-label="Hero slides">
-        {HERO_SLIDE_SRCS.map((_, i) => (
+        {slideSrcs.map((_, i) => (
           <button
             key={i}
             type="button"

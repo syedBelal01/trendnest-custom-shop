@@ -3,7 +3,7 @@
  * - Dev: empty → Vite proxies /api to the local server (vite.config.ts).
  * - Production: VITE_API_BASE_URL from .env.production or the host (e.g. Vercel), else deployed Render API below.
  */
-const PRODUCTION_API_BASE = 'https://trendnest-custom-shop.onrender.com';
+const PRODUCTION_API_BASE = 'https://api.trendnest99.in';
 
 export function apiUrl(path: string): string {
   let base = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '').trim() ?? '';

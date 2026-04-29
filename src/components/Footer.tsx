@@ -1,120 +1,133 @@
 import { Link } from 'react-router-dom';
-import {
-  Home,
-  ShoppingBag,
-  Paintbrush,
-  TrendingUp,
-  MessageCircle,
-  HelpCircle,
-  RotateCcw,
-  Truck,
-  Package,
-  Mail,
-  Phone,
-  Instagram,
-  Facebook,
-} from 'lucide-react';
-
-const shopLinks = [
-  { to: '/', label: 'Home', icon: Home },
-  { to: '/category/home', label: 'Home Essentials', icon: ShoppingBag },
-  { to: '/category/printed', label: 'Printed Products', icon: Paintbrush },
-  { to: '/category/trending', label: 'Trending', icon: TrendingUp },
-];
-
-const helpLinks = [
-  { to: '/contact', label: 'Contact Us', icon: MessageCircle },
-  { to: '/faqs', label: 'FAQs', icon: HelpCircle },
-  { to: '/returns', label: 'Return Policy', icon: RotateCcw },
-  { to: '/shipping', label: 'Shipping Policy', icon: Truck },
-  { to: '/account/orders', label: 'Track My Order', icon: Package },
-];
+import { Facebook, Instagram, MessageCircle, Send, Youtube } from 'lucide-react';
 
 export default function Footer() {
+  const year = new Date().getFullYear();
+
   return (
-    <footer className="bg-card border-t mt-12 sm:mt-16">
-      <div className="max-w-7xl mx-auto px-3 sm:px-4 py-6 sm:py-12">
-        {/* Brand */}
-        <div className="mb-5 sm:mb-0">
-          <h3 className="font-bold text-lg mb-1">
-            Trend<span className="text-primary">Nest</span>99
-          </h3>
-          <p className="text-xs sm:text-sm text-muted-foreground leading-relaxed max-w-xs">
+    <footer className="mt-16 border-t border-slate-100 bg-white">
+      <div className="mx-auto grid max-w-7xl gap-10 px-4 py-10 md:grid-cols-5 md:px-8">
+        <div className="md:col-span-2">
+          <div className="text-xl font-extrabold">
+            TrendNest<span className="text-orange-600">99</span>
+          </div>
+          <p className="mt-3 max-w-xs text-sm leading-6 text-slate-500">
             Your one-stop shop for trendy fashion, home essentials, and custom prints.
           </p>
+          <div className="mt-5 flex gap-3">
+            <a
+              aria-label="Instagram"
+              href="https://www.instagram.com/trendnest099?utm_source=qr&igsh=MWR0ZzBqOGloZzZzNg=="
+              target="_blank"
+              rel="noreferrer"
+              className="grid h-9 w-9 place-items-center rounded-full bg-orange-50 text-orange-600"
+            >
+              <Instagram className="h-4 w-4" />
+            </a>
+            <a
+              aria-label="WhatsApp"
+              href="https://wa.me/918543841110"
+              target="_blank"
+              rel="noreferrer"
+              className="grid h-9 w-9 place-items-center rounded-full bg-orange-50 text-orange-600"
+            >
+              <MessageCircle className="h-4 w-4" />
+            </a>
+            <a
+              aria-label="Facebook"
+              href="https://www.facebook.com/share/18QuviL6fn/"
+              target="_blank"
+              rel="noreferrer"
+              className="grid h-9 w-9 place-items-center rounded-full bg-orange-50 text-orange-600"
+            >
+              <Facebook className="h-4 w-4" />
+            </a>
+            <a
+              aria-label="YouTube"
+              href="https://www.youtube.com/"
+              target="_blank"
+              rel="noreferrer"
+              className="grid h-9 w-9 place-items-center rounded-full bg-orange-50 text-orange-600"
+            >
+              <Youtube className="h-4 w-4" />
+            </a>
+          </div>
         </div>
 
-        {/* Links grid — 2 cols on mobile, 4 on md+ */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-5 sm:gap-8 mt-5 sm:mt-8">
-          {/* Shop */}
-          <div>
-            <h4 className="font-semibold mb-2 text-sm">Shop</h4>
-            <div className="space-y-2">
-              {shopLinks.map(l => (
-                <Link key={l.to} to={l.to} className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors py-0.5">
-                  <l.icon className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">{l.label}</span>
-                </Link>
-              ))}
-            </div>
-          </div>
+        <div>
+          <h4 className="font-extrabold">Shop</h4>
+          <ul className="mt-4 space-y-2 text-sm text-slate-500">
+            <li>
+              <Link to="/category/home" className="hover:text-orange-600 transition-colors">
+                Home
+              </Link>
+            </li>
+            <li>
+              <Link to="/category/printed" className="hover:text-orange-600 transition-colors">
+                Prints
+              </Link>
+            </li>
+            <li>
+              <Link to="/category/trending" className="hover:text-orange-600 transition-colors">
+                Trending
+              </Link>
+            </li>
+            <li>
+              <Link to="/" className="hover:text-orange-600 transition-colors">
+                All Products
+              </Link>
+            </li>
+          </ul>
+        </div>
 
-          {/* Help */}
-          <div>
-            <h4 className="font-semibold mb-2 text-sm">Help</h4>
-            <div className="space-y-2">
-              {helpLinks.map(l => (
-                <Link key={l.to} to={l.to} className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors py-0.5">
-                  <l.icon className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">{l.label}</span>
-                </Link>
-              ))}
-            </div>
-          </div>
+        <div>
+          <h4 className="font-extrabold">Help</h4>
+          <ul className="mt-4 space-y-2 text-sm text-slate-500">
+            <li>
+              <Link to="/contact" className="hover:text-orange-600 transition-colors">
+                Contact Us
+              </Link>
+            </li>
+            <li>
+              <Link to="/faqs" className="hover:text-orange-600 transition-colors">
+                FAQs
+              </Link>
+            </li>
+            <li>
+              <Link to="/returns" className="hover:text-orange-600 transition-colors">
+                Return Policy
+              </Link>
+            </li>
+            <li>
+              <Link to="/account/orders" className="hover:text-orange-600 transition-colors">
+                Track My Order
+              </Link>
+            </li>
+          </ul>
+        </div>
 
-          {/* Contact — spans full width on mobile */}
-          <div className="col-span-2 md:col-span-2">
-            <h4 className="font-semibold mb-2 text-sm">Contact</h4>
-            <div className="flex flex-col gap-2">
-              <a href="mailto:support@trendnest99.in" className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors py-0.5">
-                <Mail className="h-3.5 w-3.5 shrink-0" />
-                <span className="break-all">support@trendnest99.in</span>
-              </a>
-              <a
-                href="https://wa.me/918543841110"
-                target="_blank"
-                rel="noreferrer"
-                className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors py-0.5"
-              >
-                <Phone className="h-3.5 w-3.5 shrink-0" />
-                <span>WhatsApp: 8543841110</span>
-              </a>
-
-              <a
-                href="https://www.instagram.com/trendnest099?utm_source=qr&igsh=MWR0ZzBqOGloZzZzNg=="
-                target="_blank"
-                rel="noreferrer"
-                className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors py-0.5"
-              >
-                <Instagram className="h-3.5 w-3.5 shrink-0" />
-                <span>Instagram</span>
-              </a>
-
-              <a
-                href="https://www.facebook.com/share/18QuviL6fn/"
-                target="_blank"
-                rel="noreferrer"
-                className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors py-0.5"
-              >
-                <Facebook className="h-3.5 w-3.5 shrink-0" />
-                <span>Facebook</span>
-              </a>
-            </div>
+        <div>
+          <h4 className="font-extrabold">Newsletter</h4>
+          <p className="mt-4 text-sm text-slate-500">
+            Subscribe to get updates on new arrivals &amp; offers.
+          </p>
+          <div className="mt-4 flex rounded-xl border border-slate-200 p-1">
+            <input
+              className="min-w-0 flex-1 px-3 text-sm outline-none bg-transparent"
+              placeholder="Enter your email"
+            />
+            <button
+              className="grid h-10 w-10 place-items-center rounded-lg bg-orange-600 text-white"
+              type="button"
+            >
+              <Send className="h-4 w-4" />
+            </button>
           </div>
         </div>
       </div>
-      <div className="border-t py-3 text-center text-[10px] sm:text-xs text-muted-foreground">
-        © 2026 TrendNest99. All rights reserved.
+
+      <div className="border-t border-slate-100 py-5 text-center text-xs text-slate-400">
+        © {year} TrendNest99. All rights reserved.
         <span className="mx-2 opacity-50">·</span>
         Developed by{' '}
         <a
