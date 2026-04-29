@@ -56,6 +56,7 @@ function ProductCard({ product, ratingSummary }: { product: Product; ratingSumma
   const avg = summary?.avgRating ?? product.rating ?? 0;
   const reviewCount = summary?.reviewCount ?? product.reviews?.length ?? 0;
   const dp = discountPercent(product);
+  const filledStars = Math.max(0, Math.min(5, Math.round(Number(avg) || 0)));
 
   return (
     <div className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl">
@@ -89,7 +90,11 @@ function ProductCard({ product, ratingSummary }: { product: Product; ratingSumma
         </div>
         <div className="mt-2 flex items-center gap-1 text-xs text-slate-500">
           <div className="flex text-amber-400">
-            {Array.from({ length: 5 }).map((_, i) => <Icon key={i} size={12}>{icons.star}</Icon>)}
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Icon key={i} size={12} className={i < filledStars ? "text-amber-400" : "text-slate-200"}>
+                {i < filledStars ? icons.star : "☆"}
+              </Icon>
+            ))}
           </div>
           <span>{avg.toFixed(1)} ({reviewCount} reviews)</span>
         </div>

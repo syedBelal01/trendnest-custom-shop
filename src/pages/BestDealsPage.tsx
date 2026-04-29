@@ -86,6 +86,7 @@ function BestDealCard({
   const summary = ratingSummary[product.id];
   const avg = avgFromRatingSummary(summary, product.rating);
   const reviewCount = countFromRatingSummary(summary, Array.isArray(product.reviews) ? product.reviews.length : 0);
+  const filledStars = Math.max(0, Math.min(5, Math.round(Number(avg) || 0)));
 
   return (
     <div className="group overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-orange-100 hover:shadow-xl">
@@ -124,10 +125,10 @@ function BestDealCard({
 
         {reviewCount > 0 ? (
           <div className="mt-1.5 flex items-center gap-1 text-xs text-slate-500">
-            <div className="flex text-amber-400">
+            <div className="flex">
               {Array.from({ length: 5 }).map((_, index) => (
-                <Icon key={index} size={12}>
-                  {icons.star}
+                <Icon key={index} size={12} className={index < filledStars ? "text-amber-400" : "text-slate-200"}>
+                  {index < filledStars ? icons.star : "☆"}
                 </Icon>
               ))}
             </div>
