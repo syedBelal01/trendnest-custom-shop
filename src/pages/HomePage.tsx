@@ -8,6 +8,7 @@ import { productPrimaryImage } from "@/lib/productImages";
 import { productVariantNames } from "@/lib/productVariants";
 import { type RatingSummary } from "@/lib/reviewsSummaryApi";
 import type { Product } from "@/types";
+import { Helmet } from "react-helmet-async";
 
 const Icon = ({ children, className = "", size = 20 }) => (
   <span
@@ -42,6 +43,20 @@ const icons = {
   tag: "🏷️",
   phone: "📱",
 };
+
+const CANONICAL_BASE = "https://trendnest99.in";
+const HOME_OG_IMAGE = `${CANONICAL_BASE}/img3.jpeg`;
+const HOME_TITLE = "Printed T-Shirts, Graphic Tees & Custom Print Store | TrendNest99";
+const HOME_DESC =
+  "Shop printed t-shirts, men's oversized graphic tees, custom print products, trending fashion, and home essentials online in India at TrendNest99.";
+const HOME_KEYWORDS = [
+  "printed t shirt",
+  "printed shirt",
+  "men's oversized graphic t-shirt",
+  "graphic streetwear tee",
+  "custom print t shirt",
+  "trendnest99",
+].join(", ");
 
 function discountPercent(product: Product) {
   const mrp = product.originalPrice;
@@ -147,8 +162,38 @@ export default function HomePage() {
   const deals = bestDeals.length ? bestDeals : dealsFallback;
 
   return (
-    <div className="bg-white font-sans text-slate-900">
-      <div className="mx-auto max-w-7xl px-4 py-6 md:px-8">
+    <>
+      <Helmet>
+        <title>{HOME_TITLE}</title>
+        <meta name="description" content={HOME_DESC} />
+        <meta name="keywords" content={HOME_KEYWORDS} />
+        <meta name="robots" content="index,follow,max-image-preview:large" />
+        <link rel="canonical" href={`${CANONICAL_BASE}/`} />
+        <meta property="og:type" content="website" />
+        <meta property="og:title" content={HOME_TITLE} />
+        <meta property="og:description" content={HOME_DESC} />
+        <meta property="og:url" content={`${CANONICAL_BASE}/`} />
+        <meta property="og:image" content={HOME_OG_IMAGE} />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content={HOME_TITLE} />
+        <meta name="twitter:description" content={HOME_DESC} />
+        <meta name="twitter:image" content={HOME_OG_IMAGE} />
+        <script type="application/ld+json">
+          {JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "WebSite",
+            name: "TrendNest99",
+            url: `${CANONICAL_BASE}/`,
+            potentialAction: {
+              "@type": "SearchAction",
+              target: `${CANONICAL_BASE}/search?q={search_term_string}`,
+              "query-input": "required name=search_term_string",
+            },
+          })}
+        </script>
+      </Helmet>
+      <div className="bg-white font-sans text-slate-900">
+        <div className="mx-auto max-w-7xl px-4 py-6 md:px-8">
         <section className="relative overflow-hidden rounded-3xl border border-orange-100 bg-gradient-to-br from-orange-50 via-white to-orange-100 p-6 shadow-sm md:p-14">
           <div className="absolute right-12 top-8 h-28 w-28 rounded-full bg-orange-200/40 blur-2xl" />
           <div className="absolute bottom-8 left-1/3 h-20 w-20 rounded-full bg-orange-300/20 blur-2xl" />
@@ -169,7 +214,8 @@ export default function HomePage() {
         <section className="mt-12 rounded-3xl bg-orange-50/70 p-5 md:p-8"><SectionHeader icon={icons.gift} title="Best Deals" linkTo="/best-deals" /><div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">{deals.map((product) => <ProductCard key={`deal-${product.id}`} product={product} ratingSummary={ratingSummary} />)}</div></section>
 
         <section className="mt-12 grid gap-6 lg:grid-cols-2"><div className="relative overflow-hidden rounded-3xl border border-orange-100 bg-gradient-to-br from-orange-50 to-white p-8 shadow-sm"><div className="flex items-center gap-5"><div className="grid h-24 w-24 place-items-center rounded-3xl bg-white shadow-lg"><Icon size={46} className="text-orange-600">{icons.shirt}</Icon></div><div><h3 className="text-2xl font-black">Upload Your Own Design</h3><p className="mt-2 text-sm leading-6 text-slate-600">Get your custom design printed on T-shirts & cups — starting at ₹499!</p><Link to="/custom-print" className="mt-4 inline-flex items-center justify-center w-fit rounded-xl bg-orange-600 px-5 py-3 text-sm font-bold text-white">Start Designing <span className="ml-1">→</span></Link></div></div></div><div className="relative overflow-hidden rounded-3xl bg-orange-600 p-8 text-white shadow-xl shadow-orange-500/20"><div className="absolute -right-10 -top-10 h-36 w-36 rounded-full bg-white/10" /><div className="flex items-center gap-5"><div className="grid h-24 w-24 place-items-center rounded-3xl bg-white/15"><Icon size={48}>{icons.percent}</Icon></div><div><h3 className="text-2xl font-black">Use Code WELCOME10</h3><p className="mt-2 text-sm text-white/85">Get 10% off on your first order!</p><Link to="/category/trending" className="mt-4 inline-flex items-center justify-center w-fit rounded-xl bg-white px-5 py-3 text-sm font-bold text-orange-600">Shop Now <span className="ml-1">→</span></Link></div></div></div></section>
+        </div>
       </div>
-    </div>
+    </>
   );
 }

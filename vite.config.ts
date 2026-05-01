@@ -47,7 +47,16 @@ export default defineConfig(async ({ mode }) => {
   };
 
   async function getPrerenderData(): Promise<{ routes: string[]; productById: Record<string, PrerenderProduct> }> {
-    const staticRoutes = ["/", "/category/home", "/category/printed", "/category/trending"];
+    const staticRoutes = [
+      "/",
+      "/best-deals",
+      "/custom-print",
+      "/category/home",
+      "/category/printed",
+      "/category/trending",
+      "/category/fashion",
+      "/category/electronics",
+    ];
 
     const apiBase =
       (process.env.VITE_API_BASE_URL || process.env.API_BASE_URL || "").replace(/\/+$/, "") ||
@@ -119,13 +128,16 @@ export default defineConfig(async ({ mode }) => {
 
   function injectSeoHead(html: string, route: string): string {
     const u = route === "/" ? `${CANONICAL_BASE}/` : `${CANONICAL_BASE}${route}`;
+    const stripHtml = (v: string) => String(v || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+    const truncate = (v: string, max = 160) => (v.length <= max ? v : `${v.slice(0, max - 1).trimEnd()}…`);
 
     // Defaults
-    let title = "TrendNest99 | Trendy Fashion, Home Essentials & Custom Prints";
+    let title = "Printed T-Shirts, Graphic Tees & Custom Prints Online | TrendNest99";
     let desc =
-      "Shop trending fashion, home essentials, and custom print products at great prices. Cash on delivery available across India.";
+      "Shop printed t-shirts, men's oversized graphic tees, custom prints, trending fashion, and home essentials online in India.";
     let ogType = "website";
-    let ogImage: string | undefined;
+    let ogImage: string | undefined = `${CANONICAL_BASE}/img3.jpeg`;
+    let keywords = "printed t shirt, printed shirt, graphic t shirt, custom print t shirt, trendnest99";
     let extraJsonLd: any[] = [];
 
     const orgJsonLd = {
@@ -140,12 +152,25 @@ export default defineConfig(async ({ mode }) => {
       "@type": "WebSite",
       name: "TrendNest99",
       url: CANONICAL_BASE,
+      potentialAction: {
+        "@type": "SearchAction",
+        target: `${CANONICAL_BASE}/search?q={search_term_string}`,
+        "query-input": "required name=search_term_string",
+      },
     };
 
-    const categoryMeta: Record<string, { name: string; description: string }> = {
+    const categoryMeta: Record<string, { name: string; description: string; keywords?: string }> = {
       home: { name: "Home Essentials", description: "Shop home essentials for your kitchen, bath, and everyday living." },
-      printed: { name: "Printed Products", description: "Shop printed products and custom print options." },
+      printed: {
+        name: "Printed T-Shirts & Graphic Shirts",
+        description:
+          "Shop printed T-shirts, printed shirts, and men's oversized graphic streetwear tees including back-print styles.",
+        keywords:
+          "printed t shirt, printed shirt, men's oversized graphic t-shirt, streetwear tee, broken rules back print",
+      },
       trending: { name: "Trending", description: "Explore trending products picked by TrendNest99 customers." },
+      fashion: { name: "Fashion", description: "Shop fashion products and accessories online." },
+      electronics: { name: "Electronics", description: "Browse electronics and useful accessories online." },
     };
 
     const mCat = route.match(/^\/category\/([^/]+)$/);
@@ -154,7 +179,24 @@ export default defineConfig(async ({ mode }) => {
       const cm = categoryMeta[cid];
       title = cm ? `${cm.name} | TrendNest99` : "Products | TrendNest99";
       desc = cm ? `${cm.description}` : "Browse products on TrendNest99.";
+      keywords = cm?.keywords || `${cid}, products online, trendnest99`;
       ogType = "website";
+      extraJsonLd.push({
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        itemListElement: [
+          { "@type": "ListItem", position: 1, name: "Home", item: `${CANONICAL_BASE}/` },
+          { "@type": "ListItem", position: 2, name: cm?.name || cid, item: u },
+        ],
+      });
+      extraJsonLd.push({
+        "@context": "https://schema.org",
+        "@type": "CollectionPage",
+        name: cm?.name || "Products",
+        description: desc,
+        url: u,
+        isPartOf: { "@type": "WebSite", name: "TrendNest99", url: `${CANONICAL_BASE}/` },
+      });
     }
 
     const mProd = route.match(/^\/product\/([^/]+)$/);
@@ -162,9 +204,17 @@ export default defineConfig(async ({ mode }) => {
       const pid = decodeURIComponent(mProd[1]);
       const p = prerenderData.productById[pid];
       title = p?.name ? `${p.name} | TrendNest99` : "Product | TrendNest99";
-      desc = p?.description ? String(p.description).slice(0, 160) : "Shop products on TrendNest99.";
+      const plain = p?.description ? stripHtml(String(p.description)) : "";
+      const printedShirt = String(p?.category || "").toLowerCase() === "printed" && /t-?shirt|tee/i.test(String(p?.name || ""));
+      desc = plain
+        ? truncate(`${plain}${printedShirt ? " Shop printed t-shirts and oversized graphic tees online in India." : ""}`, 160)
+        : "Shop products on TrendNest99.";
       ogType = "product";
-      ogImage = p?.images?.[0];
+      ogImage = p?.images?.[0] || ogImage;
+      keywords = [p?.name, p?.category, printedShirt ? "printed t shirt" : "", "trendnest99"]
+        .map((v) => String(v || "").trim())
+        .filter(Boolean)
+        .join(", ");
 
       if (p?.name) {
         extraJsonLd.push({
@@ -208,11 +258,17 @@ export default defineConfig(async ({ mode }) => {
       `<title>${xmlEscape(title)}</title>`,
       `<meta name="description" content="${escapeAttr(desc)}">`,
       `<link rel="canonical" href="${escapeAttr(u)}">`,
+      `<meta name="keywords" content="${escapeAttr(keywords)}">`,
+      `<meta name="robots" content="index,follow,max-image-preview:large">`,
       `<meta property="og:type" content="${escapeAttr(ogType)}">`,
       `<meta property="og:title" content="${escapeAttr(title)}">`,
       `<meta property="og:description" content="${escapeAttr(desc)}">`,
       `<meta property="og:url" content="${escapeAttr(u)}">`,
       ogImage ? `<meta property="og:image" content="${escapeAttr(String(ogImage))}">` : "",
+      `<meta name="twitter:card" content="summary_large_image">`,
+      `<meta name="twitter:title" content="${escapeAttr(title)}">`,
+      `<meta name="twitter:description" content="${escapeAttr(desc)}">`,
+      ogImage ? `<meta name="twitter:image" content="${escapeAttr(String(ogImage))}">` : "",
       `<script type="application/ld+json">${JSON.stringify(orgJsonLd)}</script>`,
       `<script type="application/ld+json">${JSON.stringify(websiteJsonLd)}</script>`,
       ...extraJsonLd.map((j) => `<script type="application/ld+json">${JSON.stringify(j)}</script>`),
@@ -222,8 +278,20 @@ export default defineConfig(async ({ mode }) => {
 
     // Replace existing title/description if present, then inject our canonical/OG/JSON-LD.
     let out = html;
-    out = out.replace(/<title>[\s\S]*?<\/title>/i, `<title>${xmlEscape(title)}</title>`);
-    out = out.replace(/<meta name="description"[^>]*>/i, `<meta name="description" content="${escapeAttr(desc)}">`);
+    out = out.replace(/<title>[\s\S]*?<\/title>/gi, "");
+    out = out.replace(/<meta name="description"[^>]*>/gi, "");
+    out = out.replace(/<link rel="canonical"[^>]*>/gi, "");
+    out = out.replace(/<meta name="keywords"[^>]*>/gi, "");
+    out = out.replace(/<meta name="robots"[^>]*>/gi, "");
+    out = out.replace(/<meta property="og:type"[^>]*>/gi, "");
+    out = out.replace(/<meta property="og:title"[^>]*>/gi, "");
+    out = out.replace(/<meta property="og:description"[^>]*>/gi, "");
+    out = out.replace(/<meta property="og:url"[^>]*>/gi, "");
+    out = out.replace(/<meta property="og:image"[^>]*>/gi, "");
+    out = out.replace(/<meta name="twitter:card"[^>]*>/gi, "");
+    out = out.replace(/<meta name="twitter:title"[^>]*>/gi, "");
+    out = out.replace(/<meta name="twitter:description"[^>]*>/gi, "");
+    out = out.replace(/<meta name="twitter:image"[^>]*>/gi, "");
     // Insert the rest right before </head>
     out = out.replace(/<\/head>/i, `${tags}</head>`);
     return out;

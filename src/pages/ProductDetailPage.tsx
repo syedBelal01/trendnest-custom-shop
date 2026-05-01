@@ -21,6 +21,19 @@ import { useDelayedFlag } from '@/hooks/useDelayedFlag';
 import { RichTextRenderer } from '@/components/RichTextRenderer';
 
 const CANONICAL_BASE = 'https://trendnest99.in';
+const DEFAULT_OG_IMAGE = `${CANONICAL_BASE}/img3.jpeg`;
+
+function stripHtml(input: string): string {
+  return String(input || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function truncate(input: string, max = 160): string {
+  if (input.length <= max) return input;
+  return `${input.slice(0, max - 1).trimEnd()}…`;
+}
 
 function productJsonLd(args: {
   url: string;
@@ -128,6 +141,14 @@ function variantOptionLabel(product: Product): string {
   return 'Color';
 }
 
+function isPrintedShirt(product: Product | null | undefined): boolean {
+  if (!product) return false;
+  const category = String(product.category || '').toLowerCase();
+  const subcategory = String(product.subcategory || '').toLowerCase();
+  const name = String(product.name || '').toLowerCase();
+  return category === 'printed' && (name.includes('t-shirt') || name.includes('tshirt') || subcategory.includes('tee'));
+}
+
 const pillBtn = (active: boolean) =>
   `rounded-xl px-4 py-2 text-sm font-medium border-2 transition-all duration-200 ${
     active
@@ -165,12 +186,38 @@ export default function ProductDetailPage() {
 
   // Prefer the latest list copy for stock; fall back to fetched detail.
   const product = fromList ?? fetchedProduct;
-  const seoTitle = product?.name ? `${product.name} | TrendNest99` : 'Product | TrendNest99';
-  const seoDesc = product?.description
-    ? String(product.description).slice(0, 160)
-    : 'Shop products on TrendNest99.';
+  const plainDescription = product?.description ? stripHtml(String(product.description)) : '';
+  const printedShirt = isPrintedShirt(product);
+  const seoTitle = product?.name
+    ? `${product.name}${printedShirt ? ' | Printed T-Shirt for Men' : ''} | TrendNest99`
+    : 'Product | TrendNest99';
+  const seoDesc = truncate(
+    plainDescription
+      ? `${plainDescription}${printedShirt ? ' Shop printed t-shirts, oversized graphic tees, and streetwear styles online in India.' : ''}`
+      : 'Shop products online on TrendNest99.',
+    160
+  );
   const canonicalUrl = id ? `${CANONICAL_BASE}/product/${encodeURIComponent(id)}` : `${CANONICAL_BASE}/`;
-  const ogImage = product?.images?.[0] ? String(product.images[0]) : undefined;
+  const ogImage = product?.images?.[0] ? String(product.images[0]) : DEFAULT_OG_IMAGE;
+  const seoKeywords = product
+    ? Array.from(
+        new Set(
+          [
+            product.name,
+            product.subcategory,
+            product.category,
+            ...(Array.isArray(product.tags) ? product.tags : []),
+            'trendnest99',
+            printedShirt ? 'printed t shirt' : '',
+            printedShirt ? 'printed shirt' : '',
+            printedShirt ? "men's oversized graphic t-shirt" : '',
+            printedShirt ? 'graphic streetwear tee' : '',
+          ]
+            .map((v) => String(v || '').trim())
+            .filter(Boolean)
+        )
+      ).join(', ')
+    : 'trendnest99';
   const { addItem } = useCart();
   const [selectedSize, setSelectedSize] = useState('');
   const [selectedVariant, setSelectedVariant] = useState('');
@@ -471,18 +518,24 @@ export default function ProductDetailPage() {
       <Helmet>
         <title>{seoTitle}</title>
         <meta name="description" content={seoDesc} />
+        <meta name="keywords" content={seoKeywords} />
+        <meta name="robots" content="index,follow,max-image-preview:large" />
         <link rel="canonical" href={canonicalUrl} />
         <meta property="og:type" content="product" />
         <meta property="og:title" content={seoTitle} />
         <meta property="og:description" content={seoDesc} />
         <meta property="og:url" content={canonicalUrl} />
-        {ogImage && <meta property="og:image" content={ogImage} />}
+        <meta property="og:image" content={ogImage} />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content={seoTitle} />
+        <meta name="twitter:description" content={seoDesc} />
+        <meta name="twitter:image" content={ogImage} />
         <script type="application/ld+json">
           {JSON.stringify(
             productJsonLd({
               url: canonicalUrl,
               name: product.name,
-              description: String(product.description || '').trim() || seoDesc,
+              description: plainDescription || seoDesc,
               images: Array.isArray(product.images) ? product.images.map((u) => String(u)).filter(Boolean) : [],
               price: Number.isFinite(selectedPrice) ? selectedPrice : Number(product.price) || 0,
               inStock,

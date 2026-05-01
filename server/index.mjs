@@ -5463,12 +5463,25 @@ app.get('/sitemap.xml', async (req, res) => {
     const nowIso = new Date().toISOString();
     const staticUrls = [
       { loc: `${SITE}/`, lastmod: nowIso },
+      { loc: `${SITE}/best-deals`, lastmod: nowIso },
+      { loc: `${SITE}/custom-print`, lastmod: nowIso },
       { loc: `${SITE}/category/home`, lastmod: nowIso },
       { loc: `${SITE}/category/printed`, lastmod: nowIso },
       { loc: `${SITE}/category/trending`, lastmod: nowIso },
+      { loc: `${SITE}/category/fashion`, lastmod: nowIso },
+      { loc: `${SITE}/category/electronics`, lastmod: nowIso },
+      { loc: `${SITE}/contact`, lastmod: nowIso },
     ];
 
     const products = await fetchProductsForSitemap(req);
+    const categoryUrls = Array.from(
+      new Set(
+        products
+          .map((p) => String(p?.category || '').trim())
+          .filter(Boolean)
+          .map((category) => `${SITE}/category/${encodeURIComponent(category)}`)
+      )
+    ).map((loc) => ({ loc, lastmod: nowIso }));
     const productUrls = products
       .map((p) => {
         const id = String(p?.id || p?._id || '').trim();
@@ -5480,7 +5493,7 @@ app.get('/sitemap.xml', async (req, res) => {
       })
       .filter(Boolean);
 
-    const urls = [...staticUrls, ...productUrls];
+    const urls = [...staticUrls, ...categoryUrls, ...productUrls];
     const body =
       `<?xml version="1.0" encoding="UTF-8"?>\n` +
       `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n` +
