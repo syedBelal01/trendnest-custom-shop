@@ -68,7 +68,12 @@ export async function fetchPublicHealthApi(): Promise<PublicHealthResponse> {
 export async function uploadProductImage(fileOrBlob: Blob, filename = 'product.jpg'): Promise<string> {
   const fd = new FormData();
   fd.append('image', fileOrBlob, filename);
-  const res = await fetch(apiUrl('/api/upload/image'), { method: 'POST', body: fd });
+  const res = await fetch(apiUrl('/api/upload/image'), {
+    method: 'POST',
+    credentials: 'include',
+    headers: uploadAuthHeaders(),
+    body: fd,
+  });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(typeof data.error === 'string' ? data.error : 'Image upload failed');
@@ -80,7 +85,12 @@ export async function uploadProductImage(fileOrBlob: Blob, filename = 'product.j
 export async function uploadCustomDesign(file: File): Promise<string> {
   const fd = new FormData();
   fd.append('design', file, file.name);
-  const res = await fetch(apiUrl('/api/upload/design'), { method: 'POST', body: fd });
+  const res = await fetch(apiUrl('/api/upload/design'), {
+    method: 'POST',
+    credentials: 'include',
+    headers: uploadAuthHeaders(),
+    body: fd,
+  });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(typeof data.error === 'string' ? data.error : 'Design upload failed');
@@ -142,6 +152,20 @@ export async function fetchProductsApi(): Promise<import('@/types').Product[]> {
 function getAdminApiKey(): string | null {
   if (typeof window === 'undefined') return null;
   return sessionStorage.getItem('trendnest-admin-api-key');
+}
+
+function uploadAuthHeaders(): HeadersInit {
+  const h: Record<string, string> = {};
+  if (typeof window === 'undefined') return h;
+  try {
+    const adminKey = sessionStorage.getItem('trendnest-admin-api-key');
+    if (adminKey && adminKey.trim()) h['X-Admin-Key'] = adminKey.trim();
+    const clientToken = sessionStorage.getItem('tn_client_auth');
+    if (clientToken && clientToken.trim()) h['Authorization'] = `Bearer ${clientToken.trim()}`;
+  } catch {
+    // ignore storage access errors (private mode)
+  }
+  return h;
 }
 
 function adminHeaders(): HeadersInit {

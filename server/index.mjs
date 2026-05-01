@@ -616,6 +616,20 @@ async function hasValidMxOrThrow(domainLower) {
 // --- Rate limiting (single instance) ---
 const SIGNUP_RATE_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.SIGNUP_RATE_LIMIT_WINDOW_MS || 60_000));
 const SIGNUP_RATE_LIMIT_MAX = Math.max(1, Number(process.env.SIGNUP_RATE_LIMIT_MAX || 5));
+const UPLOAD_RATE_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.UPLOAD_RATE_LIMIT_WINDOW_MS || 60_000));
+const UPLOAD_RATE_LIMIT_MAX = Math.max(1, Number(process.env.UPLOAD_RATE_LIMIT_MAX || 20));
+const PAYMENT_CREATE_RATE_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.PAYMENT_CREATE_RATE_LIMIT_WINDOW_MS || 60_000));
+const PAYMENT_CREATE_RATE_LIMIT_MAX = Math.max(1, Number(process.env.PAYMENT_CREATE_RATE_LIMIT_MAX || 10));
+const PAYMENT_VERIFY_RATE_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.PAYMENT_VERIFY_RATE_LIMIT_WINDOW_MS || 60_000));
+const PAYMENT_VERIFY_RATE_LIMIT_MAX = Math.max(1, Number(process.env.PAYMENT_VERIFY_RATE_LIMIT_MAX || 20));
+const ORDER_CREATE_RATE_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.ORDER_CREATE_RATE_LIMIT_WINDOW_MS || 60_000));
+const ORDER_CREATE_RATE_LIMIT_MAX = Math.max(1, Number(process.env.ORDER_CREATE_RATE_LIMIT_MAX || 8));
+const ORDER_CANCEL_RATE_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.ORDER_CANCEL_RATE_LIMIT_WINDOW_MS || 60_000));
+const ORDER_CANCEL_RATE_LIMIT_MAX = Math.max(1, Number(process.env.ORDER_CANCEL_RATE_LIMIT_MAX || 8));
+const ADMIN_KEY_RATE_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.ADMIN_KEY_RATE_LIMIT_WINDOW_MS || 60_000));
+const ADMIN_KEY_RATE_LIMIT_MAX = Math.max(1, Number(process.env.ADMIN_KEY_RATE_LIMIT_MAX || 25));
+const WEBHOOK_RATE_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.WEBHOOK_RATE_LIMIT_WINDOW_MS || 60_000));
+const WEBHOOK_RATE_LIMIT_MAX = Math.max(1, Number(process.env.WEBHOOK_RATE_LIMIT_MAX || 240));
 /** @type {Map<string, { count: number, resetAtMs: number }>} */
 const ipRateLimitMap = new Map();
 
@@ -651,6 +665,42 @@ function rateLimitByIp({ keyPrefix, limit, windowMs }) {
     }
   };
 }
+
+const uploadRateLimit = rateLimitByIp({
+  keyPrefix: 'upload',
+  limit: UPLOAD_RATE_LIMIT_MAX,
+  windowMs: UPLOAD_RATE_LIMIT_WINDOW_MS,
+});
+const paymentCreateRateLimit = rateLimitByIp({
+  keyPrefix: 'payment_create',
+  limit: PAYMENT_CREATE_RATE_LIMIT_MAX,
+  windowMs: PAYMENT_CREATE_RATE_LIMIT_WINDOW_MS,
+});
+const paymentVerifyRateLimit = rateLimitByIp({
+  keyPrefix: 'payment_verify',
+  limit: PAYMENT_VERIFY_RATE_LIMIT_MAX,
+  windowMs: PAYMENT_VERIFY_RATE_LIMIT_WINDOW_MS,
+});
+const orderCreateRateLimit = rateLimitByIp({
+  keyPrefix: 'order_create',
+  limit: ORDER_CREATE_RATE_LIMIT_MAX,
+  windowMs: ORDER_CREATE_RATE_LIMIT_WINDOW_MS,
+});
+const orderCancelRateLimit = rateLimitByIp({
+  keyPrefix: 'order_cancel',
+  limit: ORDER_CANCEL_RATE_LIMIT_MAX,
+  windowMs: ORDER_CANCEL_RATE_LIMIT_WINDOW_MS,
+});
+const adminKeyRateLimit = rateLimitByIp({
+  keyPrefix: 'admin_key',
+  limit: ADMIN_KEY_RATE_LIMIT_MAX,
+  windowMs: ADMIN_KEY_RATE_LIMIT_WINDOW_MS,
+});
+const webhookRateLimit = rateLimitByIp({
+  keyPrefix: 'webhook',
+  limit: WEBHOOK_RATE_LIMIT_MAX,
+  windowMs: WEBHOOK_RATE_LIMIT_WINDOW_MS,
+});
 
 const CouponSchema = new mongoose.Schema(
   {
@@ -1436,17 +1486,26 @@ function serializePaymentSessionForClient(doc) {
 }
 
 function adminKeyRequired(req, res, next) {
+  adminKeyRateLimit(req, res, () => {
+    const expected = process.env.ADMIN_API_KEY;
+    if (!expected) {
+      res.status(503).json({ error: 'ADMIN_API_KEY is not configured on the server.' });
+      return;
+    }
+    const provided = req.get('x-admin-key') || req.get('X-Admin-Key') || '';
+    if (provided !== expected) {
+      res.status(401).json({ error: 'Invalid or missing admin key.' });
+      return;
+    }
+    next();
+  });
+}
+
+function hasValidAdminKey(req) {
   const expected = process.env.ADMIN_API_KEY;
-  if (!expected) {
-    res.status(503).json({ error: 'ADMIN_API_KEY is not configured on the server.' });
-    return;
-  }
-  const provided = req.get('x-admin-key') || req.get('X-Admin-Key') || '';
-  if (provided !== expected) {
-    res.status(401).json({ error: 'Invalid or missing admin key.' });
-    return;
-  }
-  next();
+  if (!expected) return false;
+  const provided = String(req.get('x-admin-key') || req.get('X-Admin-Key') || '').trim();
+  return !!provided && provided === String(expected);
 }
 
 function simpleEmailValid(s) {
@@ -2572,13 +2631,49 @@ function isAllowedCorsOrigin(requestOrigin) {
   return false;
 }
 
+function getOriginFromReferer(referer) {
+  if (!referer) return '';
+  try {
+    return new URL(referer).origin;
+  } catch {
+    return '';
+  }
+}
+
+function requireTrustedBrowserOrigin(req, res, next) {
+  const method = String(req.method || 'GET').toUpperCase();
+  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+    next();
+    return;
+  }
+  const origin = String(req.get('origin') || '').trim();
+  const refererOrigin = getOriginFromReferer(String(req.get('referer') || ''));
+  if ((origin && isAllowedCorsOrigin(origin)) || (refererOrigin && isAllowedCorsOrigin(refererOrigin))) {
+    next();
+    return;
+  }
+  if (process.env.NODE_ENV !== 'production' && !origin && !refererOrigin) {
+    next();
+    return;
+  }
+  res.status(403).json({ error: 'Blocked by origin policy' });
+}
+
 const corsOptions = {
   origin: (requestOrigin, callback) => {
     if (allowedFrontendOrigins.length === 0) {
+      if (process.env.NODE_ENV === 'production') {
+        callback(new Error('CORS is not configured for production'));
+        return;
+      }
       callback(null, requestOrigin || true);
       return;
     }
     if (!requestOrigin) {
+      if (process.env.NODE_ENV === 'production') {
+        callback(new Error('Origin header is required in production'));
+        return;
+      }
       callback(null, true);
       return;
     }
@@ -2635,6 +2730,9 @@ const SESSION_TTL_MS = Number(process.env.SESSION_TTL_MS || 1000 * 60 * 60 * 24 
 const COOKIE_SAMESITE = (process.env.COOKIE_SAMESITE || '').trim().toLowerCase();
 const COOKIE_SECURE = (process.env.COOKIE_SECURE || '').trim().toLowerCase();
 const isProd = process.env.NODE_ENV === 'production';
+if (isProd && !SESSION_SECRET) {
+  throw new Error('SESSION_SECRET is required in production');
+}
 const useMongoSessionStore = isProd && !!MONGODB_URI;
 const cookieSameSite =
   COOKIE_SAMESITE === 'none' || COOKIE_SAMESITE === 'lax' || COOKIE_SAMESITE === 'strict'
@@ -2646,7 +2744,7 @@ const cookieSecure = COOKIE_SECURE ? COOKIE_SECURE === 'true' : isProd;
 app.use(
   session({
     name: 'tn_session',
-    secret: SESSION_SECRET || 'dev-insecure-session-secret',
+    secret: SESSION_SECRET || 'dev-session-secret-change-me',
     resave: false,
     saveUninitialized: false,
     // In dev, avoid Mongo-backed sessions: flaky/blocked Mongo networking can turn all requests into 500s.
@@ -2710,18 +2808,15 @@ function isAdminRequest(req) {
 app.use(async (req, res, next) => {
   try {
     if (req.method !== 'GET') {
-      next();
-      return;
+      return next();
     }
     if (isAdminRequest(req)) {
-      next();
-      return;
+      return next();
     }
     // Avoid counting the webhook endpoints.
     const p = String(req.path || req.url || '');
     if (p.startsWith('/api/webhooks')) {
-      next();
-      return;
+      return next();
     }
 
     const cookies = parseCookieHeader(req.headers.cookie);
@@ -2749,9 +2844,8 @@ app.use(async (req, res, next) => {
     });
   } catch (e) {
     // ignore
-  } finally {
-    next();
   }
+  next();
 });
 
 function saveSession(req) {
@@ -2771,7 +2865,15 @@ app.get('/', (_req, res) => {
   res.type('text/plain').send('Backend is running 🚀');
 });
 
-app.get('/api/__debug/routes', (_req, res) => {
+function debugRoutesEnabled(req, res, next) {
+  if (process.env.NODE_ENV === 'production') {
+    res.status(404).json({ error: 'Not found' });
+    return;
+  }
+  next();
+}
+
+app.get('/api/__debug/routes', debugRoutesEnabled, (_req, res) => {
   try {
     const stack = (app && app._router && Array.isArray(app._router.stack)) ? app._router.stack : [];
     const routes = [];
@@ -2789,13 +2891,13 @@ app.get('/api/__debug/routes', (_req, res) => {
   }
 });
 
-app.get('/api/__debug/delay', (_req, res) => {
+app.get('/api/__debug/delay', debugRoutesEnabled, (_req, res) => {
   setTimeout(() => {
     if (!res.headersSent) res.json({ ok: true, waitedMs: 750 });
   }, 750);
 });
 
-app.get('/api/__debug/orders-count', mongoReady, async (_req, res) => {
+app.get('/api/__debug/orders-count', debugRoutesEnabled, mongoReady, async (_req, res) => {
   try {
     const count = await Order.countDocuments({});
     res.json({ ok: true, count });
@@ -3197,33 +3299,41 @@ async function handleShiprocketTrackingWebhook(req, res) {
       bodyKeys: req.body && typeof req.body === 'object' ? Object.keys(req.body).slice(0, 40) : typeof req.body,
     });
 
-    // Enforce token check when configured.
-    if (expectedToken) {
-      if (!sentToken || sentToken !== expectedToken) {
-        logJson('warn', 'shiprocket.webhook_rejected', { reason: 'bad_token' });
-        res.status(401).json({ ok: false });
-        return;
-      }
+    const raw = req.rawBody ? Buffer.from(req.rawBody) : Buffer.from(JSON.stringify(req.body || {}));
+    const verifySignature = () => {
+      if (!secret || !sig) return false;
+      const expected = crypto.createHmac('sha256', secret).update(raw).digest('hex');
+      const a = Buffer.from(String(expected));
+      const b = Buffer.from(String(sig));
+      return a.length === b.length && crypto.timingSafeEqual(a, b);
+    };
+
+    // Production must have webhook authentication configured.
+    if (process.env.NODE_ENV === 'production' && !expectedToken && !secret) {
+      logJson('warn', 'shiprocket.webhook_rejected', { reason: 'missing_prod_webhook_auth' });
+      res.status(503).json({ ok: false });
+      return;
     }
 
-    // Enforce signature only when explicitly required.
-    if (requireSig) {
+    // Token auth when configured.
+    if (expectedToken && (!sentToken || sentToken !== expectedToken)) {
+      logJson('warn', 'shiprocket.webhook_rejected', { reason: 'bad_token' });
+      res.status(401).json({ ok: false });
+      return;
+    }
+
+    // Signature auth:
+    // - required when explicitly enabled
+    // - also required in production when token is not configured.
+    const mustCheckSignature = requireSig || (process.env.NODE_ENV === 'production' && !expectedToken);
+    if (mustCheckSignature) {
       if (!secret) {
         logJson('warn', 'shiprocket.webhook_rejected', { reason: 'signature_required_but_secret_missing' });
         res.status(500).json({ ok: false });
         return;
       }
-      if (!sig) {
-        logJson('warn', 'shiprocket.webhook_rejected', { reason: 'missing_signature' });
-        res.status(401).json({ ok: false });
-        return;
-      }
-      const raw = req.rawBody ? Buffer.from(req.rawBody) : Buffer.from(JSON.stringify(req.body || {}));
-      const expected = crypto.createHmac('sha256', secret).update(raw).digest('hex');
-      const a = Buffer.from(String(expected));
-      const b = Buffer.from(String(sig));
-      if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
-        logJson('warn', 'shiprocket.webhook_rejected', { reason: 'bad_signature' });
+      if (!sig || !verifySignature()) {
+        logJson('warn', 'shiprocket.webhook_rejected', { reason: sig ? 'bad_signature' : 'missing_signature' });
         res.status(401).json({ ok: false });
         return;
       }
@@ -3410,15 +3520,34 @@ async function handleShiprocketTrackingWebhook(req, res) {
 
 // Shiprocket blocks webhook URLs containing keywords like "shiprocket"/"sr"/"kr".
 // Keep the old route for compatibility, but configure Shiprocket to use /api/webhooks/tracking.
-app.post('/api/webhooks/shiprocket', handleShiprocketTrackingWebhook);
-app.post('/api/webhooks/tracking', handleShiprocketTrackingWebhook);
+app.post('/api/webhooks/shiprocket', webhookRateLimit, handleShiprocketTrackingWebhook);
+app.post('/api/webhooks/tracking', webhookRateLimit, handleShiprocketTrackingWebhook);
 
 function requireAuth(req, res, next) {
   if (!req.session?.userId) {
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }
-  next();
+  requireTrustedBrowserOrigin(req, res, next);
+}
+
+function requireUploadAuth(req, res, next) {
+  if (req.session?.userId) {
+    requireTrustedBrowserOrigin(req, res, next);
+    return;
+  }
+  const hasAdminHeader = !!String(req.get('x-admin-key') || req.get('X-Admin-Key') || '').trim();
+  if (!hasAdminHeader) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+  adminKeyRateLimit(req, res, () => {
+    if (!hasValidAdminKey(req)) {
+      res.status(401).json({ error: 'Invalid or missing admin key.' });
+      return;
+    }
+    requireTrustedBrowserOrigin(req, res, next);
+  });
 }
 
 function serializeUser(userDoc) {
@@ -3588,7 +3717,7 @@ app.get('/api/auth/me', async (req, res) => {
   }
 });
 
-app.post('/api/auth/logout', async (req, res) => {
+app.post('/api/auth/logout', requireTrustedBrowserOrigin, async (req, res) => {
   const uid = req.session?.userId ? String(req.session.userId) : null;
   try {
     if (uid) await revokeClientAuthTokensForUser(uid);
@@ -4087,6 +4216,7 @@ app.post(
 
 app.post(
   '/api/auth/otp/verify',
+  requireTrustedBrowserOrigin,
   rateLimitByIp({ keyPrefix: 'auth_otp_verify', limit: SIGNUP_RATE_LIMIT_MAX, windowMs: SIGNUP_RATE_LIMIT_WINDOW_MS }),
   async (req, res) => {
   try {
@@ -4251,7 +4381,7 @@ app.get('/api/me/orders/:id', mongoReady, requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/me/orders/:id/cancel', mongoReady, requireAuth, async (req, res) => {
+app.post('/api/me/orders/:id/cancel', orderCancelRateLimit, mongoReady, requireAuth, async (req, res) => {
   try {
     const id = String(req.params.id || '').trim();
     const reason = String(req.body?.reason || '').trim();
@@ -5137,7 +5267,11 @@ app.post('/api/auth/password/set', mongoReady, requireAuth, async (req, res) => 
   }
 });
 
-app.post('/api/auth/login', async (req, res) => {
+app.post(
+  '/api/auth/login',
+  rateLimitByIp({ keyPrefix: 'auth_login', limit: SIGNUP_RATE_LIMIT_MAX, windowMs: SIGNUP_RATE_LIMIT_WINDOW_MS }),
+  requireTrustedBrowserOrigin,
+  async (req, res) => {
   try {
     const email = String(req.body?.email || '').trim();
     const password = String(req.body?.password || '').trim();
@@ -5232,7 +5366,7 @@ app.post('/api/auth/password/forgot', async (req, res) => {
   }
 });
 
-app.post('/api/auth/password/reset', async (req, res) => {
+app.post('/api/auth/password/reset', requireTrustedBrowserOrigin, async (req, res) => {
   try {
     const challengeId = String(req.body?.challengeId || '').trim();
     const code = String(req.body?.code || '').trim();
@@ -6678,7 +6812,7 @@ async function computeServerCheckoutPricing({ req, body, rawItems, paymentMethod
   };
 }
 
-app.post('/api/orders', mongoReady, async (req, res) => {
+app.post('/api/orders', orderCreateRateLimit, requireTrustedBrowserOrigin, mongoReady, async (req, res) => {
   try {
     const body = req.body || {};
     const c = body.customer || {};
@@ -6858,7 +6992,7 @@ setInterval(() => {
 }, 60_000).unref?.();
 
 /** Create a pending Razorpay payment session (no Order is created here). */
-app.post('/api/payments/razorpay/session', mongoReady, async (req, res) => {
+app.post('/api/payments/razorpay/session', paymentCreateRateLimit, requireTrustedBrowserOrigin, mongoReady, async (req, res) => {
   try {
     if (!requireRazorpayConfigured(res)) return;
     const body = req.body || {};
@@ -7014,7 +7148,7 @@ app.post('/api/payments/razorpay/session', mongoReady, async (req, res) => {
   }
 });
 
-app.post('/api/payments/razorpay/cancel', mongoReady, async (req, res) => {
+app.post('/api/payments/razorpay/cancel', orderCancelRateLimit, requireTrustedBrowserOrigin, mongoReady, async (req, res) => {
   try {
     const sessionId = String(req.body?.sessionId || '').trim();
     if (!sessionId) {
@@ -7054,7 +7188,7 @@ app.post('/api/payments/razorpay/order', mongoReady, async (req, res) => {
   }
 });
 
-app.post('/api/payments/razorpay/verify', mongoReady, async (req, res) => {
+app.post('/api/payments/razorpay/verify', paymentVerifyRateLimit, requireTrustedBrowserOrigin, mongoReady, async (req, res) => {
   try {
     if (!requireRazorpayConfigured(res)) return;
     const sessionId = String(req.body?.sessionId || '').trim();
@@ -7222,18 +7356,7 @@ app.post('/api/payments/razorpay/verify', mongoReady, async (req, res) => {
   }
 });
 
-app.get('/api/orders', mongoReady, (req, res) => {
-  const expected = process.env.ADMIN_API_KEY;
-  if (!expected) {
-    res.status(503).json({ error: 'ADMIN_API_KEY is not configured on the server.' });
-    return;
-  }
-  const provided = req.get('x-admin-key') || req.get('X-Admin-Key') || '';
-  if (provided !== expected) {
-    res.status(401).json({ error: 'Invalid or missing admin key.' });
-    return;
-  }
-
+app.get('/api/orders', mongoReady, adminKeyRequired, (req, res) => {
   res.set('Cache-Control', 'no-store');
   Order.find()
     .sort({ createdAt: -1 })
@@ -8180,7 +8303,7 @@ app.post('/api/admin/orders/:id/sync-shipping-status', mongoReady, adminKeyRequi
   }
 });
 
-app.post('/api/upload/image', (req, res, next) => {
+app.post('/api/upload/image', uploadRateLimit, mongoReady, requireUploadAuth, (req, res, next) => {
   upload.single('image')(req, res, (err) => {
     if (err) {
       res.status(400).json({ error: err.message || 'Upload error' });
@@ -8212,7 +8335,7 @@ app.post('/api/upload/image', (req, res, next) => {
   stream.end(req.file.buffer);
 });
 
-app.post('/api/upload/design', (req, res, next) => {
+app.post('/api/upload/design', uploadRateLimit, mongoReady, requireUploadAuth, (req, res, next) => {
   uploadDesign.single('design')(req, res, (err) => {
     if (err) {
       res.status(400).json({ error: err.message || 'Upload error' });
@@ -8247,7 +8370,7 @@ app.post('/api/upload/design', (req, res, next) => {
   stream.end(req.file.buffer);
 });
 
-app.post('/api/upload/review-image', mongoReady, requireAuth, (req, res, next) => {
+app.post('/api/upload/review-image', uploadRateLimit, mongoReady, requireAuth, (req, res, next) => {
   upload.single('image')(req, res, (err) => {
     if (err) {
       res.status(400).json({ error: err.message || 'Upload error' });
@@ -8279,7 +8402,7 @@ app.post('/api/upload/review-image', mongoReady, requireAuth, (req, res, next) =
   stream.end(req.file.buffer);
 });
 
-app.post('/api/upload/review-media', mongoReady, requireAuth, (req, res, next) => {
+app.post('/api/upload/review-media', uploadRateLimit, mongoReady, requireAuth, (req, res, next) => {
   upload.single('file')(req, res, (err) => {
     if (err) {
       res.status(400).json({ error: err.message || 'Upload error' });
@@ -8313,7 +8436,7 @@ app.post('/api/upload/review-media', mongoReady, requireAuth, (req, res, next) =
   stream.end(req.file.buffer);
 });
 
-app.post('/api/upload/return-image', mongoReady, requireAuth, (req, res, next) => {
+app.post('/api/upload/return-image', uploadRateLimit, mongoReady, requireAuth, (req, res, next) => {
   upload.single('image')(req, res, (err) => {
     if (err) {
       res.status(400).json({ error: err.message || 'Upload error' });
