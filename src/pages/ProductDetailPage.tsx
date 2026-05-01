@@ -202,6 +202,30 @@ export default function ProductDetailPage() {
     }
     return items[0] ?? null;
   }, [product, selectedVariantKey]);
+  const imageDriverTypeName = useMemo(() => {
+    if (!product?.variantModel?.types?.length) return '';
+    const names = product.variantModel.types
+      .map((t) => String(t?.name ?? '').trim())
+      .filter(Boolean);
+    if (!names.length) return '';
+    const preferred = names.find((name) => {
+      const n = normKey(name);
+      return n.includes('color') || n.includes('colour') || n.includes('finish') || n.includes('leather');
+    });
+    return preferred || names[0];
+  }, [product]);
+  const selectedImageVariantItem = useMemo(() => {
+    if (!product?.variantModel?.items?.length) return null;
+    const items = product.variantModel.items;
+    if (!imageDriverTypeName) return selectedVariantItem ?? items[0] ?? null;
+    const selectedImageAttrValue = normVal(getAttrValueCaseInsensitive(variantAttrs, imageDriverTypeName));
+    if (!selectedImageAttrValue) return selectedVariantItem ?? items[0] ?? null;
+    const hit = items.find((x) => {
+      const attrs = (x as { attrs?: Record<string, string> }).attrs;
+      return normVal(getAttrValueCaseInsensitive(attrs, imageDriverTypeName)) === selectedImageAttrValue;
+    });
+    return hit ?? selectedVariantItem ?? items[0] ?? null;
+  }, [product, imageDriverTypeName, variantAttrs, selectedVariantItem]);
 
   const pdpGoodsLineTotal = useMemo(() => {
     if (!product) return 0;
@@ -346,9 +370,9 @@ export default function ProductDetailPage() {
   const variantNames = product ? productVariantNames(product) : [];
   const galleryImages = useMemo(() => {
     if (!product) return [];
-    if (hasVariantModel && selectedVariantItem) {
-      const variantImages = (Array.isArray(selectedVariantItem.images) ? selectedVariantItem.images : []).map((u: unknown) => String(u).trim()).filter(Boolean);
-      const legacyImg = selectedVariantItem.image ? String(selectedVariantItem.image).trim() : '';
+    if (hasVariantModel && selectedImageVariantItem) {
+      const variantImages = (Array.isArray(selectedImageVariantItem.images) ? selectedImageVariantItem.images : []).map((u: unknown) => String(u).trim()).filter(Boolean);
+      const legacyImg = selectedImageVariantItem.image ? String(selectedImageVariantItem.image).trim() : '';
       const rootOnly = dedupeImageUrls((product.images ?? []).map(u => String(u).trim()).filter(Boolean));
       if (variantImages.length === 0 && !legacyImg) return rootOnly;
       const primaryList = variantImages.length > 0 ? variantImages : legacyImg ? [legacyImg] : [];
@@ -356,11 +380,15 @@ export default function ProductDetailPage() {
       return dedupeImageUrls(primaryList);
     }
     return galleryImagesForSelection(product, selectedVariant);
-  }, [product, selectedVariant, hasVariantModel, selectedVariantItem]);
+  }, [product, selectedVariant, hasVariantModel, selectedImageVariantItem]);
 
   useEffect(() => {
-    setSelectedImage(galleryImages[0] ? String(galleryImages[0]) : '');
-  }, [galleryImages, selectedVariantKey, selectedVariant]);
+    setSelectedImage((prev) => {
+      const current = String(prev || '').trim();
+      if (current && galleryImages.includes(current)) return current;
+      return galleryImages[0] ? String(galleryImages[0]) : '';
+    });
+  }, [galleryImages]);
 
   const specRows = useMemo(() => {
     if (!product) return [];

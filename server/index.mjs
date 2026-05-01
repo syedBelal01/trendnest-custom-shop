@@ -6054,22 +6054,28 @@ function buildProductUpdateSet(src) {
     if (src.variantModel && typeof src.variantModel === 'object') {
       const vm = src.variantModel;
       if (Array.isArray(vm.items)) {
+        const normalizedItems = vm.items.map((it) => {
+          const price = Number(it?.price);
+          const images = Array.isArray(it?.images) ? it.images.map((u) => String(u).trim()).filter(Boolean) : undefined;
+          const image = it?.image != null ? String(it.image).trim() : undefined;
+          const stock = Math.max(0, Math.floor(Number(it?.stock) || 0));
+          return {
+            ...it,
+            // Storefront compares keys as strings; coerce so admin/API JSON (number vs string) stays consistent.
+            key: it?.key == null ? it?.key : String(it.key),
+            stock,
+            codPrice: Number.isFinite(price) ? price : undefined,
+            images,
+            image,
+          };
+        });
+        const stockSum = normalizedItems.reduce((acc, it) => acc + Math.max(0, Math.floor(Number(it?.stock) || 0)), 0);
         out.variantModel = {
           ...vm,
-          items: vm.items.map((it) => {
-            const price = Number(it?.price);
-            const images = Array.isArray(it?.images) ? it.images.map((u) => String(u).trim()).filter(Boolean) : undefined;
-            const image = it?.image != null ? String(it.image).trim() : undefined;
-            return {
-              ...it,
-              // Storefront compares keys as strings; coerce so admin/API JSON (number vs string) stays consistent.
-              key: it?.key == null ? it?.key : String(it.key),
-              codPrice: Number.isFinite(price) ? price : undefined,
-              images,
-              image,
-            };
-          }),
+          items: normalizedItems,
         };
+        // Keep persisted product stock aligned with variant sum.
+        out.stock = stockSum;
       } else {
         out.variantModel = vm;
       }

@@ -91,6 +91,36 @@ function toAttrs(v: unknown): Record<string, string> {
   }
   return out;
 }
+function normalizeNonNegativeStock(v: unknown): number {
+  const n = Math.floor(Number(v));
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return n;
+}
+function variantModelTotalStock(vm: Product['variantModel'] | undefined): number {
+  if (!vm || !Array.isArray(vm.items)) return 0;
+  return vm.items.reduce(
+    (acc, it) => acc + normalizeNonNegativeStock((it as { stock?: unknown } | undefined)?.stock),
+    0
+  );
+}
+function variantKeyFromAttrs(types: VariantModelType[], attrs: Record<string, string>): string {
+  return types.map((t) => `${t.name}:${toStr(attrs[t.name] ?? '').trim()}`).join('|');
+}
+function buildVariantAttrsCombos(types: VariantModelType[]): Array<Record<string, string>> {
+  if (!types.length) return [{}];
+  const [head, ...rest] = types;
+  const tail = buildVariantAttrsCombos(rest);
+  const out: Array<Record<string, string>> = [];
+  const headName = toStr(head?.name).trim();
+  const headValues = Array.isArray(head?.values) ? head.values.map((v) => toStr(v).trim()).filter(Boolean) : [];
+  if (!headName || headValues.length === 0) return tail;
+  for (const value of headValues) {
+    for (const t of tail) {
+      out.push({ ...t, [headName]: value });
+    }
+  }
+  return out.length ? out : tail;
+}
 function stockStatusLabel(s: StockStatus): string {
   if (s === 'out') return 'Out of Stock';
   if (s === 'low') return 'Low Stock';
@@ -107,6 +137,10 @@ function normalizeSpecsForPersist(rows: { label: string; value: string }[] | und
   return rows
     .map(r => ({ label: (r.label ?? '').trim(), value: (r.value ?? '').trim() }))
     .filter(r => r.label.length > 0 && r.value.length > 0);
+}
+function normalizeCsvList(values: string[] | undefined): string[] {
+  if (!Array.isArray(values)) return [];
+  return values.map((s) => String(s).trim()).filter(Boolean);
 }
 
 const emptyProduct = (): Partial<Product> => ({
@@ -224,13 +258,20 @@ function normalizeProductForEditing(p: Product): Partial<Product> {
           : [],
         items: Array.isArray(vm.items)
           ? vm.items.map(it => {
-              const itAny = it as unknown as { key?: unknown; attrs?: unknown; images?: unknown; image?: unknown };
+              const itAny = it as unknown as {
+                key?: unknown;
+                attrs?: unknown;
+                images?: unknown;
+                image?: unknown;
+                stock?: unknown;
+              };
               return {
                 ...it,
                 key: toStr(itAny.key).trim(),
                 attrs: toAttrs(itAny.attrs),
                 images: toStrList(itAny.images),
                 image: toStr(itAny.image).trim() || undefined,
+                stock: normalizeNonNegativeStock(itAny.stock),
               } as VariantModelItem;
             })
           : ([] as VariantModelItem[]),
@@ -424,6 +465,147 @@ export default function AdminProducts() {
       return v.trim() || String(it?.key ?? '').trim() || 'Variant';
     }
     return String(it?.key ?? '').trim() || 'Variant';
+  };
+
+  const updateVmItemStock = (idx: number, raw: string) => {
+    setEditing((p) => {
+      if (!p?.variantModel || !Array.isArray(p.variantModel.items)) return p;
+      const items = [...p.variantModel.items];
+      const cur = items[idx];
+      if (!cur) return p;
+      items[idx] = { ...cur, stock: normalizeNonNegativeStock(raw) };
+      const total = items.reduce(
+        (acc, it) => acc + normalizeNonNegativeStock((it as { stock?: unknown } | undefined)?.stock),
+        0
+      );
+      return { ...p, stock: total, variantModel: { ...p.variantModel, items } };
+    });
+  };
+
+  const addVmVariant = () => {
+    if (!editing?.variantModel) return;
+    const vm = editing.variantModel as VariantModel;
+
+    const types: VariantModelType[] = (Array.isArray(vm.types) ? vm.types : [])
+      .map((t) => ({
+        name: toStr((t as unknown as { name?: unknown })?.name).trim(),
+        values: toStrList((t as unknown as { values?: unknown })?.values),
+      }))
+      .filter((t) => t.name.length > 0);
+
+    const items: VariantModelItem[] = (Array.isArray(vm.items) ? vm.items : []).map((it) => {
+      const row = it as unknown as {
+        key?: unknown;
+        attrs?: unknown;
+        sku?: unknown;
+        price?: unknown;
+        originalPrice?: unknown;
+        onlinePrice?: unknown;
+        codPrice?: unknown;
+        stock?: unknown;
+        image?: unknown;
+        images?: unknown;
+      };
+      const price = Number(row.price);
+      const normalizedPrice = Number.isFinite(price) ? price : Number(editing.price) || 0;
+      return {
+        ...it,
+        key: toStr(row.key).trim(),
+        attrs: toAttrs(row.attrs),
+        sku: toStr(row.sku).trim(),
+        price: normalizedPrice,
+        originalPrice: row.originalPrice != null ? Number(row.originalPrice) : undefined,
+        onlinePrice: row.onlinePrice != null ? Number(row.onlinePrice) : undefined,
+        codPrice: Number.isFinite(normalizedPrice) ? normalizedPrice : undefined,
+        stock: normalizeNonNegativeStock(row.stock),
+        image: toStr(row.image).trim() || undefined,
+        images: toStrList(row.images),
+      } as VariantModelItem;
+    });
+
+    const nextTypes = types.length
+      ? types.map((t) => ({ ...t, values: [...t.values] }))
+      : [{ name: 'Variant', values: ['Option 1'] }];
+
+    const firstType = nextTypes[0];
+    const existingValues = new Set(firstType.values.map((v) => v.toLowerCase()));
+    let seq = firstType.values.length + 1;
+    let newValue = firstType.values.length ? `${firstType.name} ${seq}` : 'Option 1';
+    while (existingValues.has(newValue.toLowerCase())) {
+      seq += 1;
+      newValue = `${firstType.name} ${seq}`;
+    }
+    if (!firstType.values.some((v) => v.toLowerCase() === newValue.toLowerCase())) {
+      firstType.values.push(newValue);
+    }
+
+    const tailTypes = nextTypes.slice(1);
+    const tailCombos = buildVariantAttrsCombos(tailTypes);
+    const existingKeys = new Set(items.map((it) => toStr(it?.key).trim()).filter(Boolean));
+    const template = items.find((it) => it?.isDefault) ?? items[0];
+    const fallbackPrice = Number(editing.price) || 0;
+    const basePrice = Number.isFinite(Number(template?.price)) ? Number(template?.price) : fallbackPrice;
+    const baseOnline =
+      template?.onlinePrice != null && Number.isFinite(Number(template.onlinePrice))
+        ? Number(template.onlinePrice)
+        : editing.onlinePrice != null && Number.isFinite(Number(editing.onlinePrice))
+          ? Number(editing.onlinePrice)
+          : undefined;
+    const baseOriginal =
+      template?.originalPrice != null && Number.isFinite(Number(template.originalPrice))
+        ? Number(template.originalPrice)
+        : editing.originalPrice != null && Number.isFinite(Number(editing.originalPrice))
+          ? Number(editing.originalPrice)
+          : undefined;
+
+    const rowsToAdd: VariantModelItem[] = [];
+    for (const tail of tailCombos) {
+      const attrs = { ...tail, [firstType.name]: newValue };
+      const key = variantKeyFromAttrs(nextTypes, attrs);
+      if (!key || existingKeys.has(key)) continue;
+      rowsToAdd.push({
+        key,
+        attrs,
+        isDefault: false,
+        sku: '',
+        price: basePrice,
+        originalPrice: baseOriginal,
+        onlinePrice: baseOnline,
+        codPrice: basePrice,
+        stock: 0,
+        images: [],
+      });
+    }
+
+    if (!rowsToAdd.length) {
+      toast.message('No new variant could be generated. Please check your variant setup.');
+      return;
+    }
+
+    const nextItems = [...items, ...rowsToAdd];
+    const total = nextItems.reduce(
+      (acc, it) => acc + normalizeNonNegativeStock((it as { stock?: unknown } | undefined)?.stock),
+      0
+    );
+
+    setEditing((p) => {
+      if (!p?.variantModel) return p;
+      return {
+        ...p,
+        stock: total,
+        variantModel: {
+          ...p.variantModel,
+          types: nextTypes,
+          items: nextItems,
+        },
+      };
+    });
+
+    toast.success(
+      rowsToAdd.length === 1
+        ? 'Added 1 variant row. Fill details and save.'
+        : `Added ${rowsToAdd.length} variant rows. Fill details and save.`
+    );
   };
 
   const handleVmImageFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -786,7 +968,8 @@ export default function AdminProducts() {
         variants: editing.variants ? [...editing.variants] : undefined,
       };
 
-      const sleeveTypes = snap.sleeveTypes?.filter(Boolean);
+      const sizes = normalizeCsvList(snap.sizes);
+      const sleeveTypes = normalizeCsvList(snap.sleeveTypes);
 
       const hasVariantMatrix = !!(snap.variantModel?.items?.length);
 
@@ -884,7 +1067,7 @@ export default function AdminProducts() {
           images,
           category: snap.category || 'fashion',
           subcategory: snap.subcategory,
-          sizes: snap.sizes?.length ? snap.sizes : undefined,
+          sizes: sizes.length ? sizes : undefined,
           sleeveTypes: sleeveTypes?.length ? sleeveTypes : undefined,
           rating: Number(snap.rating) || 4,
           reviews: snap.reviews || [],
@@ -918,7 +1101,7 @@ export default function AdminProducts() {
           images,
           category: snap.category || 'fashion',
           subcategory: snap.subcategory,
-          sizes: snap.sizes?.length ? snap.sizes : undefined,
+          sizes: sizes.length ? sizes : undefined,
           variants: variantsList.length ? variantsList : undefined,
           variantOptions: persistVariantOptions ? variantOptionsIn : [],
           sleeveTypes: sleeveTypes?.length ? sleeveTypes : undefined,
@@ -983,6 +1166,7 @@ export default function AdminProducts() {
         return hay.includes(query);
       });
   }, [products, categoryFilter, q]);
+  const derivedVmStock = useMemo(() => variantModelTotalStock(editing?.variantModel), [editing?.variantModel]);
 
   return (
     <div>
@@ -1158,13 +1342,21 @@ export default function AdminProducts() {
                   onSaveToDb={() => void saveSpecificationsOnly()}
                 />
 
-                {editing.variantModel?.items?.length ? (
+                {editing.variantModel ? (
                   <div className="rounded-xl border border-border bg-card p-3 shadow-sm space-y-3">
-                    <div>
-                      <p className="text-sm font-medium">Variants</p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Upload images per variant. The storefront product page uses these images.
-                      </p>
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-medium">Variants</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Upload images per variant. The storefront product page uses these images.
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Total stock is derived from variant rows: <span className="tabular-nums font-medium">{derivedVmStock}</span>
+                        </p>
+                      </div>
+                      <Button type="button" variant="secondary" size="sm" className="h-9" onClick={addVmVariant}>
+                        <Plus className="h-3.5 w-3.5 mr-1" /> Add Variant
+                      </Button>
                     </div>
                     <input
                       ref={vmFileRef}
@@ -1204,7 +1396,7 @@ export default function AdminProducts() {
                     </div>
 
                     <div className="space-y-4 pt-1">
-                      {(editing.variantModel.items as VariantModelItem[]).map((it, idx) => {
+                      {(Array.isArray(editing.variantModel.items) ? (editing.variantModel.items as VariantModelItem[]) : []).map((it, idx) => {
                         const name = labelForVmItem(it);
                         const imgs = (Array.isArray(it?.images) ? it.images : []).map(u => toStr(u).trim()).filter(Boolean);
                         return (
@@ -1215,6 +1407,18 @@ export default function AdminProducts() {
                                 <div className="text-[11px] text-muted-foreground truncate" title={String(it?.key ?? '')}>
                                   {String(it?.key ?? '')}
                                 </div>
+                              </div>
+                              <div className="ml-auto w-full sm:w-36">
+                                <Label className="text-[11px] text-muted-foreground">Variant stock</Label>
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  step={1}
+                                  inputMode="numeric"
+                                  className="h-9 mt-1"
+                                  value={String(normalizeNonNegativeStock(it?.stock))}
+                                  onChange={(e) => updateVmItemStock(idx, e.target.value)}
+                                />
                               </div>
                               <Button
                                 type="button"
@@ -1317,15 +1521,23 @@ export default function AdminProducts() {
                   </Select>
                   <Input
                     type="number"
-                    placeholder={editing.variantModel?.items?.length ? 'Stock is derived from variants' : 'Stock'}
-                    value={editing.stock || ''}
-                    disabled={!!editing.variantModel?.items?.length}
+                    placeholder={editing.variantModel ? 'Stock is derived from variants' : 'Stock'}
+                    value={editing.variantModel ? String(derivedVmStock) : String(editing.stock ?? '')}
+                    disabled={!!editing.variantModel}
                     onChange={e => setEditing(p => ({ ...p, stock: +e.target.value }))}
                   />
                 </div>
                 <Input placeholder="Subcategory" value={editing.subcategory || ''} onChange={e => setEditing(p => ({ ...p, subcategory: e.target.value }))} />
-                <Input placeholder="Sizes (comma separated, e.g. waist or tee sizes)" value={editing.sizes?.join(',') || ''} onChange={e => setEditing(p => ({ ...p, sizes: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))} />
-                <Input placeholder="Sleeve types (comma separated, tees only)" value={editing.sleeveTypes?.join(',') || ''} onChange={e => setEditing(p => ({ ...p, sleeveTypes: e.target.value.split(',').map(s => s.trim()).filter(Boolean) }))} />
+                <Input
+                  placeholder="Sizes (comma separated, e.g. waist or tee sizes)"
+                  value={editing.sizes?.join(',') || ''}
+                  onChange={e => setEditing(p => ({ ...p, sizes: e.target.value.split(',').map(s => s.trim()) }))}
+                />
+                <Input
+                  placeholder="Sleeve types (comma separated, tees only)"
+                  value={editing.sleeveTypes?.join(',') || ''}
+                  onChange={e => setEditing(p => ({ ...p, sleeveTypes: e.target.value.split(',').map(s => s.trim()) }))}
+                />
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input type="checkbox" checked={!!editing.isCustomPrint} onChange={e => setEditing(p => ({ ...p, isCustomPrint: e.target.checked }))} />
                   Custom print flow (links to /custom-print)
