@@ -28,6 +28,7 @@ import AdminCoupons from "@/pages/admin/AdminCoupons";
 import AdminCustomPrints from "@/pages/admin/AdminCustomPrints";
 import AdminCustomers from "@/pages/admin/AdminCustomers";
 import AdminAnalytics from "@/pages/admin/AdminAnalytics";
+import AdminHeroSaleBanners from "@/pages/admin/AdminHeroSaleBanners";
 import UserGuard from "@/components/UserGuard";
 import AccountPage from "@/pages/AccountPage";
 import AccountOrdersPage from "@/pages/AccountOrdersPage";
@@ -43,6 +44,7 @@ import ShippingPolicyPage from "@/pages/ShippingPolicyPage";
 import NotFound from "@/pages/NotFound";
 import ScrollToTop from "@/components/ScrollToTop";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { SaleBannersProvider } from "@/contexts/SaleBannersContext";
 import { Helmet } from "react-helmet-async";
 import ReviewInvitePage from "@/pages/ReviewInvitePage";
 
@@ -85,6 +87,7 @@ const App = () => (
             <BrowserRouter>
               <AuthProvider>
               <PaymentMethodProvider>
+              <SaleBannersProvider>
               <ScrollToTop />
               <Routes>
                 <Route element={<Layout />}>
@@ -156,9 +159,11 @@ const App = () => (
                   <Route path="coupons" element={<AdminCoupons />} />
                   <Route path="custom-prints" element={<AdminCustomPrints />} />
                   <Route path="customers" element={<AdminCustomers />} />
+                  <Route path="hero-banners" element={<AdminHeroSaleBanners />} />
                 </Route>
                 <Route path="*" element={<NotFound />} />
               </Routes>
+              </SaleBannersProvider>
               </PaymentMethodProvider>
               </AuthProvider>
             </BrowserRouter>

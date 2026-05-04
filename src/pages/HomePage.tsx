@@ -1,6 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
+import HeroSaleSlider from "@/components/HeroSaleSlider";
 import HeroCarousel from "@/components/HeroCarousel";
 import { categories as mockCategories } from "@/data/mockData";
 import { useProducts } from "@/contexts/ProductsContext";
@@ -211,7 +212,9 @@ export default function HomePage() {
 
       <div className="bg-white font-sans text-slate-900">
         <div className="mx-auto max-w-7xl px-4 py-6 md:px-8">
-          <section className="relative overflow-hidden rounded-3xl border border-orange-100 bg-gradient-to-br from-orange-50 via-white to-orange-100 p-6 shadow-sm md:p-14">
+          <HeroSaleSlider />
+          {false && (
+            <section className="hidden">
             <div className="absolute right-12 top-8 h-28 w-28 rounded-full bg-orange-200/40 blur-2xl" />
             <div className="absolute bottom-8 left-1/3 h-20 w-20 rounded-full bg-orange-300/20 blur-2xl" />
             <div className="grid items-center gap-10 md:grid-cols-2">
@@ -249,7 +252,8 @@ export default function HomePage() {
                 </div>
               </div>
             </div>
-          </section>
+            </section>
+          )}
 
           <section className="mx-auto -mt-1 grid max-w-6xl grid-cols-2 gap-3 rounded-2xl bg-white p-4 shadow-xl shadow-slate-200/70 md:-mt-2 md:grid-cols-4 md:p-5">
             {[

@@ -6,6 +6,36 @@ export interface ProductVariantOption {
 
 export type ProductCategory = 'fashion' | 'home' | 'electronics' | 'printed' | 'trending';
 
+export type SaleBannerTheme = 'default' | 'winter' | 'summer' | 'eid' | 'holi' | 'diwali' | 'flash';
+export type SaleBannerStatus = 'draft' | 'live' | 'disabled';
+export type HeroFirstSlideMode = 'auto' | 'default' | 'banner';
+
+export interface HeroBannerSettings {
+  firstSlideMode: HeroFirstSlideMode;
+  firstBannerId?: string;
+  updatedAt?: string;
+}
+
+export interface SaleBanner {
+  id: string;
+  title: string;
+  subtitle?: string;
+  desktopImage: string;
+  mobileImage?: string;
+  ctaText?: string;
+  ctaLink?: string;
+  theme: SaleBannerTheme;
+  startDate: string;
+  endDate: string;
+  status: SaleBannerStatus;
+  priority: number;
+  targetCategory?: string;
+  targetProductIds?: string[];
+  isActive?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 /** Admin-managed key/value rows shown under Product details on the PDP. */
 export interface ProductSpecification {
   label: string;
