@@ -34,6 +34,17 @@ type BannerFormState = {
 
 const THEMES: SaleBannerTheme[] = ['default', 'winter', 'summer', 'eid', 'holi', 'diwali', 'flash'];
 const STATUSES: SaleBannerStatus[] = ['draft', 'live', 'disabled'];
+const BANNER_UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
+const BANNER_UPLOAD_MAX_MB_LABEL = Math.floor(BANNER_UPLOAD_MAX_BYTES / (1024 * 1024));
+const ALLOWED_BANNER_MIME_TYPES = new Set([
+  'image/jpeg',
+  'image/jpg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+  'image/avif',
+]);
+const ALLOWED_BANNER_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.avif'];
 
 function pad2(n: number): string {
   return String(n).padStart(2, '0');
@@ -131,6 +142,20 @@ function sortByPriority(rows: SaleBanner[]): SaleBanner[] {
   });
 }
 
+function validateBannerFile(file: File): string | null {
+  const mime = String(file.type || '').toLowerCase();
+  const lowerName = String(file.name || '').toLowerCase();
+  const hasAllowedExt = ALLOWED_BANNER_EXTENSIONS.some((ext) => lowerName.endsWith(ext));
+  const isAllowedMime = mime ? ALLOWED_BANNER_MIME_TYPES.has(mime) : false;
+  if (!isAllowedMime && !hasAllowedExt) {
+    return 'Only JPG, PNG, WebP, GIF or AVIF banners are allowed';
+  }
+  if (Number(file.size) > BANNER_UPLOAD_MAX_BYTES) {
+    return `File is too large. Maximum size is ${BANNER_UPLOAD_MAX_MB_LABEL}MB`;
+  }
+  return null;
+}
+
 export default function AdminHeroSaleBanners() {
   const [rows, setRows] = useState<SaleBanner[]>([]);
   const [loading, setLoading] = useState(true);
@@ -138,6 +163,7 @@ export default function AdminHeroSaleBanners() {
   const [savingFirstSlide, setSavingFirstSlide] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
+  const [supportsFirstSlideSettings, setSupportsFirstSlideSettings] = useState(true);
   const [firstSlideMode, setFirstSlideMode] = useState<HeroFirstSlideMode>('auto');
   const [firstBannerId, setFirstBannerId] = useState('');
   const [form, setForm] = useState<BannerFormState>(defaultForm);
@@ -151,6 +177,7 @@ export default function AdminHeroSaleBanners() {
     try {
       const loaded = await fetchAdminHeroBannersWithSettingsApi();
       setRows(sortByPriority(loaded.banners));
+      setSupportsFirstSlideSettings(loaded.supportsSettingsApi !== false);
       const settings = loaded.settings;
       setFirstSlideMode(settings.firstSlideMode);
       setFirstBannerId(settings.firstBannerId || '');
@@ -176,6 +203,10 @@ export default function AdminHeroSaleBanners() {
   );
 
   const saveFirstSlidePreference = async () => {
+    if (!supportsFirstSlideSettings) {
+      toast.error('First-slide settings are unavailable on current backend. Restart with latest API build.');
+      return;
+    }
     if (firstSlideMode === 'banner' && !firstBannerId.trim()) {
       toast.error('Select a sale banner for first slide');
       return;
@@ -299,6 +330,12 @@ export default function AdminHeroSaleBanners() {
 
   const uploadDesktop = async (file?: File) => {
     if (!file) return;
+    const fileError = validateBannerFile(file);
+    if (fileError) {
+      toast.error(fileError);
+      if (desktopFileRef.current) desktopFileRef.current.value = '';
+      return;
+    }
     try {
       setUploadingDesktop(true);
       const url = await uploadProductImage(file, file.name || `sale-desktop-${Date.now()}.jpg`);
@@ -314,6 +351,12 @@ export default function AdminHeroSaleBanners() {
 
   const uploadMobile = async (file?: File) => {
     if (!file) return;
+    const fileError = validateBannerFile(file);
+    if (fileError) {
+      toast.error(fileError);
+      if (mobileFileRef.current) mobileFileRef.current.value = '';
+      return;
+    }
     try {
       setUploadingMobile(true);
       const url = await uploadProductImage(file, file.name || `sale-mobile-${Date.now()}.jpg`);
@@ -362,6 +405,11 @@ export default function AdminHeroSaleBanners() {
         <p className="mt-1 text-xs text-muted-foreground">
           Choose what appears first on homepage hero: automatic priority, default hero, or a specific sale banner.
         </p>
+        {!supportsFirstSlideSettings ? (
+          <p className="mt-2 text-xs font-medium text-amber-700">
+            Current backend does not support first-slide settings endpoint yet. Restart/deploy latest API server to enable this.
+          </p>
+        ) : null}
         <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
           <div>
             <Label htmlFor="first-slide-mode">First slide mode</Label>
@@ -396,7 +444,11 @@ export default function AdminHeroSaleBanners() {
           </div>
 
           <div className="flex items-end">
-            <Button type="button" onClick={() => void saveFirstSlidePreference()} disabled={savingFirstSlide}>
+            <Button
+              type="button"
+              onClick={() => void saveFirstSlidePreference()}
+              disabled={savingFirstSlide || !supportsFirstSlideSettings}
+            >
               {savingFirstSlide ? 'Saving...' : 'Save First Slide'}
             </Button>
           </div>
@@ -433,6 +485,9 @@ export default function AdminHeroSaleBanners() {
 
             <div className="sm:col-span-2">
               <Label>Desktop banner image</Label>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Supports JPG, PNG, WebP, GIF (animated), AVIF up to {BANNER_UPLOAD_MAX_MB_LABEL}MB.
+              </p>
               <div className="mt-1 flex gap-2">
                 <Input
                   value={form.desktopImage}
@@ -451,7 +506,7 @@ export default function AdminHeroSaleBanners() {
                 <input
                   ref={desktopFileRef}
                   type="file"
-                  accept="image/*"
+                  accept=".jpg,.jpeg,.png,.webp,.gif,.avif,image/jpeg,image/png,image/webp,image/gif,image/avif"
                   className="hidden"
                   onChange={(e) => void uploadDesktop(e.target.files?.[0])}
                 />
@@ -460,6 +515,9 @@ export default function AdminHeroSaleBanners() {
 
             <div className="sm:col-span-2">
               <Label>Mobile banner image</Label>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Optional mobile-specific banner. GIF/animated uploads are supported.
+              </p>
               <div className="mt-1 flex gap-2">
                 <Input
                   value={form.mobileImage}
@@ -478,7 +536,7 @@ export default function AdminHeroSaleBanners() {
                 <input
                   ref={mobileFileRef}
                   type="file"
-                  accept="image/*"
+                  accept=".jpg,.jpeg,.png,.webp,.gif,.avif,image/jpeg,image/png,image/webp,image/gif,image/avif"
                   className="hidden"
                   onChange={(e) => void uploadMobile(e.target.files?.[0])}
                 />

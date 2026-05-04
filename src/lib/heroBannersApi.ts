@@ -97,6 +97,7 @@ export type HeroBannerSettingsInput = {
 export type AdminHeroBannersResponse = {
   banners: SaleBanner[];
   settings: HeroBannerSettings;
+  supportsSettingsApi: boolean;
 };
 
 export type ActiveHeroBannersResponse = {
@@ -113,9 +114,14 @@ export async function fetchAdminHeroBannersWithSettingsApi(): Promise<AdminHeroB
   const res = await fetch(apiUrl('/api/admin/hero-banners'), { headers: adminHeaders() });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Failed to load hero banners');
+  const supportsSettingsApi =
+    !!data &&
+    typeof data === 'object' &&
+    Object.prototype.hasOwnProperty.call(data, 'settings');
   return {
     banners: Array.isArray(data?.banners) ? data.banners.map(normalizeSaleBanner) : [],
     settings: normalizeHeroBannerSettings(data?.settings || {}),
+    supportsSettingsApi,
   };
 }
 
@@ -135,6 +141,9 @@ export async function updateHeroBannerSettingsApi(input: HeroBannerSettingsInput
       firstBannerId: String(input?.firstBannerId ?? '').trim(),
     }),
   });
+  if (res.status === 404) {
+    throw new Error('First-slide settings API is unavailable on this backend. Restart/deploy latest server code.');
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(typeof data.error === 'string' ? data.error : 'Failed to update hero banner settings');
   return normalizeHeroBannerSettings(data?.settings || {});

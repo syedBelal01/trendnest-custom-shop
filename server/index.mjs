@@ -657,6 +657,8 @@ const SIGNUP_RATE_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.SIGNUP_RAT
 const SIGNUP_RATE_LIMIT_MAX = Math.max(1, Number(process.env.SIGNUP_RATE_LIMIT_MAX || 5));
 const UPLOAD_RATE_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.UPLOAD_RATE_LIMIT_WINDOW_MS || 60_000));
 const UPLOAD_RATE_LIMIT_MAX = Math.max(1, Number(process.env.UPLOAD_RATE_LIMIT_MAX || 20));
+const IMAGE_UPLOAD_MAX_BYTES = Math.max(1 * 1024 * 1024, Number(process.env.IMAGE_UPLOAD_MAX_BYTES || 20 * 1024 * 1024));
+const DESIGN_UPLOAD_MAX_BYTES = Math.max(1 * 1024 * 1024, Number(process.env.DESIGN_UPLOAD_MAX_BYTES || 8 * 1024 * 1024));
 const PAYMENT_CREATE_RATE_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.PAYMENT_CREATE_RATE_LIMIT_WINDOW_MS || 60_000));
 const PAYMENT_CREATE_RATE_LIMIT_MAX = Math.max(1, Number(process.env.PAYMENT_CREATE_RATE_LIMIT_MAX || 10));
 const PAYMENT_VERIFY_RATE_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.PAYMENT_VERIFY_RATE_LIMIT_WINDOW_MS || 60_000));
@@ -2596,7 +2598,7 @@ function streamInvoicePdf(order, res) {
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 8 * 1024 * 1024 },
+  limits: { fileSize: IMAGE_UPLOAD_MAX_BYTES },
   fileFilter: (_req, file, cb) => {
     if (!file.mimetype.startsWith('image/')) {
       cb(new Error('Only image files are allowed'));
@@ -2608,7 +2610,7 @@ const upload = multer({
 
 const uploadDesign = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 8 * 1024 * 1024 },
+  limits: { fileSize: DESIGN_UPLOAD_MAX_BYTES },
   fileFilter: (_req, file, cb) => {
     const ok =
       file.mimetype.startsWith('image/') || file.mimetype === 'application/pdf';
