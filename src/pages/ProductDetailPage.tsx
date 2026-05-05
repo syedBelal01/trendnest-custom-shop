@@ -19,9 +19,18 @@ import { Helmet } from 'react-helmet-async';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useDelayedFlag } from '@/hooks/useDelayedFlag';
 import { RichTextRenderer } from '@/components/RichTextRenderer';
+import {
+  SEO_CANONICAL_BASE,
+  buildProductSeoParagraph,
+  ensureSeoMetaDescription,
+  productCanonicalUrl,
+  productImageAlt,
+  productLongTailKeyword,
+  productSeoPath,
+  resolveProductFromRouteParam,
+} from '@/lib/seo';
 
-const CANONICAL_BASE = 'https://trendnest99.in';
-const DEFAULT_OG_IMAGE = `${CANONICAL_BASE}/img3.jpeg`;
+const DEFAULT_OG_IMAGE = `${SEO_CANONICAL_BASE}/img3.jpeg`;
 
 function stripHtml(input: string): string {
   return String(input || '')
@@ -89,14 +98,14 @@ function productJsonLd(args: {
 function breadcrumbJsonLd(args: { url: string; categoryId?: string; categoryName?: string; productName: string }) {
   const { url, categoryId, categoryName, productName } = args;
   const itemListElement: Array<Record<string, unknown>> = [
-    { '@type': 'ListItem', position: 1, name: 'Home', item: `${CANONICAL_BASE}/` },
+    { '@type': 'ListItem', position: 1, name: 'Home', item: `${SEO_CANONICAL_BASE}/` },
   ];
   if (categoryId && categoryName) {
     itemListElement.push({
       '@type': 'ListItem',
       position: 2,
       name: categoryName,
-      item: `${CANONICAL_BASE}/category/${encodeURIComponent(categoryId)}`,
+      item: `${SEO_CANONICAL_BASE}/category/${encodeURIComponent(categoryId)}`,
     });
     itemListElement.push({
       '@type': 'ListItem',
@@ -157,24 +166,40 @@ const pillBtn = (active: boolean) =>
   }`;
 
 export default function ProductDetailPage() {
-  const { id } = useParams<{ id: string }>();
+  const { id: routeProductParam } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { products, ratingSummary, loading } = useProducts();
   const showSkeleton = useDelayedFlag(loading, 250);
   const { method: paymentMethod, setMethod: setPaymentMethod } = usePaymentMethod();
-  const fromList = id ? products.find(p => p.id === id) : undefined;
+  const matchedFromRoute = useMemo(
+    () => resolveProductFromRouteParam(routeProductParam, products),
+    [routeProductParam, products]
+  );
+  const idCandidateForFetch = useMemo(() => {
+    if (matchedFromRoute?.id) return String(matchedFromRoute.id);
+    return String(routeProductParam || '').trim();
+  }, [matchedFromRoute?.id, routeProductParam]);
+  const fromList = matchedFromRoute?.id ? products.find((p) => p.id === matchedFromRoute.id) : undefined;
   const [fetchedProduct, setFetchedProduct] = useState<Product | null>(null);
 
   useEffect(() => {
-    if (!id) return;
+    if (!idCandidateForFetch) return;
     let cancelled = false;
-    const load = () => { void (async () => { const one = await fetchProductByIdApi(id); if (!cancelled && one) setFetchedProduct(one); })(); };
+    const load = () => {
+      void (async () => {
+        const one = await fetchProductByIdApi(idCandidateForFetch);
+        if (!cancelled && one) setFetchedProduct(one);
+      })();
+    };
     load();
     const onVis = () => { if (document.visibilityState === 'visible') load(); };
     document.addEventListener('visibilitychange', onVis);
     const onProductsUpdated = () => { load(); };
     window.addEventListener('trendnest:products-updated', onProductsUpdated);
-    const onProductUpdated = (e: Event) => { const ce = e as CustomEvent<{ id?: string }>; if (ce.detail?.id === id) load(); };
+    const onProductUpdated = (e: Event) => {
+      const ce = e as CustomEvent<{ id?: string }>;
+      if (ce.detail?.id === idCandidateForFetch) load();
+    };
     window.addEventListener('trendnest:product-updated', onProductUpdated);
     return () => {
       cancelled = true;
@@ -182,22 +207,34 @@ export default function ProductDetailPage() {
       window.removeEventListener('trendnest:products-updated', onProductsUpdated);
       window.removeEventListener('trendnest:product-updated', onProductUpdated);
     };
-  }, [id]);
+  }, [idCandidateForFetch]);
 
   // Prefer the latest list copy for stock; fall back to fetched detail.
   const product = fromList ?? fetchedProduct;
+  useEffect(() => {
+    if (!product || !routeProductParam) return;
+    const active = decodeURIComponent(String(routeProductParam || '')).trim().toLowerCase();
+    const expected = productSeoPath(product).replace('/product/', '').toLowerCase();
+    if (active && expected && active !== expected) {
+      navigate(productSeoPath(product), { replace: true });
+    }
+  }, [product, routeProductParam, navigate]);
+
   const plainDescription = product?.description ? stripHtml(String(product.description)) : '';
   const printedShirt = isPrintedShirt(product);
+  const seoKeyword = product ? productLongTailKeyword(product) : 'online shopping india';
   const seoTitle = product?.name
-    ? `${product.name}${printedShirt ? ' | Printed T-Shirt for Men' : ''} | TrendNest99`
+    ? `${product.name} | ${seoKeyword} | TrendNest99`
     : 'Product | TrendNest99';
-  const seoDesc = truncate(
+  const seoDesc = ensureSeoMetaDescription(
     plainDescription
-      ? `${plainDescription}${printedShirt ? ' Shop printed t-shirts, oversized graphic tees, and streetwear styles online in India.' : ''}`
-      : 'Shop products online on TrendNest99.',
+      ? `${plainDescription} Buy ${product?.name || 'this product'} online in India from TrendNest99.`
+      : `Buy ${seoKeyword} products online in India from TrendNest99.`,
+    150,
     160
   );
-  const canonicalUrl = id ? `${CANONICAL_BASE}/product/${encodeURIComponent(id)}` : `${CANONICAL_BASE}/`;
+  const canonicalUrl = product ? productCanonicalUrl(product) : `${SEO_CANONICAL_BASE}/`;
+  const seoLongDescription = product ? buildProductSeoParagraph(product) : '';
   const ogImage = product?.images?.[0] ? String(product.images[0]) : DEFAULT_OG_IMAGE;
   const seoKeywords = product
     ? Array.from(
@@ -206,6 +243,7 @@ export default function ProductDetailPage() {
             product.name,
             product.subcategory,
             product.category,
+            seoKeyword,
             ...(Array.isArray(product.tags) ? product.tags : []),
             'trendnest99',
             printedShirt ? 'printed t shirt' : '',
@@ -582,7 +620,7 @@ export default function ProductDetailPage() {
                       active ? 'border-orange-500 ring-2 ring-orange-100' : 'border-slate-200 hover:border-orange-200'
                     }`}
                   >
-                    <img src={image} alt="Product thumbnail" className="h-full w-full rounded-xl object-cover" loading="lazy" />
+                    <img src={image} alt={productImageAlt(product, 'thumbnail')} className="h-full w-full rounded-xl object-cover" loading="lazy" />
                   </button>
                 );
               })}
@@ -591,7 +629,7 @@ export default function ProductDetailPage() {
             <div className="order-1 overflow-hidden rounded-3xl border border-slate-200 bg-slate-100 shadow-sm md:order-2">
               <div className="relative aspect-square">
                 {selectedImage ? (
-                  <img src={selectedImage} alt={product.name} className="h-full w-full object-cover" />
+                  <img src={selectedImage} alt={productImageAlt(product, 'main image')} className="h-full w-full object-cover" />
                 ) : (
                   <div className="h-full w-full bg-slate-200" />
                 )}
@@ -858,9 +896,12 @@ export default function ProductDetailPage() {
               </TabsList>
               <TabsContent value="description" className="mt-4">
                 {product.description ? (
-                  <RichTextRenderer value={product.description} className="text-sm text-muted-foreground leading-relaxed" />
+                  <div className="space-y-4">
+                    <RichTextRenderer value={product.description} className="text-sm text-muted-foreground leading-relaxed" />
+                    <p className="text-sm text-muted-foreground leading-relaxed">{seoLongDescription}</p>
+                  </div>
                 ) : (
-                  <p className="text-sm text-muted-foreground leading-relaxed">No description provided.</p>
+                  <p className="text-sm text-muted-foreground leading-relaxed">{seoLongDescription}</p>
                 )}
               </TabsContent>
               <TabsContent value="specs" className="mt-4">
@@ -1052,18 +1093,28 @@ export default function ProductDetailPage() {
         {related.length > 0 && (
           <div className="hidden md:block mt-12">
             <div className="flex items-end justify-between mb-4">
-              <h2 className="text-lg font-bold">You May Also Like</h2>
+              <h2 className="text-lg font-bold">Related Products</h2>
               <Link to={`/category/${product.category}`} className="text-sm text-primary hover:underline">View more</Link>
             </div>
+            <p className="mb-3 text-sm text-slate-600">
+              Explore similar picks: {related.slice(0, 3).map((p, index) => (
+                <span key={`related-inline-${p.id}`}>
+                  <Link to={productSeoPath(p)} className="font-semibold text-orange-600 hover:underline">
+                    Buy {p.name} online in India
+                  </Link>
+                  {index < Math.min(related.length, 3) - 1 ? ', ' : '.'}
+                </span>
+              ))}
+            </p>
             <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
               {related.map(p => (
                 <Link
                   key={p.id}
-                  to={`/product/${encodeURIComponent(p.id)}`}
+                  to={productSeoPath(p)}
                   className="rounded-2xl border border-border bg-card overflow-hidden hover:shadow-sm transition-shadow"
                 >
                   <div className="aspect-square bg-muted">
-                    <img src={galleryImagesForSelection(p, productVariantNames(p)[0] || '')[0] ?? (p.images?.[0] ?? '')} alt={p.name} className="h-full w-full object-cover" loading="lazy" />
+                    <img src={galleryImagesForSelection(p, productVariantNames(p)[0] || '')[0] ?? (p.images?.[0] ?? '')} alt={productImageAlt(p, 'related product image')} className="h-full w-full object-cover" loading="lazy" />
                   </div>
                   <div className="p-3">
                     <div className="text-sm font-semibold line-clamp-2">{p.name}</div>

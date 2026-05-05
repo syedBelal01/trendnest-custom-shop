@@ -144,7 +144,7 @@ function DefaultHeroSlide() {
           </div>
         </div>
         <div className="flex justify-center">
-          <div className="relative flex aspect-square w-full max-w-[320px] items-stretch justify-center rounded-full bg-gradient-to-br from-orange-200 to-orange-100 shadow-2xl shadow-orange-200/50 md:max-w-md">
+          <div className="relative flex aspect-square w-full max-w-[240px] items-stretch justify-center rounded-full bg-gradient-to-br from-orange-200 to-orange-100 shadow-2xl shadow-orange-200/50 sm:max-w-[280px] md:max-w-md">
             <div className="absolute bottom-8 h-20 w-64 rounded-[50%] bg-slate-900/10 blur-xl" />
             <div className="relative z-10 h-full w-full">
               <HeroCarousel />
@@ -224,6 +224,9 @@ export default function HeroSaleSlider() {
     [count, startTimer]
   );
 
+  const activeSlide = slides[index] ?? slides[0];
+  const isDefaultActive = activeSlide?.kind === 'default';
+
   return (
     <section
       className="relative"
@@ -234,7 +237,12 @@ export default function HeroSaleSlider() {
         pausedRef.current = false;
       }}
     >
-      <div className="relative min-h-[420px] sm:min-h-[460px] md:min-h-[530px]">
+      <div
+        className={cn(
+          'relative',
+          isDefaultActive ? 'min-h-[640px] sm:min-h-[680px] md:min-h-[530px]' : 'min-h-[360px] sm:min-h-[420px] md:min-h-[530px]'
+        )}
+      >
         {slides.map((slide, i) => (
           <div
             key={slide.id}

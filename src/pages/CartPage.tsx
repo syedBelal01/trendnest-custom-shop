@@ -4,6 +4,7 @@ import { useCart } from "@/contexts/CartContext";
 import { usePaymentMethod } from "@/contexts/PaymentMethodContext";
 import { productImageForVariant } from "@/lib/productImages";
 import { validateCouponApi } from "@/lib/couponsApi";
+import { productImageAlt } from "@/lib/seo";
 import { toast } from "sonner";
 import type { CartItem } from "@/types";
 
@@ -90,7 +91,12 @@ function CartItemCard({
     <div className="group overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-orange-100 hover:shadow-xl">
       <div className="flex flex-col sm:flex-row">
         <div className="relative aspect-square w-full overflow-hidden bg-slate-100 sm:w-40 md:w-44">
-          <img src={image} alt={item.product.name} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" />
+          <img
+            src={image}
+            alt={productImageAlt(item.product, "cart item image")}
+            className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+            loading="lazy"
+          />
           <span className="absolute left-3 top-3 rounded-md bg-orange-600 px-2.5 py-1 text-xs font-bold text-white">
             In Cart
           </span>

@@ -2626,6 +2626,25 @@ const app = express();
 // Render runs behind a proxy; required for secure cookies (`SameSite=None; Secure`).
 app.set('trust proxy', 1);
 
+// Enforce HTTPS and send HSTS in production.
+app.use((req, res, next) => {
+  if (process.env.NODE_ENV !== 'production') {
+    next();
+    return;
+  }
+  const forwardedProtoRaw = String(req.get('x-forwarded-proto') || '').trim().toLowerCase();
+  const forwardedProto = forwardedProtoRaw.split(',')[0]?.trim() || '';
+  if (forwardedProto && forwardedProto !== 'https') {
+    const host = String(req.get('host') || '').trim();
+    if (host) {
+      res.redirect(301, `https://${host}${req.originalUrl || ''}`);
+      return;
+    }
+  }
+  res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+  next();
+});
+
 /** Comma-separated URLs allowed to call this API with credentials (Vercel prod, preview, www). */
 function parseFrontendOrigins() {
   const raw = [process.env.FRONTEND_ORIGIN, process.env.FRONTEND_ORIGINS].filter(Boolean).join(',');
@@ -5485,6 +5504,36 @@ function xmlEscape(s) {
     .replace(/'/g, '&apos;');
 }
 
+function seoClean(input) {
+  return String(input || '')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function productLongTailKeywordForSitemap(p) {
+  const name = seoClean(p?.name);
+  const category = seoClean(p?.category);
+  const subcategory = seoClean(p?.subcategory);
+  if (category === 'printed') {
+    if (name.includes('cup') || name.includes('mug')) return 'custom printed cup online india';
+    return 'printed t shirt online india';
+  }
+  if (subcategory.includes('belt') || name.includes('belt')) return 'men leather belt online india';
+  if (category === 'fashion') return 'mens fashion accessories online india';
+  if (category === 'home') return 'home essentials online india';
+  if (category === 'electronics') return 'electronics accessories online india';
+  return 'online shopping india';
+}
+
+function productSeoSlugForSitemap(p) {
+  const raw = `${p?.name || ''} ${productLongTailKeywordForSitemap(p)} trendnest99`;
+  const slug = seoClean(raw).split(' ').filter(Boolean).slice(0, 14).join('-').replace(/-+/g, '-').replace(/^-+|-+$/g, '');
+  return slug || String(p?.id || p?._id || 'product').toLowerCase();
+}
+
 async function fetchProductsForSitemap(req) {
   const base =
     process.env.PUBLIC_API_BASE_URL && String(process.env.PUBLIC_API_BASE_URL).trim()
@@ -5530,7 +5579,7 @@ app.get('/sitemap.xml', async (req, res) => {
         const rawLastmod = p?.updatedAt || p?.createdAt || '';
         const d = rawLastmod ? new Date(rawLastmod) : null;
         const lastmod = d && !Number.isNaN(d.getTime()) ? d.toISOString() : nowIso;
-        return { loc: `${SITE}/product/${encodeURIComponent(id)}`, lastmod };
+        return { loc: `${SITE}/product/${encodeURIComponent(productSeoSlugForSitemap(p))}`, lastmod };
       })
       .filter(Boolean);
 
@@ -5554,7 +5603,15 @@ app.get('/sitemap.xml', async (req, res) => {
 
 app.get('/robots.txt', (_req, res) => {
   const SITE = 'https://trendnest99.in';
-  const body = `User-agent: *\nAllow: /\n\nSitemap: ${SITE}/sitemap.xml\n`;
+  const body =
+    `User-agent: *\n` +
+    `Allow: /\n` +
+    `Disallow: /admin\n` +
+    `Disallow: /account\n` +
+    `Disallow: /cart\n` +
+    `Disallow: /checkout\n` +
+    `Disallow: /api/\n\n` +
+    `Sitemap: ${SITE}/sitemap.xml\n`;
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.setHeader('Cache-Control', 'public, max-age=900');
   res.status(200).send(body);

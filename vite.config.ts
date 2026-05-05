@@ -35,6 +35,49 @@ export default defineConfig(async ({ mode }) => {
     return String(s || "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
 
+  function seoClean(input: unknown) {
+    return String(input || "")
+      .toLowerCase()
+      .normalize("NFKD")
+      .replace(/[^a-z0-9\s-]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function productLongTailKeyword(p: { name?: string; category?: string; subcategory?: string }) {
+    const name = seoClean(p.name);
+    const category = seoClean(p.category);
+    const subcategory = seoClean(p.subcategory);
+    if (category === "printed") {
+      if (name.includes("cup") || name.includes("mug")) return "custom printed cup online india";
+      return "printed t shirt online india";
+    }
+    if (subcategory.includes("belt") || name.includes("belt")) return "men leather belt online india";
+    if (category === "fashion") return "mens fashion accessories online india";
+    if (category === "home") return "home essentials online india";
+    if (category === "electronics") return "electronics accessories online india";
+    return "online shopping india";
+  }
+
+  function productSeoSlug(p: { name?: string; category?: string; subcategory?: string }) {
+    const raw = `${p.name || ""} ${productLongTailKeyword(p)} trendnest99`;
+    const slug = seoClean(raw)
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 14)
+      .join("-")
+      .replace(/-+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    return slug || "product";
+  }
+
+  function ensureMetaDescription(v: string, max = 160) {
+    const cleaned = String(v || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+    if (!cleaned) return "";
+    if (cleaned.length <= max) return cleaned;
+    return `${cleaned.slice(0, max - 1).trimEnd()}...`;
+  }
+
   type PrerenderProduct = {
     id: string;
     name?: string;
@@ -43,11 +86,18 @@ export default defineConfig(async ({ mode }) => {
     price?: number;
     originalPrice?: number;
     category?: string;
+    subcategory?: string;
     rating?: number;
+    reviewCount?: number;
+    slug?: string;
   };
 
-  async function getPrerenderData(): Promise<{ routes: string[]; productById: Record<string, PrerenderProduct> }> {
-    const staticRoutes = [
+  async function getPrerenderData(): Promise<{
+    routes: string[];
+    productById: Record<string, PrerenderProduct>;
+    productBySlug: Record<string, PrerenderProduct>;
+  }> {
+    const baseStaticRoutes = [
       "/",
       "/best-deals",
       "/custom-print",
@@ -62,15 +112,14 @@ export default defineConfig(async ({ mode }) => {
       (process.env.VITE_API_BASE_URL || process.env.API_BASE_URL || "").replace(/\/+$/, "") ||
       "http://127.0.0.1:5050";
 
-    try {
-      const res = await fetch(`${apiBase}/api/products`, { headers: { Accept: "application/json" } });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const list = (await res.json().catch(() => [])) as Array<any>;
+    const buildFromList = (list: Array<any>) => {
       const productById: Record<string, PrerenderProduct> = {};
+      const productBySlug: Record<string, PrerenderProduct> = {};
+      const categories = new Set<string>();
       for (const p of list || []) {
         const id = String(p?.id || "").trim();
         if (!id) continue;
-        productById[id] = {
+        const row: PrerenderProduct = {
           id,
           name: typeof p?.name === "string" ? p.name : undefined,
           description: typeof p?.description === "string" ? p.description : undefined,
@@ -78,44 +127,44 @@ export default defineConfig(async ({ mode }) => {
           price: p?.price != null ? Number(p.price) : undefined,
           originalPrice: p?.originalPrice != null ? Number(p.originalPrice) : undefined,
           category: typeof p?.category === "string" ? p.category : undefined,
+          subcategory: typeof p?.subcategory === "string" ? p.subcategory : undefined,
           rating: p?.rating != null ? Number(p.rating) : undefined,
+          reviewCount:
+            p?.reviewCount != null
+              ? Number(p.reviewCount)
+              : Array.isArray(p?.reviews)
+                ? p.reviews.length
+                : undefined,
         };
+        row.slug = productSeoSlug(row);
+        productById[id] = row;
+        if (row.slug) productBySlug[row.slug] = row;
+        if (row.category) categories.add(String(row.category));
       }
-      const ids = Array.from(
-        new Set(Object.keys(productById))
-      );
-      return { routes: [...staticRoutes, ...ids.map((id) => `/product/${encodeURIComponent(id)}`)], productById };
+      const categoryRoutes = Array.from(categories).map((c) => `/category/${encodeURIComponent(c)}`);
+      const productRoutes = Array.from(new Set(Object.values(productById).map((p) => `/product/${encodeURIComponent(String(p.slug || p.id))}`)));
+      const routes = Array.from(new Set([...baseStaticRoutes, ...categoryRoutes, ...productRoutes]));
+      return { routes, productById, productBySlug };
+    };
+
+    try {
+      const res = await fetch(`${apiBase}/api/products`, { headers: { Accept: "application/json" } });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const list = (await res.json().catch(() => [])) as Array<any>;
+      return buildFromList(list);
     } catch {
       // Fallback dataset: server/seed.json contains stable ids for builds when API isn't reachable.
       try {
         const raw = readFileSync(path.join(__dirname, "server", "seed.json"), "utf8");
         const seed = JSON.parse(raw) as Array<any>;
-        const productById: Record<string, PrerenderProduct> = {};
-        for (const p of seed || []) {
-          const id = String(p?.id || "").trim();
-          if (!id) continue;
-          productById[id] = {
-            id,
-            name: typeof p?.name === "string" ? p.name : undefined,
-            description: typeof p?.description === "string" ? p.description : undefined,
-            images: Array.isArray(p?.images) ? p.images.map((u: any) => String(u)).filter(Boolean) : undefined,
-            price: p?.price != null ? Number(p.price) : undefined,
-            originalPrice: p?.originalPrice != null ? Number(p.originalPrice) : undefined,
-            category: typeof p?.category === "string" ? p.category : undefined,
-            rating: p?.rating != null ? Number(p.rating) : undefined,
-          };
-        }
-        const ids = Array.from(
-          new Set(Object.keys(productById))
-        );
-        return { routes: [...staticRoutes, ...ids.map((id) => `/product/${encodeURIComponent(id)}`)], productById };
+        return buildFromList(seed);
       } catch {
-        return { routes: staticRoutes, productById: {} };
+        return { routes: baseStaticRoutes, productById: {}, productBySlug: {} };
       }
     }
   }
 
-  const prerenderData = mode === "production" ? await getPrerenderData() : { routes: [], productById: {} };
+  const prerenderData = mode === "production" ? await getPrerenderData() : { routes: [], productById: {}, productBySlug: {} };
   const prerenderRoutes = prerenderData.routes;
 
   const prerenderProxyTarget =
@@ -127,9 +176,8 @@ export default defineConfig(async ({ mode }) => {
       : "http://127.0.0.1:5050";
 
   function injectSeoHead(html: string, route: string): string {
-    const u = route === "/" ? `${CANONICAL_BASE}/` : `${CANONICAL_BASE}${route}`;
+    let canonicalUrl = route === "/" ? `${CANONICAL_BASE}/` : `${CANONICAL_BASE}${route}`;
     const stripHtml = (v: string) => String(v || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-    const truncate = (v: string, max = 160) => (v.length <= max ? v : `${v.slice(0, max - 1).trimEnd()}…`);
 
     // Defaults
     let title = "Printed T-Shirts, Graphic Tees & Custom Prints Online | TrendNest99";
@@ -138,7 +186,7 @@ export default defineConfig(async ({ mode }) => {
     let ogType = "website";
     let ogImage: string | undefined = `${CANONICAL_BASE}/img3.jpeg`;
     let keywords = "printed t shirt, printed shirt, graphic t shirt, custom print t shirt, trendnest99";
-    let extraJsonLd: any[] = [];
+    const extraJsonLd: Record<string, unknown>[] = [];
 
     const orgJsonLd = {
       "@context": "https://schema.org",
@@ -177,8 +225,8 @@ export default defineConfig(async ({ mode }) => {
     if (mCat) {
       const cid = decodeURIComponent(mCat[1]);
       const cm = categoryMeta[cid];
-      title = cm ? `${cm.name} | TrendNest99` : "Products | TrendNest99";
-      desc = cm ? `${cm.description}` : "Browse products on TrendNest99.";
+      title = cm ? `${cm.name} Online India | TrendNest99` : "Products | TrendNest99";
+      desc = ensureMetaDescription(cm ? `${cm.description}` : "Browse products on TrendNest99.");
       keywords = cm?.keywords || `${cid}, products online, trendnest99`;
       ogType = "website";
       extraJsonLd.push({
@@ -186,7 +234,7 @@ export default defineConfig(async ({ mode }) => {
         "@type": "BreadcrumbList",
         itemListElement: [
           { "@type": "ListItem", position: 1, name: "Home", item: `${CANONICAL_BASE}/` },
-          { "@type": "ListItem", position: 2, name: cm?.name || cid, item: u },
+          { "@type": "ListItem", position: 2, name: cm?.name || cid, item: canonicalUrl },
         ],
       });
       extraJsonLd.push({
@@ -194,24 +242,33 @@ export default defineConfig(async ({ mode }) => {
         "@type": "CollectionPage",
         name: cm?.name || "Products",
         description: desc,
-        url: u,
+        url: canonicalUrl,
         isPartOf: { "@type": "WebSite", name: "TrendNest99", url: `${CANONICAL_BASE}/` },
       });
     }
 
     const mProd = route.match(/^\/product\/([^/]+)$/);
     if (mProd) {
-      const pid = decodeURIComponent(mProd[1]);
-      const p = prerenderData.productById[pid];
-      title = p?.name ? `${p.name} | TrendNest99` : "Product | TrendNest99";
+      const rawProductParam = decodeURIComponent(mProd[1]).trim();
+      const productParam = rawProductParam.toLowerCase();
+      const p =
+        prerenderData.productBySlug[productParam] ||
+        prerenderData.productById[rawProductParam] ||
+        prerenderData.productById[productParam];
+      if (p?.slug) {
+        canonicalUrl = `${CANONICAL_BASE}/product/${encodeURIComponent(String(p.slug))}`;
+      }
+      const longTailKeyword = p ? productLongTailKeyword(p) : "online shopping india";
+      title = p?.name ? `${p.name} | ${longTailKeyword} | TrendNest99` : "Product | TrendNest99";
       const plain = p?.description ? stripHtml(String(p.description)) : "";
-      const printedShirt = String(p?.category || "").toLowerCase() === "printed" && /t-?shirt|tee/i.test(String(p?.name || ""));
-      desc = plain
-        ? truncate(`${plain}${printedShirt ? " Shop printed t-shirts and oversized graphic tees online in India." : ""}`, 160)
-        : "Shop products on TrendNest99.";
+      desc = ensureMetaDescription(
+        plain
+          ? `${plain} Buy ${p?.name || "this product"} online in India from TrendNest99.`
+          : `Buy ${longTailKeyword} products online in India from TrendNest99.`
+      );
       ogType = "product";
       ogImage = p?.images?.[0] || ogImage;
-      keywords = [p?.name, p?.category, printedShirt ? "printed t shirt" : "", "trendnest99"]
+      keywords = [p?.name, p?.category, longTailKeyword, "trendnest99"]
         .map((v) => String(v || "").trim())
         .filter(Boolean)
         .join(", ");
@@ -225,9 +282,18 @@ export default defineConfig(async ({ mode }) => {
           image: p.images || [],
           brand: { "@type": "Brand", name: "TrendNest99" },
           category: p.category,
+          ...(p.rating != null && p.reviewCount != null && Number(p.reviewCount) > 0
+            ? {
+                aggregateRating: {
+                  "@type": "AggregateRating",
+                  ratingValue: Number(p.rating).toFixed(1),
+                  reviewCount: String(p.reviewCount),
+                },
+              }
+            : {}),
           offers: {
             "@type": "Offer",
-            url: u,
+            url: canonicalUrl,
             priceCurrency: "INR",
             price: p.price != null ? String(p.price) : undefined,
             availability: "https://schema.org/InStock",
@@ -246,9 +312,9 @@ export default defineConfig(async ({ mode }) => {
                     name: categoryMeta[p.category]?.name || p.category,
                     item: `${CANONICAL_BASE}/category/${encodeURIComponent(p.category)}`,
                   },
-                  { "@type": "ListItem", position: 3, name: p.name, item: u },
+                  { "@type": "ListItem", position: 3, name: p.name, item: canonicalUrl },
                 ]
-              : [{ "@type": "ListItem", position: 2, name: p.name, item: u }]),
+              : [{ "@type": "ListItem", position: 2, name: p.name, item: canonicalUrl }]),
           ],
         });
       }
@@ -257,13 +323,13 @@ export default defineConfig(async ({ mode }) => {
     const tags = [
       `<title>${xmlEscape(title)}</title>`,
       `<meta name="description" content="${escapeAttr(desc)}">`,
-      `<link rel="canonical" href="${escapeAttr(u)}">`,
+      `<link rel="canonical" href="${escapeAttr(canonicalUrl)}">`,
       `<meta name="keywords" content="${escapeAttr(keywords)}">`,
       `<meta name="robots" content="index,follow,max-image-preview:large">`,
       `<meta property="og:type" content="${escapeAttr(ogType)}">`,
       `<meta property="og:title" content="${escapeAttr(title)}">`,
       `<meta property="og:description" content="${escapeAttr(desc)}">`,
-      `<meta property="og:url" content="${escapeAttr(u)}">`,
+      `<meta property="og:url" content="${escapeAttr(canonicalUrl)}">`,
       ogImage ? `<meta property="og:image" content="${escapeAttr(String(ogImage))}">` : "",
       `<meta name="twitter:card" content="summary_large_image">`,
       `<meta name="twitter:title" content="${escapeAttr(title)}">`,

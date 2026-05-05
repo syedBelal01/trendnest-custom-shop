@@ -8,15 +8,23 @@ function firstUrlInList(list: string[] | undefined): string | undefined {
   return u;
 }
 
+function optimizeCloudinaryUrl(url: string): string {
+  const input = String(url || '').trim();
+  if (!input) return input;
+  if (!/res\.cloudinary\.com/i.test(input) || !input.includes('/upload/')) return input;
+  if (/\/upload\/[^/]*(f_auto|q_auto)/i.test(input)) return input;
+  return input.replace('/upload/', '/upload/f_auto,q_auto/');
+}
+
 /** Card / list thumbnail: first image from first variant option that has images, else `product.images`. */
 export function productPrimaryImage(product: Pick<Product, 'images' | 'variantOptions'>): string {
   const root = firstUrlInList(product.images);
-  if (root) return root;
+  if (root) return optimizeCloudinaryUrl(root);
   const opts = product.variantOptions?.filter(v => v.name?.trim());
   if (opts?.length) {
     for (const o of opts) {
       const u = firstUrlInList(o.images);
-      if (u) return u;
+      if (u) return optimizeCloudinaryUrl(u);
     }
   }
   return PLACEHOLDER;
@@ -30,7 +38,7 @@ export function productImageForVariant(
   if (product.variantOptions?.length && selectedVariant) {
     const m = product.variantOptions.find(v => v.name.trim() === selectedVariant.trim());
     const u = firstUrlInList(m?.images);
-    if (u) return u;
+    if (u) return optimizeCloudinaryUrl(u);
   }
   return productPrimaryImage(product);
 }
@@ -40,7 +48,7 @@ export function galleryImagesForSelection(
   product: Product,
   selectedVariant: string
 ): string[] {
-  const root = (product.images ?? []).map(s => s.trim()).filter(Boolean);
+  const root = (product.images ?? []).map(s => optimizeCloudinaryUrl(String(s).trim())).filter(Boolean);
   if (product.variantOptions?.length) {
     const names = productVariantNames(product);
     const effective =
@@ -48,7 +56,7 @@ export function galleryImagesForSelection(
         ? selectedVariant
         : names[0] || '';
     const opt = product.variantOptions.find(v => v.name.trim() === effective.trim());
-    const fromVariant = (opt?.images ?? []).map(s => s.trim()).filter(Boolean);
+    const fromVariant = (opt?.images ?? []).map(s => optimizeCloudinaryUrl(String(s).trim())).filter(Boolean);
     if (fromVariant.length) {
       // Root images are still included so admin updates to product.images always reflect on the storefront.
       return [...fromVariant, ...root].filter((u, i, arr) => arr.indexOf(u) === i);

@@ -83,7 +83,12 @@ export default function ProductImageGallery({
                     : 'border-transparent opacity-70 hover:opacity-100 hover:border-border'
                 )}
               >
-                <img src={src} alt="" className="h-full w-full object-cover" loading="lazy" />
+                <img
+                  src={src}
+                  alt={`${productName} image ${i + 1}`}
+                  className="h-full w-full object-cover"
+                  loading="lazy"
+                />
               </button>
             ))}
           </div>
@@ -97,7 +102,7 @@ export default function ProductImageGallery({
         >
           <img
             src={mainSrc}
-            alt={productName}
+            alt={`${productName} main image`}
             className={cn(
               'h-full w-full object-cover transition-all duration-300',
               isTransitioning ? 'opacity-0 scale-[1.02]' : 'opacity-100 scale-100'

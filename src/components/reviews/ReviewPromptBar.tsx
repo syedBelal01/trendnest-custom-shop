@@ -4,6 +4,7 @@ import { X } from 'lucide-react';
 import { dismissReviewPromptApi, fetchReviewPromptsApi } from '@/lib/reviewsApi';
 import { useProducts } from '@/contexts/ProductsContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { productSeoPath } from '@/lib/seo';
 
 export default function ReviewPromptBar() {
   const { products } = useProducts();
@@ -37,6 +38,12 @@ export default function ReviewPromptBar() {
     return products.find(p => p.id === productId)?.name || 'your product';
   }, [productId, products]);
 
+  const productLink = useMemo(() => {
+    if (!productId) return '/';
+    const hit = products.find((p) => p.id === productId);
+    return hit ? productSeoPath(hit) : `/product/${encodeURIComponent(productId)}`;
+  }, [productId, products]);
+
   if (!open || !productId) return null;
 
   return (
@@ -46,7 +53,7 @@ export default function ReviewPromptBar() {
           <div className="font-semibold">You recently purchased {productName}.</div>
           <div className="text-xs text-muted-foreground">
             If you like it, please give us a 5-star rating.
-            <Link to={`/product/${productId}`} className="ml-2 text-primary font-semibold hover:underline">
+            <Link to={productLink} className="ml-2 text-primary font-semibold hover:underline">
               Write a review
             </Link>
           </div>

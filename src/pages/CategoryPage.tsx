@@ -1,4 +1,4 @@
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { categories } from '@/data/mockData';
 import { useProducts } from '@/contexts/ProductsContext';
 import ProductCard from '@/components/ProductCard';
@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Helmet } from 'react-helmet-async';
 import ProductCardSkeleton from '@/components/ProductCardSkeleton';
 import { useDelayedFlag } from '@/hooks/useDelayedFlag';
+import { ensureSeoMetaDescription, productCanonicalUrl, productSeoPath } from '@/lib/seo';
 
 const CANONICAL_BASE = 'https://trendnest99.in';
 const DEFAULT_OG_IMAGE = `${CANONICAL_BASE}/img3.jpeg`;
@@ -16,6 +17,7 @@ type CategorySeoConfig = {
   description: string;
   keywords: string[];
   intro?: string;
+  longIntro: string;
 };
 
 const CATEGORY_SEO: Record<string, CategorySeoConfig> = {
@@ -24,13 +26,15 @@ const CATEGORY_SEO: Record<string, CategorySeoConfig> = {
     description:
       'Shop practical home essentials online in India, including stylish utility products for everyday living at TrendNest99.',
     keywords: ['home essentials', 'home products online', 'kitchen and bath essentials', 'trendnest99'],
+    longIntro:
+      "Home essentials are no longer simple utility purchases. Most Indian shoppers now compare design, durability, and value before placing an order online. At TrendNest99, this category is curated for customers who want products that look clean, work reliably, and blend naturally into modern homes. Whether you are upgrading your bathroom setup, organizing a kitchen corner, or replacing daily-use accessories, the focus here is practical function with consistent finish quality. These listings are selected for everyday convenience so you can buy with confidence instead of trial and error.\n\nPeople searching for home essentials online India or bathroom accessories online usually want clear product choices, not clutter. That is why this collection is structured around straightforward options with transparent pricing and relevant details. You can compare utility features, match finishes with your decor, and shortlist items that support frequent use without adding maintenance stress. If your goal is to build a more organized, comfortable living space with affordable online shopping, this section helps you move from discovery to checkout quickly.",
   },
   printed: {
-    title: 'Printed T-Shirts for Men, Graphic Tees & Custom Prints | TrendNest99',
+    title: 'Printed T Shirts Online India for Men | TrendNest99',
     description:
       "Shop printed T-shirts, printed shirts, and men's oversized graphic T-shirts online. Discover streetwear styles like Broken Rules back print tees and custom print options at TrendNest99.",
     keywords: [
-      'printed t shirt',
+      'printed t shirt online india',
       'printed shirt',
       'printed t-shirt for men',
       "men's oversized graphic t-shirt",
@@ -41,22 +45,31 @@ const CATEGORY_SEO: Record<string, CategorySeoConfig> = {
     ],
     intro:
       'Explore premium printed T-shirts and graphic streetwear designs with fresh drops, bold back prints, and custom print options.',
+    longIntro:
+      "If you are searching for printed t shirt online India, this category is built around that exact purchase intent. TrendNest99 brings together graphic tees, bold back-print styles, and wearable streetwear looks that balance comfort with personality. From everyday round-neck prints to oversized silhouettes inspired by urban fashion, each listing is selected for shoppers who want standout design without compromising fabric feel, fit, or repeat wear quality. This is the right place for customers looking for men printed shirts online with modern visual identity and practical styling flexibility.\n\nBuyers also reach this section through queries like men's oversized graphic t-shirt India, printed shirt for casual wear, and custom print tee for gifting. To support those journeys, we keep the collection focused on useful details such as sleeve variants, size ranges, and design-led options that can be styled for daily outings or weekend looks. If you want printed apparel that feels premium, photographs well, and still fits a realistic budget for Indian online shopping, these products are curated to deliver both style impact and dependable value.",
   },
   trending: {
     title: 'Trending Products Online | TrendNest99',
     description:
       'Discover trending products and top customer picks in fashion, printed apparel, and home essentials at TrendNest99.',
     keywords: ['trending products online', 'best selling products', 'latest fashion picks', 'trendnest99'],
+    longIntro:
+      "Trending products show what customers are actively discovering and buying right now. This category is ideal for shoppers who want a fast way to explore current favorites across fashion accessories, printed apparel, and practical essentials. Instead of opening multiple sections and comparing everything manually, you can start here with a curated shortlist shaped by ongoing demand and shopper behavior. For users searching trending products online India or best selling products in India, this page reduces decision friction while still giving enough variety.\n\nTime-sensitive shopping usually depends on relevance and trust. That is why this collection highlights products that combine visual appeal, practical use, and value-oriented pricing for everyday buyers. Whether you are shopping for yourself, evaluating gift options, or trying to catch what is popular this month, this feed helps you identify strong choices quickly. Open any listing for deeper details, compare top picks, and move to checkout with confidence using products that are already attracting real customer attention.",
   },
   fashion: {
-    title: 'Fashion Products Online | TrendNest99',
-    description: 'Shop latest fashion essentials and accessories online at TrendNest99.',
-    keywords: ['fashion products online', 'latest fashion trends', 'men fashion online', 'trendnest99'],
+    title: 'Mens Fashion Accessories Online India | TrendNest99',
+    description:
+      'Shop latest fashion essentials and accessories online at TrendNest99 with practical style options for Indian buyers.',
+    keywords: ['fashion products online', 'latest fashion trends', 'men fashion online', 'men leather belt online india', 'trendnest99'],
+    longIntro:
+      "Fashion shopping online works best when style, comfort, and price stay in balance. This category is curated for people who want practical fashion essentials that can be worn regularly while still looking polished. From daily accessories to wardrobe-friendly picks, each product is chosen to support easy styling for work, travel, college, and casual plans. Customers searching mens fashion accessories online India often want reliable pieces that feel premium without becoming expensive impulse buys, and this collection is designed around that requirement.\n\nLong-tail searches such as men leather belt online India, affordable fashion accessories, and smart casual essentials for men reflect clear buying intent. To match that intent, we focus on usable designs, durable materials, and price points that fit real budgets. You can compare options by look, finish, and daily utility, then select products that blend easily with your existing outfits. If your goal is to shop fashion products online with less guesswork and better value, this category provides a clean path from search to purchase.",
   },
   electronics: {
     title: 'Electronics & Accessories Online | TrendNest99',
     description: 'Browse everyday electronics and useful accessories online at TrendNest99.',
     keywords: ['electronics online', 'gadgets and accessories', 'electronics store india', 'trendnest99'],
+    longIntro:
+      "Electronics accessories may be small purchases, but they have a big impact on daily convenience. This category is built for shoppers who want practical gadgets and useful add-ons for home, office, and travel routines. If you are searching electronics accessories online India, you will find product choices aimed at real-world usability instead of unnecessary complexity. The selection prioritizes dependable function, straightforward value, and clean product comparisons so you can buy quickly without overthinking technical details.\n\nBuyers often come with intent-based phrases like gadgets and accessories online, electronics store India, or affordable electronics essentials. To support that journey, this category keeps attention on products that are easy to use, easy to compare, and relevant for regular day-to-day use. Whether you are replacing an often-used accessory or trying a new gadget for convenience, these listings are organized to reduce confusion and improve purchase confidence. Explore top options, review practical details, and choose electronics essentials that match your workflow and budget.",
   },
 };
 
@@ -69,7 +82,14 @@ function stripHtml(input: string): string {
 
 function truncate(input: string, max = 160): string {
   if (input.length <= max) return input;
-  return `${input.slice(0, max - 1).trimEnd()}…`;
+  return `${input.slice(0, max - 1).trimEnd()}...`;
+}
+
+function splitIntoParagraphs(text: string): string[] {
+  return String(text || '')
+    .split(/\n\s*\n/g)
+    .map((part) => part.trim())
+    .filter(Boolean);
 }
 
 export default function CategoryPage() {
@@ -78,14 +98,13 @@ export default function CategoryPage() {
   const showSkeleton = useDelayedFlag(loading, 250);
   const [sort, setSort] = useState('default');
 
-  const category = categories.find(c => c.id === id);
+  const category = categories.find((c) => c.id === id);
   let filtered =
-    id === 'trending' ? products.filter(p => p.isTrending) : products.filter(p => p.category === id);
-  // Trending: newest-first (admin displayOrder is per-category and not used here).
+    id === 'trending' ? products.filter((p) => p.isTrending) : products.filter((p) => p.category === id);
   if (id === 'trending') {
     const ts = (pid: string) => {
       const m = String(pid || '').match(/\d{10,}/);
-      const n = m ? Number(m[0]) : NaN;
+      const n = m ? Number(m[0]) : Number.NaN;
       return Number.isFinite(n) ? n : 0;
     };
     filtered = [...filtered].sort((a, b) => ts(b.id) - ts(a.id));
@@ -101,7 +120,7 @@ export default function CategoryPage() {
   const fallbackDesc = category?.description
     ? `${category.description} Browse ${filtered.length} products on TrendNest99.`
     : `Browse ${filtered.length} products on TrendNest99.`;
-  const desc = truncate(stripHtml(seoPreset?.description || fallbackDesc), 160);
+  const desc = ensureSeoMetaDescription(truncate(stripHtml(seoPreset?.description || fallbackDesc), 160));
   const canonicalUrl = id ? `${CANONICAL_BASE}/category/${encodeURIComponent(id)}` : `${CANONICAL_BASE}/category`;
   const keywords = Array.from(
     new Set([
@@ -130,7 +149,7 @@ export default function CategoryPage() {
       itemListElement: filtered.slice(0, 12).map((p, index) => ({
         '@type': 'ListItem',
         position: index + 1,
-        url: `${CANONICAL_BASE}/product/${encodeURIComponent(String(p.id || ''))}`,
+        url: productCanonicalUrl(p),
         name: p.name,
       })),
     },
@@ -191,13 +210,41 @@ export default function CategoryPage() {
           </SelectContent>
         </Select>
       </div>
+
+      {seoPreset?.longIntro ? (
+        <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+          <h2 className="text-base font-semibold text-slate-900">About {categoryName}</h2>
+          <div className="mt-2 space-y-3">
+            {splitIntoParagraphs(seoPreset.longIntro).map((paragraph, index) => (
+              <p key={`${id}-intro-${index}`} className="text-sm leading-7 text-slate-600">
+                {paragraph}
+              </p>
+            ))}
+          </div>
+          {filtered.length > 0 ? (
+            <p className="mt-3 text-sm text-slate-700">
+              Popular picks in this category:{' '}
+              {filtered.slice(0, 3).map((p, index) => (
+                <span key={`inline-link-${p.id}`}>
+                  <Link to={productSeoPath(p)} className="font-semibold text-orange-600 hover:underline">
+                    Buy {p.name} online in India
+                  </Link>
+                  {index < Math.min(filtered.length, 3) - 1 ? ', ' : '.'}
+                </span>
+              ))}
+            </p>
+          ) : null}
+        </section>
+      ) : null}
+
       {filtered.length === 0 ? (
         <p className="text-center text-muted-foreground py-20">No products found in this category.</p>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
-          {filtered.map(p => <ProductCard key={p.id} product={p} />)}
+          {filtered.map((p) => <ProductCard key={p.id} product={p} />)}
         </div>
       )}
     </div>
   );
 }
+

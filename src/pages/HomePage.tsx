@@ -10,6 +10,7 @@ import { productPrimaryImage } from "@/lib/productImages";
 import { productVariantNames } from "@/lib/productVariants";
 import { type RatingSummary } from "@/lib/reviewsSummaryApi";
 import type { Product } from "@/types";
+import { ensureSeoMetaDescription, productImageAlt, productSeoPath } from "@/lib/seo";
 
 const Icon = ({ children, className = "", size = 20 }) => (
   <span
@@ -49,7 +50,9 @@ const CANONICAL_BASE = "https://trendnest99.in";
 const HOME_OG_IMAGE = `${CANONICAL_BASE}/img3.jpeg`;
 const HOME_TITLE = "Printed T-Shirts, Graphic Tees & Custom Print Store | TrendNest99";
 const HOME_DESC =
-  "Shop printed t-shirts, men's oversized graphic tees, custom print products, trending fashion, and home essentials online in India at TrendNest99.";
+  ensureSeoMetaDescription(
+    "Shop printed t-shirts, men's oversized graphic tees, custom print products, trending fashion, and home essentials online in India at TrendNest99."
+  );
 const HOME_KEYWORDS = [
   "printed t shirt",
   "printed shirt",
@@ -76,11 +79,12 @@ function ProductCard({ product, ratingSummary }: { product: Product; ratingSumma
 
   return (
     <div className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl">
-      <Link to={`/product/${product.id}`} className="block relative aspect-square overflow-hidden rounded-t-2xl bg-slate-100">
+      <Link to={productSeoPath(product)} className="block relative aspect-square overflow-hidden rounded-t-2xl bg-slate-100">
         <img
           src={productPrimaryImage(product)}
-          alt={product.name}
+          alt={productImageAlt(product, "homepage product photo")}
           className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+          loading="lazy"
         />
         {dp > 0 ? (
           <span className="absolute left-3 top-3 rounded-md bg-orange-600 px-2.5 py-1 text-xs font-bold text-white">
@@ -99,7 +103,7 @@ function ProductCard({ product, ratingSummary }: { product: Product; ratingSumma
         </button>
       </Link>
       <div className="p-4">
-        <Link to={`/product/${product.id}`} className="block">
+        <Link to={productSeoPath(product)} className="block">
           <h3 className="line-clamp-1 text-sm font-bold text-slate-900 transition-colors hover:text-orange-600">
             {product.name}
           </h3>

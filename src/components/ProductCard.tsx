@@ -7,6 +7,7 @@ import { useCart } from '@/contexts/CartContext';
 import { ShoppingCart } from 'lucide-react';
 import { useProducts } from '@/contexts/ProductsContext';
 import RatingSummaryInline from '@/components/reviews/RatingSummaryInline';
+import { productImageAlt, productSeoPath } from '@/lib/seo';
 
 export default function ProductCard({ product }: { product: Product }) {
   const { addItem } = useCart();
@@ -21,8 +22,8 @@ export default function ProductCard({ product }: { product: Product }) {
 
   return (
     <div className="group bg-card rounded-xl border overflow-hidden hover:shadow-lg transition-shadow">
-      <Link to={`/product/${product.id}`} className="block aspect-square overflow-hidden relative">
-        <img src={productPrimaryImage(product)} alt={product.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" />
+      <Link to={productSeoPath(product)} className="block aspect-square overflow-hidden relative">
+        <img src={productPrimaryImage(product)} alt={productImageAlt(product, 'catalog photo')} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" />
         {discount > 0 && (
           <span className="absolute top-1.5 sm:top-2 left-1.5 sm:left-2 bg-primary text-primary-foreground text-[10px] sm:text-xs font-semibold px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md">{discount}% OFF</span>
         )}
@@ -31,7 +32,7 @@ export default function ProductCard({ product }: { product: Product }) {
         )}
       </Link>
       <div className="p-2.5 sm:p-3">
-        <Link to={`/product/${product.id}`}>
+        <Link to={productSeoPath(product)}>
           <h3 className="font-medium text-xs sm:text-sm truncate hover:text-primary transition-colors">{product.name}</h3>
         </Link>
         <div className="flex items-center gap-1.5 sm:gap-2 mt-1">

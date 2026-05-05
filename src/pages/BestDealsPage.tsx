@@ -11,6 +11,7 @@ import type { Product } from '@/types';
 import { Link } from 'react-router-dom';
 import { type RatingSummary } from '@/lib/reviewsSummaryApi';
 import { toast } from 'sonner';
+import { ensureSeoMetaDescription, productImageAlt, productSeoPath } from '@/lib/seo';
 
 const CANONICAL_BASE = 'https://trendnest99.in';
 
@@ -90,10 +91,10 @@ function BestDealCard({
 
   return (
     <div className="group overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-orange-100 hover:shadow-xl">
-      <Link to={`/product/${product.id}`} className="block relative aspect-square overflow-hidden bg-slate-100">
+      <Link to={productSeoPath(product)} className="block relative aspect-square overflow-hidden bg-slate-100">
         <img
           src={productPrimaryImage(product)}
-          alt={product.name}
+          alt={productImageAlt(product, 'best deals product photo')}
           className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
           loading="lazy"
         />
@@ -110,7 +111,7 @@ function BestDealCard({
       </Link>
 
       <div className="p-3">
-        <Link to={`/product/${product.id}`}>
+        <Link to={productSeoPath(product)}>
           <h3 className="line-clamp-2 min-h-[34px] text-sm font-black leading-5 text-slate-950 transition-colors hover:text-orange-600">
             {product.name}
           </h3>
@@ -212,7 +213,9 @@ export default function BestDealsPage() {
   };
 
   const title = 'Best Deals | TrendNest99';
-  const desc = `Browse ${sortedProducts.length} best deal products on TrendNest99.`;
+  const desc = ensureSeoMetaDescription(
+    `Browse ${sortedProducts.length} best deal products on TrendNest99. Discover fashion accessories, printed t-shirts, and home essentials with strong value pricing for Indian shoppers.`
+  );
 
   if (showSkeleton) {
     return (
