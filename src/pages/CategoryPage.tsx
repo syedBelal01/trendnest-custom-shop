@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Helmet } from 'react-helmet-async';
 import ProductCardSkeleton from '@/components/ProductCardSkeleton';
 import { useDelayedFlag } from '@/hooks/useDelayedFlag';
-import { ensureSeoMetaDescription, productCanonicalUrl, productSeoPath } from '@/lib/seo';
+import { ensureSeoMetaDescription, productCanonicalUrl } from '@/lib/seo';
 
 const CANONICAL_BASE = 'https://trendnest99.in';
 const DEFAULT_OG_IMAGE = `${CANONICAL_BASE}/img3.jpeg`;
@@ -83,13 +83,6 @@ function stripHtml(input: string): string {
 function truncate(input: string, max = 160): string {
   if (input.length <= max) return input;
   return `${input.slice(0, max - 1).trimEnd()}...`;
-}
-
-function splitIntoParagraphs(text: string): string[] {
-  return String(text || '')
-    .split(/\n\s*\n/g)
-    .map((part) => part.trim())
-    .filter(Boolean);
 }
 
 export default function CategoryPage() {
@@ -211,32 +204,6 @@ export default function CategoryPage() {
         </Select>
       </div>
 
-      {seoPreset?.longIntro ? (
-        <section className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
-          <h2 className="text-base font-semibold text-slate-900">About {categoryName}</h2>
-          <div className="mt-2 space-y-3">
-            {splitIntoParagraphs(seoPreset.longIntro).map((paragraph, index) => (
-              <p key={`${id}-intro-${index}`} className="text-sm leading-7 text-slate-600">
-                {paragraph}
-              </p>
-            ))}
-          </div>
-          {filtered.length > 0 ? (
-            <p className="mt-3 text-sm text-slate-700">
-              Popular picks in this category:{' '}
-              {filtered.slice(0, 3).map((p, index) => (
-                <span key={`inline-link-${p.id}`}>
-                  <Link to={productSeoPath(p)} className="font-semibold text-orange-600 hover:underline">
-                    Buy {p.name} online in India
-                  </Link>
-                  {index < Math.min(filtered.length, 3) - 1 ? ', ' : '.'}
-                </span>
-              ))}
-            </p>
-          ) : null}
-        </section>
-      ) : null}
-
       {filtered.length === 0 ? (
         <p className="text-center text-muted-foreground py-20">No products found in this category.</p>
       ) : (
@@ -247,4 +214,3 @@ export default function CategoryPage() {
     </div>
   );
 }
-

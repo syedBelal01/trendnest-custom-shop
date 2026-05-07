@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useCart } from "@/contexts/CartContext";
 import { usePaymentMethod } from "@/contexts/PaymentMethodContext";
@@ -233,20 +233,23 @@ export default function CartPage() {
     items,
     removeItem,
     updateQuantity,
-    discount,
     couponCode,
+    couponValidatedFor,
     applyCoupon,
+    clearCoupon,
     unitPriceForItem,
     totalsForPaymentMethod,
   } = useCart();
   const { method: paymentMethod, setMethod: setPaymentMethod } = usePaymentMethod();
 
   const [code, setCode] = useState("");
+  const couponRecheckBusyRef = useRef(false);
 
   const computed = totalsForPaymentMethod(paymentMethod);
   const subtotal = computed.subtotal;
   const total = computed.total;
-  const savings = discount;
+  const savings = computed.discount;
+  const paymentLabel = paymentMethod === "razorpay" ? "online payment" : "COD";
 
   const handleCoupon = async () => {
     const trimmed = code.trim();
@@ -259,14 +262,40 @@ export default function CartPage() {
       const r = await validateCouponApi({
         code: trimmed,
         subtotal,
+        paymentMethod,
         items: items.map((i) => ({ productId: i.product.id, quantity: i.quantity, selectedVariant: i.selectedVariant })),
       });
-      applyCoupon(r.couponCode, r.discount);
+      applyCoupon(r.couponCode, r.discount, { paymentMethodScope: r.paymentMethodScope, validatedFor: paymentMethod });
+      setCode(r.couponCode);
       toast.success(`Coupon applied! You save ₹${r.discount}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Invalid or expired coupon");
     }
   };
+
+  useEffect(() => {
+    if (!couponCode || couponValidatedFor === paymentMethod) return;
+    if (couponRecheckBusyRef.current) return;
+    couponRecheckBusyRef.current = true;
+    const currentSubtotal = totalsForPaymentMethod(paymentMethod).subtotal;
+
+    void (async () => {
+      try {
+        const r = await validateCouponApi({
+          code: couponCode,
+          subtotal: currentSubtotal,
+          paymentMethod,
+          items: items.map((i) => ({ productId: i.product.id, quantity: i.quantity, selectedVariant: i.selectedVariant })),
+        });
+        applyCoupon(r.couponCode, r.discount, { paymentMethodScope: r.paymentMethodScope, validatedFor: paymentMethod });
+      } catch (e) {
+        clearCoupon();
+        toast.error(e instanceof Error ? e.message : `This coupon is not valid for ${paymentLabel}.`);
+      } finally {
+        couponRecheckBusyRef.current = false;
+      }
+    })();
+  }, [applyCoupon, clearCoupon, couponCode, couponValidatedFor, items, paymentLabel, paymentMethod, totalsForPaymentMethod]);
 
   const cartCount = items.reduce((sum, i) => sum + i.quantity, 0);
 
@@ -386,7 +415,7 @@ export default function CartPage() {
 
               {couponCode ? (
                 <p className="mt-2 text-xs text-slate-600">
-                  Applied: <span className="font-bold">{couponCode}</span>
+                  Applied: <span className="font-bold">{couponCode}</span>{savings > 0 ? "" : ` (not applicable on ${paymentLabel})`}
                 </p>
               ) : null}
             </div>

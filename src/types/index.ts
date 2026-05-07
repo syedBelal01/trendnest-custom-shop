@@ -253,6 +253,7 @@ export interface Order {
   freeShippingApplied?: boolean;
   discount: number;
   couponCode?: string;
+  couponPaymentMethodScope?: CouponPaymentMethodScope;
   createdAt: string;
   updatedAt?: string;
   hasCustomPrint: boolean;
@@ -342,7 +343,11 @@ export interface Coupon {
   usagePerUserLimit?: number;
   newUsersOnly?: boolean;
   allowedUserGroups?: string[];
+  /** Coupon applicability by checkout payment method; defaults to both for legacy coupons. */
+  paymentMethodScope?: CouponPaymentMethodScope;
 }
+
+export type CouponPaymentMethodScope = 'online' | 'cod' | 'both';
 
 export type OrderStatus = Order['status'];
 // ProductCategory already defined above as a type alias

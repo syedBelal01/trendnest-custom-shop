@@ -97,13 +97,24 @@ function matchesAddressSearch(a: Address, q: string): boolean {
 }
 
 export default function CheckoutPage() {
-  const { items, subtotal, total, discount, couponCode, clearCart, totalsForPaymentMethod, unitPriceForItem, reconcileWithStock, applyCoupon } = useCart();
+  const {
+    items,
+    couponCode,
+    couponValidatedFor,
+    clearCart,
+    clearCoupon,
+    totalsForPaymentMethod,
+    unitPriceForItem,
+    reconcileWithStock,
+    applyCoupon,
+  } = useCart();
   const navigate = useNavigate();
   const { refreshProducts } = useProducts();
   const { user, loading: authLoading, refreshAuth } = useAuth();
   const { method: paymentMethod, setMethod: setPaymentMethod } = usePaymentMethod();
   const [couponDraft, setCouponDraft] = useState('');
   const [couponBusy, setCouponBusy] = useState(false);
+  const couponRecheckBusyRef = useRef(false);
   const [form, setForm] = useState<CustomerInfo>({
     name: '',
     email: '',
@@ -533,7 +544,7 @@ export default function CheckoutPage() {
       window.clearTimeout(t);
       setShippingQuoteLoading(false);
     };
-  }, [form.pincode, paymentMethod, items, discount, totalsForPaymentMethod]);
+  }, [form.pincode, paymentMethod, items, couponCode, couponValidatedFor, totalsForPaymentMethod]);
 
   // Background check: if email exists, skip OTP. If new email, auto-send OTP.
   useEffect(() => {
@@ -706,7 +717,7 @@ export default function CheckoutPage() {
         customer: { ...form, email: form.email.trim(), phone: phoneCheck.digits },
         items: cartItemsToOrderLines(items).map((l, idx) => ({ ...l, price: unitPriceForItem(items[idx], paymentMethod) })),
         subtotal: computed.subtotal,
-        discount,
+        discount: computed.discount,
         total: payableTotal,
         couponCode: couponCode || undefined,
         hasCustomPrint: items.some(i => !!(i.customDesignFile || i.customDesignName)),
@@ -797,9 +808,11 @@ export default function CheckoutPage() {
       const r = await validateCouponApi({
         code: trimmed,
         subtotal: computed.subtotal,
+        paymentMethod,
         items: items.map(i => ({ productId: i.product.id, quantity: i.quantity, selectedVariant: i.selectedVariant })),
       });
-      applyCoupon(r.couponCode, r.discount);
+      applyCoupon(r.couponCode, r.discount, { paymentMethodScope: r.paymentMethodScope, validatedFor: paymentMethod });
+      setCouponDraft(r.couponCode);
       toast.success(`Coupon applied! You save ₹${r.discount}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Invalid or expired coupon');
@@ -807,6 +820,31 @@ export default function CheckoutPage() {
       setCouponBusy(false);
     }
   };
+
+  useEffect(() => {
+    if (!couponCode || couponValidatedFor === paymentMethod) return;
+    if (couponRecheckBusyRef.current) return;
+    couponRecheckBusyRef.current = true;
+    const currentSubtotal = totalsForPaymentMethod(paymentMethod).subtotal;
+    const paymentLabel = paymentMethod === 'razorpay' ? 'online payment' : 'COD';
+
+    void (async () => {
+      try {
+        const r = await validateCouponApi({
+          code: couponCode,
+          subtotal: currentSubtotal,
+          paymentMethod,
+          items: items.map(i => ({ productId: i.product.id, quantity: i.quantity, selectedVariant: i.selectedVariant })),
+        });
+        applyCoupon(r.couponCode, r.discount, { paymentMethodScope: r.paymentMethodScope, validatedFor: paymentMethod });
+      } catch (e) {
+        clearCoupon();
+        toast.error(e instanceof Error ? e.message : `This coupon is valid for a different payment method, so it was removed from ${paymentLabel}.`);
+      } finally {
+        couponRecheckBusyRef.current = false;
+      }
+    })();
+  }, [applyCoupon, clearCoupon, couponCode, couponValidatedFor, items, paymentMethod, totalsForPaymentMethod]);
 
   if (orderPlaced) return null;
 
@@ -1439,10 +1477,10 @@ export default function CheckoutPage() {
                   <span className="text-slate-500">Subtotal</span>
                   <span className="font-black text-slate-950">₹{checkoutMerchandise.subtotal}</span>
                 </div>
-                {discount > 0 && (
+                {checkoutMerchandise.discount > 0 && (
                   <div className="flex items-center justify-between">
                     <span className="text-slate-500">Discount {couponCode ? `(${couponCode})` : ''}</span>
-                    <span className="font-black text-emerald-700">-₹{discount}</span>
+                    <span className="font-black text-emerald-700">-₹{checkoutMerchandise.discount}</span>
                   </div>
                 )}
                 <div className="flex items-center justify-between">

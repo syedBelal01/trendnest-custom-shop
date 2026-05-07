@@ -12,12 +12,13 @@ import { createCouponAdmin, deleteCouponAdmin, fetchCouponsAdmin, updateCouponAd
 import { fetchProductsApi } from '@/lib/api';
 import { Badge } from '@/components/ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from '@/components/ui/command';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
 import { cn } from '@/lib/utils';
 
 type CouponFormState = {
   code: string;
   type: Coupon['type'];
+  paymentMethodScope: NonNullable<Coupon['paymentMethodScope']>;
   value: number;
   maxDiscount: string;
   minOrder: number;
@@ -56,6 +57,7 @@ export default function AdminCoupons() {
     () => ({
       code: '',
       type: 'percentage',
+      paymentMethodScope: 'both',
       value: 10,
       maxDiscount: '',
       minOrder: 500,
@@ -86,6 +88,7 @@ export default function AdminCoupons() {
     setForm({
       code: c.code || '',
       type: c.type || 'percentage',
+      paymentMethodScope: c.paymentMethodScope === 'online' || c.paymentMethodScope === 'cod' ? c.paymentMethodScope : 'both',
       value: typeof c.value === 'number' ? c.value : 0,
       maxDiscount: c.maxDiscount != null ? String(c.maxDiscount) : '',
       minOrder: typeof c.minOrder === 'number' ? c.minOrder : 0,
@@ -324,6 +327,7 @@ export default function AdminCoupons() {
     return {
       code: form.code.trim().toUpperCase(),
       type: form.type,
+      paymentMethodScope: form.paymentMethodScope,
       value: Number(form.value),
       maxDiscount,
       minOrder: Number(form.minOrder),
@@ -447,6 +451,23 @@ export default function AdminCoupons() {
                 </SelectContent>
               </Select>
 
+              <div className="space-y-1.5">
+                <Select
+                  value={form.paymentMethodScope}
+                  onValueChange={v => setForm(p => ({ ...p, paymentMethodScope: v as CouponFormState['paymentMethodScope'] }))}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="both">Both online and COD</SelectItem>
+                    <SelectItem value="online">Online payment only</SelectItem>
+                    <SelectItem value="cod">COD only</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">Choose where this coupon can be used.</p>
+              </div>
+
               <Input type="number" placeholder="Value" value={form.value} onChange={e => setForm(p => ({ ...p, value: +e.target.value }))} />
               <Input type="number" placeholder="Max Discount (optional)" value={form.maxDiscount} onChange={e => setForm(p => ({ ...p, maxDiscount: e.target.value }))} />
               <Input type="number" placeholder="Min Order (₹)" value={form.minOrder} onChange={e => setForm(p => ({ ...p, minOrder: +e.target.value }))} />
@@ -485,35 +506,37 @@ export default function AdminCoupons() {
                         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                       </Button>
                     </PopoverTrigger>
-                    <PopoverContent className="w-[420px] p-0" align="start">
+                    <PopoverContent className="w-[min(420px,calc(100vw-2rem))] p-0 overflow-hidden" align="start">
                       <Command>
                         <CommandInput placeholder="Search products…" />
-                        <CommandEmpty>No products found.</CommandEmpty>
-                        <CommandGroup>
-                          {skuOptions.map(opt => {
-                            const selected = form.applicableSkus.includes(opt.sku);
-                            return (
-                              <CommandItem
-                                key={opt.sku}
-                                value={opt.label}
-                                onSelect={() => {
-                                  setForm(p => {
-                                    const has = p.applicableSkus.includes(opt.sku);
-                                    return {
-                                      ...p,
-                                      applicableSkus: has
-                                        ? p.applicableSkus.filter(s => s !== opt.sku)
-                                        : [...p.applicableSkus, opt.sku],
-                                    };
-                                  });
-                                }}
-                              >
-                                <Check className={cn('mr-2 h-4 w-4', selected ? 'opacity-100' : 'opacity-0')} />
-                                <span className="truncate">{opt.label}</span>
-                              </CommandItem>
-                            );
-                          })}
-                        </CommandGroup>
+                        <CommandList className="max-h-[min(52vh,340px)]">
+                          <CommandEmpty>No products found.</CommandEmpty>
+                          <CommandGroup>
+                            {skuOptions.map(opt => {
+                              const selected = form.applicableSkus.includes(opt.sku);
+                              return (
+                                <CommandItem
+                                  key={opt.sku}
+                                  value={opt.label}
+                                  onSelect={() => {
+                                    setForm(p => {
+                                      const has = p.applicableSkus.includes(opt.sku);
+                                      return {
+                                        ...p,
+                                        applicableSkus: has
+                                          ? p.applicableSkus.filter(s => s !== opt.sku)
+                                          : [...p.applicableSkus, opt.sku],
+                                      };
+                                    });
+                                  }}
+                                >
+                                  <Check className={cn('mr-2 h-4 w-4', selected ? 'opacity-100' : 'opacity-0')} />
+                                  <span className="truncate">{opt.label}</span>
+                                </CommandItem>
+                              );
+                            })}
+                          </CommandGroup>
+                        </CommandList>
                       </Command>
                     </PopoverContent>
                   </Popover>
@@ -597,6 +620,14 @@ export default function AdminCoupons() {
               {c.maxDiscount != null && <span>Cap ₹{c.maxDiscount}</span>}
               <span>Min ₹{c.minOrder}</span>
               <span>Scope: {c.scope || 'cart'}</span>
+              <span>
+                Payment:{' '}
+                {c.paymentMethodScope === 'online'
+                  ? 'Online only'
+                  : c.paymentMethodScope === 'cod'
+                    ? 'COD only'
+                    : 'Both'}
+              </span>
             </div>
             <div className="flex items-center gap-2 pt-1 border-t">
               <Button
@@ -634,6 +665,7 @@ export default function AdminCoupons() {
               <th className="text-left p-3">Type</th>
               <th className="text-left p-3">Value</th>
               <th className="text-left p-3">Scope</th>
+              <th className="text-left p-3">Payment Scope</th>
               <th className="text-left p-3">Min Order</th>
               <th className="p-3">Active</th>
               <th className="p-3">Actions</th>
@@ -649,6 +681,13 @@ export default function AdminCoupons() {
                   {c.maxDiscount != null ? <span className="text-xs text-muted-foreground ml-2">cap ₹{c.maxDiscount}</span> : null}
                 </td>
                 <td className="p-3">{c.scope || 'cart'}</td>
+                <td className="p-3">
+                  {c.paymentMethodScope === 'online'
+                    ? 'Online only'
+                    : c.paymentMethodScope === 'cod'
+                      ? 'COD only'
+                      : 'Both'}
+                </td>
                 <td className="p-3">₹{c.minOrder}</td>
                 <td className="p-3 text-center">
                   <Switch checked={c.isActive} onCheckedChange={checked => void toggleActive(c.id, checked)} />
@@ -665,7 +704,7 @@ export default function AdminCoupons() {
             ))}
             {list.length === 0 && !loading && (
               <tr>
-                <td colSpan={7} className="p-6 text-center text-muted-foreground">No coupons yet.</td>
+                <td colSpan={8} className="p-6 text-center text-muted-foreground">No coupons yet.</td>
               </tr>
             )}
           </tbody>

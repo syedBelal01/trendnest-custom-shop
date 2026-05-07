@@ -3,7 +3,7 @@ import { useProducts } from '@/contexts/ProductsContext';
 import { useCart } from '@/contexts/CartContext';
 import { Button } from '@/components/ui/button';
 import RatingSummaryInline from '@/components/reviews/RatingSummaryInline';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type WheelEvent } from 'react';
 import { ShoppingCart, ArrowLeft, Minus, Plus, Check, ChevronDown, ChevronUp, Truck, ShieldCheck, BadgeCheck, Package } from 'lucide-react';
 import type { CartItem, Product } from '@/types';
 import { productVariantNames } from '@/lib/productVariants';
@@ -668,6 +668,18 @@ export default function ProductDetailPage() {
     navigate('/checkout');
   };
 
+  const handleHorizontalWheel = (event: WheelEvent<HTMLElement>) => {
+    const el = event.currentTarget;
+    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+    if (el.scrollWidth <= el.clientWidth) return;
+    const canScrollRight = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+    const canScrollLeft = el.scrollLeft > 0;
+    if ((event.deltaY > 0 && canScrollRight) || (event.deltaY < 0 && canScrollLeft)) {
+      event.preventDefault();
+      el.scrollLeft += event.deltaY;
+    }
+  };
+
   return (
     <>
       <Helmet>
@@ -723,7 +735,10 @@ export default function ProductDetailPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-10 md:items-start">
           {/* Image gallery */}
           <div className="grid gap-3 md:gap-4 md:grid-cols-[78px_1fr]">
-            <div className="order-2 flex gap-2 overflow-x-auto md:order-1 md:flex-col md:overflow-visible">
+            <div
+              onWheel={handleHorizontalWheel}
+              className="order-2 flex gap-2 overflow-x-auto overflow-y-hidden pb-1 pr-1 scrollbar-none scroll-smooth [touch-action:pan-x] [-webkit-overflow-scrolling:touch] md:order-1 md:flex-col md:overflow-visible md:pb-0 md:pr-0"
+            >
               {galleryImages.map((img) => {
                 const image = String(img || '').trim();
                 if (!image) return null;
@@ -914,11 +929,14 @@ export default function ProductDetailPage() {
                             <span className="ml-2 text-muted-foreground font-medium">: {selectedImageTypeLabel}</span>
                           ) : null}
                         </p>
-                        <div className="flex items-start gap-2 overflow-x-auto pb-1 scrollbar-none">
+                        <div
+                          onWheel={handleHorizontalWheel}
+                          className="flex items-start gap-2 overflow-x-auto overflow-y-hidden pb-2 pr-2 scrollbar-none scroll-smooth [touch-action:pan-x] [-webkit-overflow-scrolling:touch] snap-x snap-mandatory"
+                        >
                           {imageTypeChoices.map((choice) => {
                             const active = normVal(String(variantAttrs[t.name] ?? '')) === normVal(choice.value);
                             return (
-                              <div key={`${t.name}-${choice.value}-${choice.item.key}`} className="w-20 shrink-0 space-y-1">
+                              <div key={`${t.name}-${choice.value}-${choice.item.key}`} className="w-20 shrink-0 snap-start space-y-1">
                                 <button
                                   type="button"
                                   title={choice.label}
@@ -1043,7 +1061,10 @@ export default function ProductDetailPage() {
           {/* Tabs row */}
           <div className="rounded-2xl border border-border bg-card p-3 sm:p-5">
             <Tabs defaultValue="description">
-              <TabsList className="w-full justify-start overflow-x-auto scrollbar-none flex-nowrap">
+            <TabsList
+              onWheel={handleHorizontalWheel}
+              className="w-full justify-start overflow-x-auto overflow-y-hidden flex-nowrap scrollbar-none scroll-smooth [touch-action:pan-x] [-webkit-overflow-scrolling:touch]"
+            >
                 <TabsTrigger value="description" className="text-xs sm:text-sm whitespace-nowrap">Description</TabsTrigger>
                 <TabsTrigger value="specs" className="text-xs sm:text-sm whitespace-nowrap">Specifications</TabsTrigger>
                 <TabsTrigger value="shipping" className="text-xs sm:text-sm whitespace-nowrap">Shipping &amp; Returns</TabsTrigger>

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useMemo, useReducer, useEffect, useCallback } from 'react';
-import { CartItem, type Product } from '@/types';
+import { CartItem, type CouponPaymentMethodScope, type Product } from '@/types';
 import { toast } from 'sonner';
 import { useProducts } from '@/contexts/ProductsContext';
 
@@ -7,17 +7,46 @@ interface CartState {
   items: CartItem[];
   couponCode: string | null;
   discount: number;
+  couponPaymentMethodScope: CouponPaymentMethodScope;
+  couponValidatedFor: 'cod' | 'razorpay' | null;
 }
 
 type CartAction =
   | { type: 'ADD_ITEM'; payload: CartItem }
   | { type: 'REMOVE_ITEM'; payload: string }
   | { type: 'UPDATE_QTY'; payload: { cartLineId: string; quantity: number } }
-  | { type: 'APPLY_COUPON'; payload: { code: string; discount: number } }
+  | {
+      type: 'APPLY_COUPON';
+      payload: {
+        code: string;
+        discount: number;
+        paymentMethodScope?: CouponPaymentMethodScope;
+        validatedFor?: 'cod' | 'razorpay';
+      };
+    }
+  | { type: 'CLEAR_COUPON' }
   | { type: 'REPLACE_ITEMS'; payload: CartItem[] }
   | { type: 'CLEAR_CART' };
 
-const initialState: CartState = { items: [], couponCode: null, discount: 0 };
+const initialState: CartState = {
+  items: [],
+  couponCode: null,
+  discount: 0,
+  couponPaymentMethodScope: 'both',
+  couponValidatedFor: null,
+};
+
+function normalizeCouponPaymentMethodScope(raw: unknown): CouponPaymentMethodScope {
+  const scope = String(raw || '').trim().toLowerCase();
+  if (scope === 'online' || scope === 'cod' || scope === 'both') return scope;
+  return 'both';
+}
+
+function couponScopeAllowsMethod(scope: CouponPaymentMethodScope, method: 'cod' | 'razorpay'): boolean {
+  if (scope === 'both') return true;
+  if (scope === 'online') return method === 'razorpay';
+  return method === 'cod';
+}
 
 function sameCartLine(a: CartItem, b: CartItem): boolean {
   const aCustom = !!(a.customDesignFile || a.customDesignName);
@@ -52,10 +81,19 @@ function migrateState(raw: unknown): CartState {
   if (!raw || typeof raw !== 'object') return initialState;
   const o = raw as CartState;
   if (!Array.isArray(o.items)) return initialState;
+  const couponCode = o.couponCode ?? null;
+  const discount = typeof o.discount === 'number' ? o.discount : 0;
   return {
     items: o.items.map((i: CartItem) => normalizeCartItem(i)),
-    couponCode: o.couponCode ?? null,
-    discount: typeof o.discount === 'number' ? o.discount : 0,
+    couponCode,
+    discount: couponCode ? discount : 0,
+    couponPaymentMethodScope: couponCode
+      ? normalizeCouponPaymentMethodScope((o as any).couponPaymentMethodScope)
+      : 'both',
+    couponValidatedFor:
+      couponCode && ((o as any).couponValidatedFor === 'cod' || (o as any).couponValidatedFor === 'razorpay')
+        ? (o as any).couponValidatedFor
+        : null,
   };
 }
 
@@ -88,7 +126,24 @@ function cartReducer(state: CartState, action: CartAction): CartState {
         ),
       };
     case 'APPLY_COUPON':
-      return { ...state, couponCode: action.payload.code, discount: action.payload.discount };
+      return {
+        ...state,
+        couponCode: action.payload.code,
+        discount: action.payload.discount,
+        couponPaymentMethodScope: normalizeCouponPaymentMethodScope(action.payload.paymentMethodScope),
+        couponValidatedFor:
+          action.payload.validatedFor === 'cod' || action.payload.validatedFor === 'razorpay'
+            ? action.payload.validatedFor
+            : null,
+      };
+    case 'CLEAR_COUPON':
+      return {
+        ...state,
+        couponCode: null,
+        discount: 0,
+        couponPaymentMethodScope: 'both',
+        couponValidatedFor: null,
+      };
     case 'REPLACE_ITEMS':
       return { ...state, items: action.payload.map(normalizeCartItem) };
     case 'CLEAR_CART':
@@ -104,14 +159,21 @@ interface CartContextType {
   items: CartItem[];
   couponCode: string | null;
   discount: number;
+  couponPaymentMethodScope: CouponPaymentMethodScope;
+  couponValidatedFor: 'cod' | 'razorpay' | null;
   /** Per-line computed unit price (defaults to product.price). */
   unitPriceForItem: (item: CartItem, method?: 'cod' | 'razorpay') => number;
   /** Compute totals for a payment method without changing cart state. */
-  totalsForPaymentMethod: (method: 'cod' | 'razorpay') => { subtotal: number; total: number };
+  totalsForPaymentMethod: (method: 'cod' | 'razorpay') => { subtotal: number; discount: number; total: number };
   addItem: (item: CartItemInput) => void;
   removeItem: (cartLineId: string) => void;
   updateQuantity: (cartLineId: string, quantity: number) => void;
-  applyCoupon: (code: string, discount: number) => void;
+  applyCoupon: (
+    code: string,
+    discount: number,
+    opts?: { paymentMethodScope?: CouponPaymentMethodScope; validatedFor?: 'cod' | 'razorpay' }
+  ) => void;
+  clearCoupon: () => void;
   clearCart: () => void;
   /** Re-validate cart lines against latest product stock. */
   reconcileWithStock: () => { removed: number; adjusted: number };
@@ -138,7 +200,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   }, [state]);
 
   const subtotal = state.items.reduce((sum, i) => sum + i.product.price * i.quantity, 0);
-  const total = Math.max(0, subtotal - state.discount);
+  const defaultMethodDiscount = state.couponCode && couponScopeAllowsMethod(state.couponPaymentMethodScope, 'cod') ? state.discount : 0;
+  const total = Math.max(0, subtotal - defaultMethodDiscount);
   const itemCount = state.items.reduce((sum, i) => sum + i.quantity, 0);
 
   const productById = useMemo(() => {
@@ -187,9 +250,11 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const totalsForPaymentMethod = useCallback(
     (method: 'cod' | 'razorpay') => {
       const sub = state.items.reduce((sum, i) => sum + unitPriceForItem(i, method) * i.quantity, 0);
-      return { subtotal: sub, total: Math.max(0, sub - state.discount) };
+      const effectiveDiscount =
+        state.couponCode && couponScopeAllowsMethod(state.couponPaymentMethodScope, method) ? state.discount : 0;
+      return { subtotal: sub, discount: effectiveDiscount, total: Math.max(0, sub - effectiveDiscount) };
     },
-    [state.items, state.discount, unitPriceForItem]
+    [state.items, state.discount, state.couponCode, state.couponPaymentMethodScope, unitPriceForItem]
   );
 
   const reconcileItems = useCallback(
@@ -252,6 +317,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         items: state.items,
         couponCode: state.couponCode,
         discount: state.discount,
+        couponPaymentMethodScope: state.couponPaymentMethodScope,
+        couponValidatedFor: state.couponValidatedFor,
         unitPriceForItem,
         totalsForPaymentMethod,
         addItem,
@@ -269,7 +336,17 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
           if (nextQty !== qty) toast.message(`Quantity adjusted to ${nextQty} (available stock).`);
           dispatch({ type: 'UPDATE_QTY', payload: { cartLineId, quantity: nextQty } });
         },
-        applyCoupon: (code, discount) => dispatch({ type: 'APPLY_COUPON', payload: { code, discount } }),
+        applyCoupon: (code, discount, opts) =>
+          dispatch({
+            type: 'APPLY_COUPON',
+            payload: {
+              code,
+              discount,
+              paymentMethodScope: opts?.paymentMethodScope,
+              validatedFor: opts?.validatedFor,
+            },
+          }),
+        clearCoupon: () => dispatch({ type: 'CLEAR_COUPON' }),
         clearCart: () => dispatch({ type: 'CLEAR_CART' }),
         reconcileWithStock,
         subtotal,

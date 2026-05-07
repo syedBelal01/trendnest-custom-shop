@@ -1,6 +1,6 @@
 import { apiUrl } from '@/lib/api';
 import { withAuthHeaders } from '@/lib/authApi';
-import type { Coupon } from '@/types';
+import type { Coupon, CouponPaymentMethodScope } from '@/types';
 
 function adminHeaders(): HeadersInit {
   const key = sessionStorage.getItem('trendnest-admin-api-key');
@@ -52,8 +52,9 @@ export async function deleteCouponAdmin(id: string): Promise<void> {
 export async function validateCouponApi(params: {
   code: string;
   subtotal: number;
+  paymentMethod: 'cod' | 'razorpay';
   items: Array<{ productId: string; quantity: number; selectedVariant?: string }>;
-}): Promise<{ couponCode: string; discount: number }> {
+}): Promise<{ couponCode: string; discount: number; paymentMethodScope: CouponPaymentMethodScope }> {
   const res = await fetch(apiUrl('/api/coupons/validate'), {
     method: 'POST',
     credentials: 'include',
@@ -64,6 +65,14 @@ export async function validateCouponApi(params: {
   if (!res.ok) {
     throw new Error(typeof data.error === 'string' ? data.error : 'Invalid coupon');
   }
-  return { couponCode: data.couponCode, discount: data.discount } as { couponCode: string; discount: number };
+  const scope =
+    data?.paymentMethodScope === 'online' || data?.paymentMethodScope === 'cod' || data?.paymentMethodScope === 'both'
+      ? data.paymentMethodScope
+      : 'both';
+  return {
+    couponCode: data.couponCode,
+    discount: data.discount,
+    paymentMethodScope: scope,
+  } as { couponCode: string; discount: number; paymentMethodScope: CouponPaymentMethodScope };
 }
 

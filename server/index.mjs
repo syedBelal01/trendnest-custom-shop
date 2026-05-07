@@ -750,6 +750,7 @@ const CouponSchema = new mongoose.Schema(
     value: { type: Number, required: true }, // percentage or flat amount
     maxDiscount: { type: Number, default: undefined }, // optional cap on discount amount
     minOrder: { type: Number, default: 0 },
+    paymentMethodScope: { type: String, enum: ['online', 'cod', 'both'], default: 'both' },
 
     // Applicability
     scope: { type: String, required: true, enum: ['cart', 'products', 'categories'] },
@@ -793,6 +794,31 @@ const CouponUsage = mongoose.model('CouponUsage', CouponUsageSchema);
 
 function normalizeCouponCode(code) {
   return String(code || '').trim().toUpperCase();
+}
+
+function isValidCouponPaymentMethodScope(scope) {
+  return scope === 'online' || scope === 'cod' || scope === 'both';
+}
+
+function normalizeCouponPaymentMethodScope(scope) {
+  const value = String(scope || '').trim().toLowerCase();
+  if (isValidCouponPaymentMethodScope(value)) return value;
+  return 'both';
+}
+
+function normalizeCheckoutPaymentMethod(raw) {
+  const value = String(raw || '').trim().toLowerCase();
+  if (value === 'cod') return 'cod';
+  if (value === 'razorpay' || value === 'online' || value === 'prepaid') return 'razorpay';
+  return 'cod';
+}
+
+function couponScopeAllowsPaymentMethod(scope, paymentMethod) {
+  const normalizedScope = normalizeCouponPaymentMethodScope(scope);
+  const normalizedMethod = normalizeCheckoutPaymentMethod(paymentMethod);
+  if (normalizedScope === 'both') return true;
+  if (normalizedScope === 'online') return normalizedMethod === 'razorpay';
+  return normalizedMethod === 'cod';
 }
 
 // --- Visitor analytics (admin-only visibility) ---
@@ -887,7 +913,7 @@ function toDateOrUndefined(raw) {
   return d;
 }
 
-async function validateCouponForCart({ code, subtotal, items, userId }) {
+async function validateCouponForCart({ code, subtotal, items, userId, paymentMethod }) {
   const couponCode = normalizeCouponCode(code);
   if (!couponCode) {
     return { ok: false, error: 'Coupon code is required' };
@@ -896,6 +922,17 @@ async function validateCouponForCart({ code, subtotal, items, userId }) {
   const coupon = await Coupon.findOne({ code: couponCode }).lean();
   if (!coupon || !coupon.isActive) {
     return { ok: false, error: 'Invalid or expired coupon' };
+  }
+
+  const checkoutMethod = normalizeCheckoutPaymentMethod(paymentMethod);
+  const paymentMethodScope = normalizeCouponPaymentMethodScope(coupon.paymentMethodScope);
+  if (!couponScopeAllowsPaymentMethod(paymentMethodScope, checkoutMethod)) {
+    if (paymentMethodScope === 'online') {
+      return { ok: false, error: 'This coupon is valid only for online payments.' };
+    }
+    if (paymentMethodScope === 'cod') {
+      return { ok: false, error: 'This coupon is valid only for COD orders.' };
+    }
   }
 
   const now = Date.now();
@@ -1004,7 +1041,14 @@ async function validateCouponForCart({ code, subtotal, items, userId }) {
 
   discount = Math.max(0, Math.min(discount, sub));
 
-  return { ok: true, couponCode: coupon.code, discount, couponId: String(coupon._id) };
+  return {
+    ok: true,
+    couponCode: coupon.code,
+    discount,
+    couponId: String(coupon._id),
+    paymentMethodScope,
+    paymentMethod: checkoutMethod,
+  };
 }
 
 const MAX_CUSTOM_INLINE_BYTES = 500 * 1024;
@@ -1129,6 +1173,7 @@ const OrderSchema = new mongoose.Schema(
     subtotal: { type: Number, required: true },
     discount: { type: Number, default: 0 },
     couponCode: String,
+    couponPaymentMethodScope: { type: String, enum: ['online', 'cod', 'both'], default: undefined },
     /** Merchandise after discount (before shipping). */
     goodsTotal: { type: Number, default: undefined },
     shippingCharge: { type: Number, default: 0 },
@@ -1234,6 +1279,7 @@ const PaymentSessionSchema = new mongoose.Schema(
     subtotal: { type: Number, required: true },
     discount: { type: Number, default: 0 },
     couponCode: String,
+    couponPaymentMethodScope: { type: String, enum: ['online', 'cod', 'both'], default: undefined },
     goodsTotal: { type: Number, default: undefined },
     shippingCharge: { type: Number, default: 0 },
     /** Internal-only: real Shiprocket shipping charge (never shown to customers). */
@@ -3912,6 +3958,7 @@ app.post(
 function serializeCoupon(doc) {
   if (!doc) return null;
   const out = doc.toObject ? doc.toObject({ flattenMaps: true, versionKey: false }) : { ...doc };
+  out.paymentMethodScope = normalizeCouponPaymentMethodScope(out.paymentMethodScope);
   const id = out._id;
   delete out._id;
   return { id, ...out };
@@ -4053,6 +4100,12 @@ app.post('/api/coupons', mongoReady, adminKeyRequired, async (req, res) => {
       res.status(400).json({ error: 'Invalid coupon scope' });
       return;
     }
+    const paymentMethodScopeRaw = body.paymentMethodScope == null ? '' : String(body.paymentMethodScope).trim().toLowerCase();
+    if (paymentMethodScopeRaw && !isValidCouponPaymentMethodScope(paymentMethodScopeRaw)) {
+      res.status(400).json({ error: 'Invalid coupon payment scope' });
+      return;
+    }
+    const paymentMethodScope = normalizeCouponPaymentMethodScope(paymentMethodScopeRaw || 'both');
 
     const coupon = await Coupon.create({
       code,
@@ -4060,6 +4113,7 @@ app.post('/api/coupons', mongoReady, adminKeyRequired, async (req, res) => {
       value: Number(body.value ?? 0),
       maxDiscount: body.maxDiscount != null && body.maxDiscount !== '' ? Number(body.maxDiscount) : undefined,
       minOrder: Number(body.minOrder ?? 0),
+      paymentMethodScope,
 
       scope,
       productIds: parseIdList(body.productIds),
@@ -4108,6 +4162,14 @@ app.patch('/api/coupons/:id', mongoReady, adminKeyRequired, async (req, res) => 
     if (body.maxDiscount != null) patch.maxDiscount = body.maxDiscount === '' ? undefined : Number(body.maxDiscount);
     if (body.minOrder != null) patch.minOrder = Number(body.minOrder);
     if (body.scope != null) patch.scope = String(body.scope).trim();
+    if (body.paymentMethodScope != null) {
+      const paymentScope = String(body.paymentMethodScope).trim().toLowerCase();
+      if (!isValidCouponPaymentMethodScope(paymentScope)) {
+        res.status(400).json({ error: 'Invalid coupon payment scope' });
+        return;
+      }
+      patch.paymentMethodScope = paymentScope;
+    }
     if (body.productIds != null) patch.productIds = parseIdList(body.productIds);
     if (body.categoryIds != null) patch.categoryIds = parseIdList(body.categoryIds);
     if (body.applicableSkus != null) patch.applicableSkus = parseIdList(body.applicableSkus);
@@ -4155,15 +4217,21 @@ app.post('/api/coupons/validate', mongoReady, async (req, res) => {
     const code = String(body.code || '');
     const subtotal = Number(body.subtotal);
     const items = Array.isArray(body.items) ? body.items : [];
+    const paymentMethod = normalizeCheckoutPaymentMethod(body.paymentMethod);
     const userId = req.session?.userId ? String(req.session.userId) : undefined;
 
-    const result = await validateCouponForCart({ code, subtotal, items, userId });
+    const result = await validateCouponForCart({ code, subtotal, items, userId, paymentMethod });
     if (!result.ok) {
       res.status(400).json({ error: result.error || 'Invalid coupon' });
       return;
     }
 
-    res.json({ ok: true, couponCode: result.couponCode, discount: result.discount });
+    res.json({
+      ok: true,
+      couponCode: result.couponCode,
+      discount: result.discount,
+      paymentMethodScope: result.paymentMethodScope || 'both',
+    });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Failed to validate coupon' });
@@ -7132,6 +7200,7 @@ async function computeServerCheckoutPricing({ req, body, rawItems, paymentMethod
 
   let discount = 0;
   let couponCode = body.couponCode ? normalizeCouponCode(body.couponCode) : undefined;
+  let couponPaymentMethodScope = 'both';
   /** Set when a coupon applies; usage is incremented only after shipping quote succeeds. */
   let couponIdForUsage = null;
 
@@ -7143,6 +7212,7 @@ async function computeServerCheckoutPricing({ req, body, rawItems, paymentMethod
       subtotal,
       items: itemsForValidate,
       userId: sessionUserId,
+      paymentMethod,
     });
     if (!validation.ok) {
       const err = new Error(validation.error || 'Invalid coupon');
@@ -7181,10 +7251,12 @@ async function computeServerCheckoutPricing({ req, body, rawItems, paymentMethod
     }
     discount = validation.discount;
     couponCode = validation.couponCode;
+    couponPaymentMethodScope = normalizeCouponPaymentMethodScope(validation.paymentMethodScope);
     couponIdForUsage = couponId;
   } else {
     discount = 0;
     couponCode = undefined;
+    couponPaymentMethodScope = 'both';
   }
 
   const goodsAfterDiscount = Math.max(0, subtotal - discount);
@@ -7225,6 +7297,7 @@ async function computeServerCheckoutPricing({ req, body, rawItems, paymentMethod
     subtotal,
     discount,
     couponCode,
+    couponPaymentMethodScope: couponCode ? couponPaymentMethodScope : undefined,
     goodsAfterDiscount,
     shippingCharge,
     actualShippingCharge,
@@ -7299,7 +7372,19 @@ app.post('/api/orders', orderCreateRateLimit, requireTrustedBrowserOrigin, mongo
     assertDeclaredMoneyMatches('Payable total', ['declaredTotal', 'total'], body, pricing.total);
 
     const pricedItems = pricing.pricedItems;
-    const { subtotal, discount, couponCode, goodsAfterDiscount, shippingCharge, actualShippingCharge, freeShippingApplied, total, shippingPlaceholder, ship } =
+    const {
+      subtotal,
+      discount,
+      couponCode,
+      couponPaymentMethodScope,
+      goodsAfterDiscount,
+      shippingCharge,
+      actualShippingCharge,
+      freeShippingApplied,
+      total,
+      shippingPlaceholder,
+      ship,
+    } =
       pricing;
 
     const orderId = `ORD-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -7323,6 +7408,7 @@ app.post('/api/orders', orderCreateRateLimit, requireTrustedBrowserOrigin, mongo
       subtotal,
       discount,
       couponCode,
+      couponPaymentMethodScope,
       goodsTotal: goodsAfterDiscount,
       shippingCharge,
       actualShippingCharge,
@@ -7509,6 +7595,7 @@ app.post('/api/payments/razorpay/session', paymentCreateRateLimit, requireTruste
       subtotal,
       discount,
       couponCode,
+      couponPaymentMethodScope,
       goodsAfterDiscount,
       shippingCharge,
       actualShippingCharge,
@@ -7539,6 +7626,7 @@ app.post('/api/payments/razorpay/session', paymentCreateRateLimit, requireTruste
       subtotal,
       discount,
       couponCode,
+      couponPaymentMethodScope,
       goodsTotal: goodsAfterDiscount,
       shippingCharge,
       actualShippingCharge,
@@ -7676,6 +7764,16 @@ app.post('/api/payments/razorpay/verify', paymentVerifyRateLimit, requireTrusted
       return;
     }
 
+    const couponScopeAtVerify = normalizeCouponPaymentMethodScope(session.couponPaymentMethodScope);
+    if (session.couponCode && !couponScopeAllowsPaymentMethod(couponScopeAtVerify, 'razorpay')) {
+      await PaymentSession.updateOne(
+        { _id: sessionId },
+        { $set: { status: 'failed', error: 'Coupon scope does not match payment method' } }
+      );
+      res.status(400).json({ error: 'This coupon is not valid for online payments.' });
+      return;
+    }
+
     // Deduct inventory only after payment is captured.
     try {
       await decrementInventoryForOrderLines(session.items, 'razorpay');
@@ -7721,6 +7819,7 @@ app.post('/api/payments/razorpay/verify', paymentVerifyRateLimit, requireTrusted
       subtotal: Number(session.subtotal ?? 0),
       discount: Number(session.discount ?? 0),
       couponCode: session.couponCode,
+      couponPaymentMethodScope: session.couponCode ? couponScopeAtVerify : undefined,
       goodsTotal: session.goodsTotal != null ? Number(session.goodsTotal) : Math.max(0, Number(session.subtotal ?? 0) - Number(session.discount ?? 0)),
       shippingCharge: Number(session.shippingCharge ?? 0),
       freeShippingApplied: !!session.freeShippingApplied,
