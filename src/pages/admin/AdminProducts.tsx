@@ -263,6 +263,9 @@ function normalizeProductForEditing(p: Product): Partial<Product> {
                 attrs?: unknown;
                 images?: unknown;
                 image?: unknown;
+                previewImage?: unknown;
+                displayName?: unknown;
+                sizes?: unknown;
                 stock?: unknown;
               };
               return {
@@ -271,6 +274,9 @@ function normalizeProductForEditing(p: Product): Partial<Product> {
                 attrs: toAttrs(itAny.attrs),
                 images: toStrList(itAny.images),
                 image: toStr(itAny.image).trim() || undefined,
+                previewImage: toStr(itAny.previewImage).trim() || undefined,
+                displayName: toStr(itAny.displayName).trim() || undefined,
+                sizes: toStrList(itAny.sizes),
                 stock: normalizeNonNegativeStock(itAny.stock),
               } as VariantModelItem;
             })
@@ -383,6 +389,8 @@ export default function AdminProducts() {
 
   const vmFileRef = useRef<HTMLInputElement>(null);
   const vmUploadIdxRef = useRef<number | null>(null);
+  const vmPreviewFileRef = useRef<HTMLInputElement>(null);
+  const vmPreviewUploadIdxRef = useRef<number | null>(null);
   const [vmUrlDraft, setVmUrlDraft] = useState<Record<number, string>>({});
 
   const [q, setQ] = useState('');
@@ -454,8 +462,14 @@ export default function AdminProducts() {
     vmUploadIdxRef.current = idx;
     vmFileRef.current?.click();
   };
+  const openVmPreviewUpload = (idx: number) => {
+    vmPreviewUploadIdxRef.current = idx;
+    vmPreviewFileRef.current?.click();
+  };
 
   const labelForVmItem = (it: VariantModelItem): string => {
+    const explicit = toStr((it as { displayName?: unknown })?.displayName).trim();
+    if (explicit) return explicit;
     const vm = editing?.variantModel;
     if (!vm || !Array.isArray(vm.types) || vm.types.length === 0) return String(it?.key ?? '').trim() || 'Variant';
     if (vm.types.length === 1) {
@@ -505,6 +519,9 @@ export default function AdminProducts() {
         stock?: unknown;
         image?: unknown;
         images?: unknown;
+        previewImage?: unknown;
+        displayName?: unknown;
+        sizes?: unknown;
       };
       const price = Number(row.price);
       const normalizedPrice = Number.isFinite(price) ? price : Number(editing.price) || 0;
@@ -512,14 +529,17 @@ export default function AdminProducts() {
         ...it,
         key: toStr(row.key).trim(),
         attrs: toAttrs(row.attrs),
+        displayName: toStr(row.displayName).trim() || undefined,
         sku: toStr(row.sku).trim(),
         price: normalizedPrice,
         originalPrice: row.originalPrice != null ? Number(row.originalPrice) : undefined,
         onlinePrice: row.onlinePrice != null ? Number(row.onlinePrice) : undefined,
         codPrice: Number.isFinite(normalizedPrice) ? normalizedPrice : undefined,
         stock: normalizeNonNegativeStock(row.stock),
+        previewImage: toStr(row.previewImage).trim() || undefined,
         image: toStr(row.image).trim() || undefined,
         images: toStrList(row.images),
+        sizes: toStrList(row.sizes),
       } as VariantModelItem;
     });
 
@@ -567,13 +587,16 @@ export default function AdminProducts() {
         key,
         attrs,
         isDefault: false,
+        displayName: newValue,
         sku: '',
         price: basePrice,
         originalPrice: baseOriginal,
         onlinePrice: baseOnline,
         codPrice: basePrice,
         stock: 0,
+        previewImage: undefined,
         images: [],
+        sizes: [],
       });
     }
 
@@ -660,6 +683,38 @@ export default function AdminProducts() {
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not process images');
+    } finally {
+      setImageBusy(false);
+    }
+  };
+
+  const handleVmPreviewImageFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] ?? null;
+    e.target.value = '';
+    const idx = vmPreviewUploadIdxRef.current;
+    vmPreviewUploadIdxRef.current = null;
+    if (!file || !editing?.variantModel?.items?.length || idx === null) return;
+    setImageBusy(true);
+    try {
+      const dataUrl = await processProductImageFile(file, { maxEdge, quality: qualityPct / 100 });
+      let url = dataUrl;
+      try {
+        const blob = await (await fetch(dataUrl)).blob();
+        url = await uploadProductImage(blob, `product-${Date.now()}-vm-preview-${idx}.jpg`);
+      } catch {
+        // Keep processed data URL locally if upload is unavailable.
+      }
+      setEditing((p) => {
+        if (!p?.variantModel || !Array.isArray(p.variantModel.items)) return p;
+        const items = [...p.variantModel.items];
+        const cur = items[idx];
+        if (!cur) return p;
+        items[idx] = { ...cur, previewImage: url };
+        return { ...p, variantModel: { ...p.variantModel, items } };
+      });
+      toast.success('Variant preview image updated');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not process preview image');
     } finally {
       setImageBusy(false);
     }
@@ -1366,6 +1421,13 @@ export default function AdminProducts() {
                       className="hidden"
                       onChange={handleVmImageFiles}
                     />
+                    <input
+                      ref={vmPreviewFileRef}
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleVmPreviewImageFiles}
+                    />
                     <div className="space-y-2">
                       <div className="flex justify-between gap-2 text-xs">
                         <Label htmlFor="img-max-edge">Max edge (px)</Label>
@@ -1399,6 +1461,12 @@ export default function AdminProducts() {
                       {(Array.isArray(editing.variantModel.items) ? (editing.variantModel.items as VariantModelItem[]) : []).map((it, idx) => {
                         const name = labelForVmItem(it);
                         const imgs = (Array.isArray(it?.images) ? it.images : []).map(u => toStr(u).trim()).filter(Boolean);
+                        const previewImage = toStr((it as { previewImage?: unknown })?.previewImage).trim();
+                        const previewFallback =
+                          previewImage ||
+                          imgs[0] ||
+                          toStr((it as { image?: unknown })?.image).trim() ||
+                          toStr(editing.images?.[0]).trim();
                         return (
                           <div key={String(it?.key ?? idx)} className="rounded-xl border border-border bg-background p-4 shadow-sm space-y-3">
                             <div className="flex flex-wrap items-center gap-2">
@@ -1425,6 +1493,56 @@ export default function AdminProducts() {
                                 variant="outline"
                                 size="sm"
                                 className="h-9"
+                                disabled={imageBusy || idx === 0}
+                                onClick={() =>
+                                  setEditing((p) => {
+                                    if (!p?.variantModel || !Array.isArray(p.variantModel.items) || idx <= 0) return p;
+                                    const items = [...p.variantModel.items];
+                                    const hit = items[idx];
+                                    items[idx] = items[idx - 1];
+                                    items[idx - 1] = hit;
+                                    return { ...p, variantModel: { ...p.variantModel, items } };
+                                  })
+                                }
+                              >
+                                ↑
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-9"
+                                disabled={imageBusy || idx >= ((editing.variantModel?.items?.length ?? 0) - 1)}
+                                onClick={() =>
+                                  setEditing((p) => {
+                                    if (!p?.variantModel || !Array.isArray(p.variantModel.items)) return p;
+                                    const last = p.variantModel.items.length - 1;
+                                    if (idx >= last) return p;
+                                    const items = [...p.variantModel.items];
+                                    const hit = items[idx];
+                                    items[idx] = items[idx + 1];
+                                    items[idx + 1] = hit;
+                                    return { ...p, variantModel: { ...p.variantModel, items } };
+                                  })
+                                }
+                              >
+                                ↓
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-9"
+                                onClick={() => openVmPreviewUpload(idx)}
+                                disabled={imageBusy}
+                              >
+                                <ImageIcon className="h-3.5 w-3.5 mr-1" /> Preview
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-9"
                                 onClick={() => openVmUpload(idx)}
                                 disabled={imageBusy}
                               >
@@ -1435,6 +1553,58 @@ export default function AdminProducts() {
                                   Default
                                 </span>
                               ) : null}
+                            </div>
+
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                              <div className="sm:col-span-2">
+                                <Label className="text-[11px] text-muted-foreground">Display name (optional)</Label>
+                                <Input
+                                  className="h-9 mt-1"
+                                  placeholder="Black / Grey"
+                                  value={toStr((it as { displayName?: unknown })?.displayName)}
+                                  onChange={(e) =>
+                                    setEditing((p) => {
+                                      if (!p?.variantModel || !Array.isArray(p.variantModel.items)) return p;
+                                      const items = [...p.variantModel.items];
+                                      const cur = items[idx];
+                                      if (!cur) return p;
+                                      items[idx] = { ...cur, displayName: e.target.value || undefined };
+                                      return { ...p, variantModel: { ...p.variantModel, items } };
+                                    })
+                                  }
+                                />
+                              </div>
+                              <div className="sm:col-span-1">
+                                <Label className="text-[11px] text-muted-foreground">Preview image</Label>
+                                <div className="mt-1 flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-2 py-2">
+                                  <div className="h-10 w-10 shrink-0 overflow-hidden rounded-md border border-border bg-background">
+                                    {previewFallback ? (
+                                      <img src={previewFallback} alt="" className="h-full w-full object-cover" />
+                                    ) : (
+                                      <div className="grid h-full w-full place-items-center text-[10px] text-muted-foreground">N/A</div>
+                                    )}
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 px-2 text-[11px]"
+                                    disabled={!previewImage}
+                                    onClick={() =>
+                                      setEditing((p) => {
+                                        if (!p?.variantModel || !Array.isArray(p.variantModel.items)) return p;
+                                        const items = [...p.variantModel.items];
+                                        const cur = items[idx];
+                                        if (!cur) return p;
+                                        items[idx] = { ...cur, previewImage: undefined };
+                                        return { ...p, variantModel: { ...p.variantModel, items } };
+                                      })
+                                    }
+                                  >
+                                    Clear
+                                  </Button>
+                                </div>
+                              </div>
                             </div>
 
                             <div className="flex flex-wrap gap-2">
@@ -1464,6 +1634,29 @@ export default function AdminProducts() {
                                   </div>
                                 ))
                               )}
+                            </div>
+
+                            <div className="space-y-1">
+                              <Label className="text-[11px] text-muted-foreground">Variant sizes (optional, comma separated)</Label>
+                              <Input
+                                className="h-9"
+                                placeholder="S, M, L"
+                                value={Array.isArray((it as { sizes?: unknown })?.sizes) ? toStrList((it as { sizes?: unknown })?.sizes).join(', ') : ''}
+                                onChange={(e) =>
+                                  setEditing((p) => {
+                                    if (!p?.variantModel || !Array.isArray(p.variantModel.items)) return p;
+                                    const items = [...p.variantModel.items];
+                                    const cur = items[idx];
+                                    if (!cur) return p;
+                                    const sizes = e.target.value
+                                      .split(',')
+                                      .map((s) => s.trim())
+                                      .filter(Boolean);
+                                    items[idx] = { ...cur, sizes: sizes.length ? sizes : undefined };
+                                    return { ...p, variantModel: { ...p.variantModel, items } };
+                                  })
+                                }
+                              />
                             </div>
 
                             <div className="flex flex-col gap-2 sm:flex-row sm:items-end">

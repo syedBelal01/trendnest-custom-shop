@@ -85,6 +85,8 @@ export interface Product {
       attrs: Record<string, string>;
       /** True when this variant should be selected by default. */
       isDefault?: boolean;
+      /** Optional admin label for storefront selector, e.g. "Black / Grey". */
+      displayName?: string;
       sku: string;
       price: number;
       /** Optional MRP / cut price for this variant (overrides product originalPrice). */
@@ -92,10 +94,14 @@ export interface Product {
       onlinePrice?: number;
       codPrice?: number;
       stock: number;
+      /** Optional dedicated thumbnail image for PDP variant-selector chips. */
+      previewImage?: string;
       /** Legacy single image. Prefer `images`. */
       image?: string;
       /** Variant-specific gallery images; first image is treated as primary. */
       images?: string[];
+      /** Optional per-variant size list (future-ready). Falls back to product.sizes. */
+      sizes?: string[];
     }>;
   };
 

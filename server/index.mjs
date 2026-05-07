@@ -5995,14 +5995,19 @@ function draftToProductPayload(draft) {
         key: String(it?.key ?? '').trim(),
         attrs: it?.attrs && typeof it.attrs === 'object' ? it.attrs : {},
         isDefault: !!it?.isDefault,
+        displayName: it?.displayName != null ? String(it.displayName).trim() || undefined : undefined,
         sku: String(it?.sku ?? '').trim(),
         price: Number(it?.price ?? 0),
         originalPrice: it?.originalPrice != null ? Number(it.originalPrice) : undefined,
         onlinePrice: it?.onlinePrice != null ? Number(it.onlinePrice) : undefined,
         codPrice: Number.isFinite(Number(it?.price)) ? Number(it.price) : undefined,
         stock: Number(it?.stock ?? 0) || 0,
+        previewImage: it?.previewImage != null ? String(it.previewImage).trim() || undefined : undefined,
         image: it?.image ? String(it.image) : undefined,
         images: Array.isArray(it?.images) ? it.images.map((u) => String(u)).filter(Boolean).slice(0, 8) : undefined,
+        sizes: Array.isArray(it?.sizes)
+          ? it.sizes.map((s) => String(s).trim()).filter(Boolean)
+          : undefined,
       })),
     },
   };
@@ -6323,7 +6328,15 @@ app.post('/api/products', mongoReady, async (req, res) => {
           ...vm,
           items: items.map((it) => {
             const price = Number(it?.price);
-            return { ...it, codPrice: Number.isFinite(price) ? price : undefined };
+            return {
+              ...it,
+              codPrice: Number.isFinite(price) ? price : undefined,
+              displayName: it?.displayName != null ? String(it.displayName).trim() || undefined : undefined,
+              previewImage: it?.previewImage != null ? String(it.previewImage).trim() || undefined : undefined,
+              image: it?.image != null ? String(it.image).trim() || undefined : undefined,
+              images: Array.isArray(it?.images) ? it.images.map((u) => String(u).trim()).filter(Boolean) : undefined,
+              sizes: Array.isArray(it?.sizes) ? it.sizes.map((s) => String(s).trim()).filter(Boolean) : undefined,
+            };
           }),
         };
       })(),
@@ -6456,6 +6469,9 @@ function buildProductUpdateSet(src) {
           const price = Number(it?.price);
           const images = Array.isArray(it?.images) ? it.images.map((u) => String(u).trim()).filter(Boolean) : undefined;
           const image = it?.image != null ? String(it.image).trim() : undefined;
+          const previewImage = it?.previewImage != null ? String(it.previewImage).trim() : undefined;
+          const displayName = it?.displayName != null ? String(it.displayName).trim() : undefined;
+          const sizes = Array.isArray(it?.sizes) ? it.sizes.map((s) => String(s).trim()).filter(Boolean) : undefined;
           const stock = Math.max(0, Math.floor(Number(it?.stock) || 0));
           return {
             ...it,
@@ -6465,6 +6481,9 @@ function buildProductUpdateSet(src) {
             codPrice: Number.isFinite(price) ? price : undefined,
             images,
             image,
+            previewImage: previewImage || undefined,
+            displayName: displayName || undefined,
+            sizes: sizes && sizes.length ? sizes : undefined,
           };
         });
         const stockSum = normalizedItems.reduce((acc, it) => acc + Math.max(0, Math.floor(Number(it?.stock) || 0)), 0);

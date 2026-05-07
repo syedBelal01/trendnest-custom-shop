@@ -18,14 +18,17 @@ type DraftVariantItem = {
   key: string;
   attrs: Record<string, string>;
   isDefault?: boolean;
+  displayName?: string;
   sku: string;
   price: number;
   originalPrice?: number;
   onlinePrice?: number;
   codPrice?: number;
   stock: number;
+  previewImage?: string;
   images?: string[];
   image?: string;
+  sizes?: string[];
 };
 
 function normalizeVariantTypes(raw: unknown): DraftVariantType[] {
@@ -51,8 +54,11 @@ function normalizeVariantItems(raw: unknown): DraftVariantItem[] {
       onlinePrice: (it as any)?.onlinePrice != null ? Number((it as any).onlinePrice) : undefined,
       codPrice: (it as any)?.codPrice != null ? Number((it as any).codPrice) : undefined,
       stock: Number((it as any)?.stock ?? 0) || 0,
+      displayName: (it as any)?.displayName != null ? String((it as any).displayName).trim() || undefined : undefined,
+      previewImage: (it as any)?.previewImage ? String((it as any).previewImage).trim() : undefined,
       images: Array.isArray((it as any)?.images) ? (it as any).images.map((u: unknown) => String(u)).filter(Boolean).slice(0, 8) : undefined,
       image: (it as any)?.image ? String((it as any).image) : undefined,
+      sizes: Array.isArray((it as any)?.sizes) ? (it as any).sizes.map((s: unknown) => String(s).trim()).filter(Boolean) : undefined,
     }))
     .filter((it) => it.key);
 }
@@ -120,17 +126,20 @@ function mergeVariantItems(
 
     return hit
       ? { ...hit, attrs: c.attrs, key: c.key }
-      : {
+        : {
           key: c.key,
           attrs: c.attrs,
           isDefault: false,
+          displayName: undefined,
           sku: '',
           price: 0,
           originalPrice: undefined,
           onlinePrice: undefined,
           codPrice: undefined,
           stock: 0,
+          previewImage: undefined,
           images: [],
+          sizes: undefined,
         };
   });
 }
@@ -912,6 +921,16 @@ function VariantsStep() {
                     idx={idx}
                     item={it}
                     items={items}
+                    canMoveUp={idx > 0}
+                    canMoveDown={idx < items.length - 1}
+                    onMoveRow={(from, to) => {
+                      if (from < 0 || to < 0 || from === to || to >= items.length) return;
+                      const next = [...items];
+                      const hit = next[from];
+                      next[from] = next[to];
+                      next[to] = hit;
+                      updateDraftLocal({ variants: { items: next } });
+                    }}
                     onChangeItems={(next) =>
                       updateDraftLocal({ variants: { items: next } })
                     }
@@ -921,7 +940,23 @@ function VariantsStep() {
                   type="button"
                   variant="secondary"
                   onClick={() => {
-                    const next = [...items, { key: `custom-${Date.now()}`, attrs: {}, sku: '', price: 0, onlinePrice: undefined, codPrice: undefined, stock: 0, image: undefined }];
+                    const next = [
+                      ...items,
+                      {
+                        key: `custom-${Date.now()}`,
+                        attrs: {},
+                        displayName: undefined,
+                        sku: '',
+                        price: 0,
+                        onlinePrice: undefined,
+                        codPrice: undefined,
+                        stock: 0,
+                        previewImage: undefined,
+                        image: undefined,
+                        images: [],
+                        sizes: undefined,
+                      },
+                    ];
                     updateDraftLocal({ variants: { items: next } });
                   }}
                 >
@@ -944,9 +979,13 @@ function VariantRow(props: {
   idx: number;
   item: any;
   items: any[];
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  onMoveRow: (from: number, to: number) => void;
   onChangeItems: (next: any[]) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const previewFileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
 
   const uploadImages = async (files: File[]) => {
@@ -974,6 +1013,24 @@ function VariantRow(props: {
   const images = (Array.isArray((props.item as any).images) ? (props.item as any).images : [])
     .map((u: unknown) => String(u))
     .filter(Boolean);
+  const previewImage = String((props.item as any).previewImage ?? '').trim();
+
+  const uploadPreviewImage = async (file: File) => {
+    setBusy(true);
+    try {
+      const dataUrl = await processProductImageFile(file, { maxEdge: 900, quality: 0.9 });
+      const blob = await (await fetch(dataUrl)).blob();
+      const url = await uploadProductImage(blob, `draft-${props.draftId}-variant-preview-${Date.now()}-${props.idx}.jpg`);
+      const next = [...props.items];
+      next[props.idx] = { ...props.item, previewImage: url };
+      props.onChangeItems(next);
+      toast.success('Variant preview image uploaded');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Could not upload preview image');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div className="rounded-lg border p-3 space-y-2">
@@ -988,6 +1045,35 @@ function VariantRow(props: {
           )}
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={!props.canMoveUp}
+            onClick={() => props.onMoveRow(props.idx, props.idx - 1)}
+          >
+            Move up
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={!props.canMoveDown}
+            onClick={() => props.onMoveRow(props.idx, props.idx + 1)}
+          >
+            Move down
+          </Button>
+          <input
+            ref={previewFileRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0] ?? null;
+              e.target.value = '';
+              if (file) void uploadPreviewImage(file);
+            }}
+          />
           <input
             ref={fileRef}
             type="file"
@@ -1000,10 +1086,43 @@ function VariantRow(props: {
               if (files.length) void uploadImages(files);
             }}
           />
+          <Button type="button" size="sm" variant="secondary" disabled={busy} onClick={() => previewFileRef.current?.click()}>
+            {busy ? 'Uploading…' : previewImage ? 'Replace preview' : 'Upload preview'}
+          </Button>
           <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => fileRef.current?.click()}>
             {busy ? 'Uploading…' : images.length ? 'Add/Replace images' : 'Upload images'}
           </Button>
         </div>
+      </div>
+
+      <div className="flex items-center gap-3 rounded-md border bg-muted/20 px-2 py-2">
+        <div className="h-14 w-14 overflow-hidden rounded-md border bg-background">
+          {previewImage ? (
+            <img src={previewImage} alt="Variant preview" className="h-full w-full object-cover" />
+          ) : images[0] ? (
+            <img src={images[0]} alt="Variant preview fallback" className="h-full w-full object-cover" />
+          ) : (
+            <div className="grid h-full w-full place-items-center text-[10px] text-muted-foreground">No preview</div>
+          )}
+        </div>
+        <div className="text-[11px] text-muted-foreground">
+          Selector thumbnail: uses preview image first, otherwise first gallery image.
+        </div>
+        {previewImage ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="ml-auto"
+            onClick={() => {
+              const next = [...props.items];
+              next[props.idx] = { ...props.item, previewImage: undefined };
+              props.onChangeItems(next);
+            }}
+          >
+            Clear preview
+          </Button>
+        ) : null}
       </div>
 
       {images.length > 0 && (
@@ -1033,9 +1152,19 @@ function VariantRow(props: {
         </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-6 gap-2">
+      <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
         <Input
-          className="sm:col-span-2"
+          className="sm:col-span-4"
+          placeholder="Display name (optional, e.g. Black / Grey)"
+          value={String((props.item as any).displayName ?? '')}
+          onChange={e => {
+            const next = [...props.items];
+            next[props.idx] = { ...props.item, displayName: e.target.value };
+            props.onChangeItems(next);
+          }}
+        />
+        <Input
+          className="sm:col-span-4"
           placeholder="Enter unique product SKU (e.g., SHIRT-BLACK-M)"
           value={String(props.item.sku ?? '')}
           onChange={e => {
@@ -1045,7 +1174,21 @@ function VariantRow(props: {
           }}
         />
         <Input
-          className="sm:col-span-1"
+          className="sm:col-span-4"
+          placeholder="Variant sizes (optional, comma separated)"
+          value={Array.isArray((props.item as any).sizes) ? (props.item as any).sizes.join(', ') : ''}
+          onChange={e => {
+            const sizes = e.target.value
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean);
+            const next = [...props.items];
+            next[props.idx] = { ...props.item, sizes: sizes.length ? sizes : undefined };
+            props.onChangeItems(next);
+          }}
+        />
+        <Input
+          className="sm:col-span-2"
           type="number"
           inputMode="decimal"
           placeholder="Enter regular selling price"
@@ -1058,7 +1201,7 @@ function VariantRow(props: {
           }}
         />
         <Input
-          className="sm:col-span-1"
+          className="sm:col-span-2"
           type="number"
           inputMode="decimal"
           placeholder="MRP / original price (optional)"
@@ -1070,7 +1213,7 @@ function VariantRow(props: {
           }}
         />
         <Input
-          className="sm:col-span-1"
+          className="sm:col-span-2"
           type="number"
           inputMode="decimal"
           placeholder="Price for online payment (optional)"
@@ -1083,7 +1226,7 @@ function VariantRow(props: {
         />
         {/* COD price removed: regular price is used for COD */}
         <Input
-          className="sm:col-span-1"
+          className="sm:col-span-2"
           type="number"
           inputMode="numeric"
           placeholder="Enter available quantity"

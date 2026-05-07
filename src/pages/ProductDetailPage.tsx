@@ -144,6 +144,17 @@ function dedupeImageUrls(urls: string[]): string[] {
   return urls.filter(u => { const s = String(u).trim(); if (!s || seen.has(s)) return false; seen.add(s); return true; });
 }
 
+function variantSelectorThumb(item: NonNullable<Product['variantModel']>['items'][number] | null | undefined, product: Product): string {
+  if (!item) return String(product.images?.[0] ?? '').trim();
+  const preview = String(item.previewImage ?? '').trim();
+  if (preview) return preview;
+  const gallery = Array.isArray(item.images) ? item.images.map((u) => String(u).trim()).filter(Boolean) : [];
+  if (gallery[0]) return gallery[0];
+  const legacy = String(item.image ?? '').trim();
+  if (legacy) return legacy;
+  return String(product.images?.[0] ?? '').trim();
+}
+
 function variantOptionLabel(product: Product): string {
   if (product.subcategory === 'Belts') return 'Leather color';
   if (product.category === 'home') return 'Finish';
@@ -311,6 +322,98 @@ export default function ProductDetailPage() {
     });
     return hit ?? selectedVariantItem ?? items[0] ?? null;
   }, [product, imageDriverTypeName, variantAttrs, selectedVariantItem]);
+  const variantSizes = useMemo(() => {
+    if (!product) return [];
+    const source = hasVariantModel && Array.isArray(selectedVariantItem?.sizes) && selectedVariantItem.sizes.length
+      ? selectedVariantItem.sizes
+      : (product.sizes ?? []);
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const raw of source) {
+      const s = String(raw ?? '').trim();
+      if (!s) continue;
+      const key = normVal(s);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(s);
+    }
+    return out;
+  }, [product, hasVariantModel, selectedVariantItem]);
+  const imageTypeChoices = useMemo(() => {
+    if (!product?.variantModel?.items?.length || !imageDriverTypeName) return [];
+    const items = product.variantModel.items;
+    const type = product.variantModel.types.find((t) => normKey(String(t?.name ?? '')) === normKey(imageDriverTypeName))
+      ?? product.variantModel.types[0];
+    const typeName = String(type?.name ?? imageDriverTypeName).trim();
+    if (!typeName) return [];
+    const allValues = Array.isArray(type?.values) && type.values.length
+      ? type.values
+      : Array.from(new Set(items.map((it) => getAttrValueCaseInsensitive(it.attrs, typeName)).filter(Boolean)));
+    const otherTypeNames = (product.variantModel.types ?? [])
+      .map((t) => String(t?.name ?? '').trim())
+      .filter((n) => n && normKey(n) !== normKey(typeName));
+    return allValues
+      .map((value) => {
+        const rawValue = String(value ?? '').trim();
+        if (!rawValue) return null;
+        const matches = items.filter((it) => {
+          const attrs = (it as { attrs?: Record<string, string> }).attrs;
+          return normVal(getAttrValueCaseInsensitive(attrs, typeName)) === normVal(rawValue);
+        });
+        if (!matches.length) return null;
+        const bestForCurrentSelection = matches.find((it) => {
+          const attrs = (it as { attrs?: Record<string, string> }).attrs;
+          return otherTypeNames.every((other) => {
+            const left = normVal(getAttrValueCaseInsensitive(attrs, other));
+            const right = normVal(String(variantAttrs[other] ?? '').trim());
+            return !right || left === right;
+          });
+        });
+        const selected = bestForCurrentSelection ?? matches.find((it) => !!it?.isDefault) ?? matches[0];
+        return {
+          typeName,
+          value: rawValue,
+          item: selected,
+          thumb: variantSelectorThumb(selected, product),
+          label: String(selected?.displayName ?? rawValue).trim() || rawValue,
+        };
+      })
+      .filter((x): x is { typeName: string; value: string; item: NonNullable<Product['variantModel']>['items'][number]; thumb: string; label: string } => !!x);
+  }, [product, imageDriverTypeName, variantAttrs]);
+  const selectedImageTypeLabel = useMemo(() => {
+    if (!imageDriverTypeName) return '';
+    const selectedValue = normVal(getAttrValueCaseInsensitive(variantAttrs, imageDriverTypeName));
+    if (!selectedValue) return '';
+    const hit = imageTypeChoices.find((x) => normVal(x.value) === selectedValue);
+    if (hit?.label) return hit.label;
+    const selectedName = String(selectedImageVariantItem?.displayName ?? '').trim();
+    if (selectedName) return selectedName;
+    return getAttrValueCaseInsensitive(selectedImageVariantItem?.attrs, imageDriverTypeName) || '';
+  }, [imageDriverTypeName, imageTypeChoices, variantAttrs, selectedImageVariantItem]);
+  const applyVariantAttrSelection = (typeName: string, value: string) => {
+    if (!product?.variantModel) return;
+    const next = { ...variantAttrs, [typeName]: value };
+    setVariantAttrs(next);
+    const types = product.variantModel.types;
+    const items = product.variantModel.items;
+    const hit = items.find((x) => {
+      const attrs = (x as { attrs?: Record<string, string> }).attrs;
+      return types.every(
+        (ty) =>
+          normVal(getAttrValueCaseInsensitive(attrs, ty.name)) ===
+          normVal(String(next[ty.name] ?? '').trim())
+      );
+    }) ?? null;
+    if (hit) {
+      setSelectedVariantKey(hit.key);
+      return;
+    }
+    const first = items[0];
+    if (first) {
+      setSelectedVariantKey(first.key);
+      setVariantAttrs({ ...(first.attrs ?? {}) });
+    }
+  };
 
   const pdpGoodsLineTotal = useMemo(() => {
     if (!product) return 0;
@@ -336,7 +439,7 @@ export default function ProductDetailPage() {
 
   useEffect(() => {
     if (!product) return;
-    setSelectedSize(product.sizes?.[0] || '');
+    setSelectedSize('');
     if (product.variantModel?.items?.length) {
       const items = product.variantModel.items;
       const first = items.find(x => x.isDefault) ?? items[0];
@@ -351,6 +454,19 @@ export default function ProductDetailPage() {
     setSelectedSleeve(product.sleeveTypes?.[0] || '');
     setQty(1);
   }, [product]);
+
+  useEffect(() => {
+    if (!variantSizes.length) {
+      setSelectedSize('');
+      return;
+    }
+    setSelectedSize((prev) => {
+      const current = String(prev ?? '').trim();
+      if (!current) return variantSizes[0];
+      const stillExists = variantSizes.some((s) => normVal(s) === normVal(current));
+      return stillExists ? current : variantSizes[0];
+    });
+  }, [variantSizes]);
 
   useEffect(() => {
     const pin = pincode.replace(/[^\d]/g, '').slice(0, 6);
@@ -372,7 +488,7 @@ export default function ProductDetailPage() {
                 cartLineId: 'pdp',
                 product,
                 quantity: lineQty,
-                selectedSize: selectedSize || product.sizes?.[0],
+                selectedSize: selectedSize || variantSizes[0],
                 selectedVariant: hasVM ? selectedVariantKey : selectedVariant,
                 selectedSleeve: selectedSleeve || product.sleeveTypes?.[0],
               } as CartItem,
@@ -397,6 +513,7 @@ export default function ProductDetailPage() {
     pdpGoodsLineTotal,
     qty,
     selectedSize,
+    variantSizes,
     selectedVariant,
     selectedVariantKey,
     selectedSleeve,
@@ -540,7 +657,7 @@ export default function ProductDetailPage() {
 
   const handleAddToCart = () => addItem({
     product, quantity: qty,
-    selectedSize: product.sizes?.length ? selectedSize : undefined,
+    selectedSize: variantSizes.length ? selectedSize : undefined,
     selectedVariant: hasVariantModel ? (selectedVariantItem?.key ?? undefined) : variantNames.length ? selectedVariant : undefined,
     selectedSleeve: product.sleeveTypes?.length ? selectedSleeve : undefined,
   });
@@ -761,11 +878,11 @@ export default function ProductDetailPage() {
             </div>
 
             {/* Size selector */}
-            {product.sizes && product.sizes.length > 0 && (
+            {variantSizes.length > 0 && (
               <div className="space-y-2">
                 <p className="text-sm font-semibold text-foreground">Size</p>
                 <div className="flex gap-2 flex-wrap">
-                  {product.sizes.map(s => (
+                  {variantSizes.map(s => (
                     <button key={s} type="button" onClick={() => setSelectedSize(s)} className={pillBtn(selectedSize === s)}>{s}</button>
                   ))}
                 </div>
@@ -789,33 +906,70 @@ export default function ProductDetailPage() {
               <div className="space-y-3">
                 {product.variantModel.types.map(t => (
                   <div key={t.name} className="space-y-2">
-                    <p className="text-sm font-semibold text-foreground">{t.name}</p>
-                    <div className="flex gap-2 flex-wrap">
-                      {t.values.map(v => {
-                        const active = normVal(String(variantAttrs[t.name] ?? '')) === normVal(String(v));
-                        return (
-                          <button
-                            key={v}
-                            type="button"
-                            onClick={() => {
-                              const next = { ...variantAttrs, [t.name]: v };
-                              setVariantAttrs(next);
-                              const types = product.variantModel!.types;
-                              const items = product.variantModel!.items;
-                              const hit = items.find(x => {
-                                const attrs = (x as { attrs?: Record<string, string> }).attrs;
-                                return types.every(ty => normVal(getAttrValueCaseInsensitive(attrs, ty.name)) === normVal(String(next[ty.name] ?? '').trim()));
-                              }) ?? null;
-                              if (hit) { setSelectedVariantKey(hit.key); }
-                              else { const first = items[0]; if (first) { setSelectedVariantKey(first.key); setVariantAttrs({ ...(first.attrs ?? {}) }); } }
-                            }}
-                            className={pillBtn(active)}
-                          >
-                            {v}
-                          </button>
-                        );
-                      })}
-                    </div>
+                    {normKey(t.name) === normKey(imageDriverTypeName) && imageTypeChoices.length > 0 ? (
+                      <div className="space-y-2">
+                        <p className="text-sm font-semibold text-foreground">
+                          {t.name}
+                          {selectedImageTypeLabel ? (
+                            <span className="ml-2 text-muted-foreground font-medium">: {selectedImageTypeLabel}</span>
+                          ) : null}
+                        </p>
+                        <div className="flex items-start gap-2 overflow-x-auto pb-1 scrollbar-none">
+                          {imageTypeChoices.map((choice) => {
+                            const active = normVal(String(variantAttrs[t.name] ?? '')) === normVal(choice.value);
+                            return (
+                              <div key={`${t.name}-${choice.value}-${choice.item.key}`} className="w-20 shrink-0 space-y-1">
+                                <button
+                                  type="button"
+                                  title={choice.label}
+                                  onClick={() => applyVariantAttrSelection(t.name, choice.value)}
+                                  className={`group relative h-20 w-20 shrink-0 overflow-hidden rounded-xl border-2 bg-white transition-all duration-200 ${
+                                    active
+                                      ? 'border-black shadow-md scale-[1.02]'
+                                      : 'border-slate-200 hover:border-slate-400 hover:shadow-sm'
+                                  }`}
+                                >
+                                  {choice.thumb ? (
+                                    <img
+                                      src={choice.thumb}
+                                      alt={`${product.name} ${choice.label}`}
+                                      loading="lazy"
+                                      className="h-full w-full object-cover"
+                                    />
+                                  ) : (
+                                    <div className="grid h-full w-full place-items-center text-[11px] text-muted-foreground">
+                                      {choice.label}
+                                    </div>
+                                  )}
+                                </button>
+                                <p className={`truncate text-center text-xs font-semibold ${active ? 'text-foreground' : 'text-muted-foreground'}`}>
+                                  {choice.label}
+                                </p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <p className="text-sm font-semibold text-foreground">{t.name}</p>
+                        <div className="flex gap-2 flex-wrap">
+                          {t.values.map(v => {
+                            const active = normVal(String(variantAttrs[t.name] ?? '')) === normVal(String(v));
+                            return (
+                              <button
+                                key={v}
+                                type="button"
+                                onClick={() => applyVariantAttrSelection(t.name, v)}
+                                className={pillBtn(active)}
+                              >
+                                {v}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>
