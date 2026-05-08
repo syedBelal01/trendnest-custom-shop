@@ -1,7 +1,8 @@
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useCart } from '@/contexts/CartContext';
 import { useAuth } from '@/contexts/AuthContext';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { categories as storefrontCategories } from '@/data/mockData';
 
 const HeaderEmojiIcon = ({
   emoji,
@@ -26,7 +27,23 @@ export default function Header() {
   const { user } = useAuth();
   const [search, setSearch] = useState('');
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [mobileCategoriesOpen, setMobileCategoriesOpen] = useState(false);
   const navigate = useNavigate();
+
+  const mobileCategories = useMemo(() => {
+    const seen = new Set<string>();
+    return storefrontCategories.filter((category) => {
+      const id = String(category.id || '').trim().toLowerCase();
+      if (!id || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+  }, []);
+
+  const closeMobileMenu = () => {
+    setMobileOpen(false);
+    setMobileCategoriesOpen(false);
+  };
 
   const desktopNavClass = ({ isActive }: { isActive: boolean }) =>
     `relative px-2 py-1 rounded-md transition-colors ${
@@ -44,16 +61,25 @@ export default function Header() {
     if (!q) return;
     navigate(`/search?q=${encodeURIComponent(q)}`);
     setSearch('');
-    setMobileOpen(false);
+    closeMobileMenu();
   };
 
   useEffect(() => {
     if (!mobileOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMobileOpen(false);
+      if (e.key === 'Escape') {
+        setMobileOpen(false);
+        setMobileCategoriesOpen(false);
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
+  }, [mobileOpen]);
+
+  useEffect(() => {
+    if (!mobileOpen) {
+      setMobileCategoriesOpen(false);
+    }
   }, [mobileOpen]);
 
   return (
@@ -160,11 +186,11 @@ export default function Header() {
           type="button"
           aria-label="Close menu"
           className="absolute inset-0 w-full h-full cursor-default bg-black/40"
-          onClick={() => setMobileOpen(false)}
+          onClick={closeMobileMenu}
         />
 
         <div
-          className="absolute top-0 inset-x-0 bg-white border-b shadow-lg transition-transform duration-200 ease-out"
+          className="absolute top-0 inset-x-0 max-h-[100dvh] overflow-y-auto bg-white border-b shadow-lg transition-transform duration-200 ease-out"
           style={{ transform: mobileOpen ? 'translateY(0)' : 'translateY(-100%)' }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -176,7 +202,7 @@ export default function Header() {
               type="button"
               className="grid h-10 w-10 place-items-center rounded-full hover:bg-slate-100"
               aria-label="Close menu"
-              onClick={() => setMobileOpen(false)}
+              onClick={closeMobileMenu}
             >
               <HeaderEmojiIcon emoji="✕" size={18} className="text-slate-800" />
             </button>
@@ -198,29 +224,56 @@ export default function Header() {
 
             <div className="space-y-1">
               <NavLink
-                to="/category/home"
-                onClick={() => setMobileOpen(false)}
+                to="/"
+                end
+                onClick={closeMobileMenu}
                 className={mobileNavClass}
               >
                 Home
               </NavLink>
-              <NavLink
-                to="/category/printed"
-                onClick={() => setMobileOpen(false)}
-                className={mobileNavClass}
+              <button
+                type="button"
+                aria-expanded={mobileCategoriesOpen}
+                onClick={() => setMobileCategoriesOpen((prev) => !prev)}
+                className="flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm font-medium transition hover:bg-slate-100"
               >
-                Prints
-              </NavLink>
-              <NavLink
-                to="/category/trending"
-                onClick={() => setMobileOpen(false)}
-                className={mobileNavClass}
+                <span>Categories</span>
+                <span
+                  aria-hidden
+                  className={`inline-block text-xs text-slate-500 transition-transform duration-200 ${
+                    mobileCategoriesOpen ? 'rotate-90' : 'rotate-0'
+                  }`}
+                >
+                  &gt;
+                </span>
+              </button>
+              <div
+                className={`grid transition-all duration-200 ease-out ${
+                  mobileCategoriesOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-80'
+                }`}
               >
-                Trending
-              </NavLink>
+                <div className="overflow-hidden">
+                  <div className="mb-1 ml-2 space-y-1 border-l border-slate-200 pl-2">
+                    {mobileCategories.map((category) => (
+                      <NavLink
+                        key={category.id}
+                        to={`/category/${category.id}`}
+                        onClick={closeMobileMenu}
+                        className={({ isActive }) =>
+                          `block rounded-md px-3 py-2 text-sm transition ${
+                            isActive ? 'bg-orange-50 font-bold text-orange-700' : 'text-slate-700 hover:bg-slate-100'
+                          }`
+                        }
+                      >
+                        {category.name}
+                      </NavLink>
+                    ))}
+                  </div>
+                </div>
+              </div>
               <NavLink
                 to="/custom-print"
-                onClick={() => setMobileOpen(false)}
+                onClick={closeMobileMenu}
                 className={({ isActive }) =>
                   `flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-md transition ${
                     isActive ? 'bg-orange-50 text-orange-700 font-bold' : 'hover:bg-slate-100 text-orange-600'
