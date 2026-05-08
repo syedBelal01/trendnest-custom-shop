@@ -9,7 +9,7 @@ import { useProducts } from '@/contexts/ProductsContext';
 import RatingSummaryInline from '@/components/reviews/RatingSummaryInline';
 import { productImageAlt, productSeoPath } from '@/lib/seo';
 
-export default function ProductCard({ product }: { product: Product }) {
+export default function ProductCard({ product, saleBadgeText }: { product: Product; saleBadgeText?: string }) {
   const { addItem } = useCart();
   const { ratingSummary } = useProducts();
   const discount = product.originalPrice
@@ -23,12 +23,30 @@ export default function ProductCard({ product }: { product: Product }) {
   return (
     <div className="group bg-card rounded-xl border overflow-hidden hover:shadow-lg transition-shadow">
       <Link to={productSeoPath(product)} className="block aspect-square overflow-hidden relative">
-        <img src={productPrimaryImage(product)} alt={productImageAlt(product, 'catalog photo')} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" loading="lazy" />
+        <img
+          src={productPrimaryImage(product)}
+          alt={productImageAlt(product, 'catalog photo')}
+          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+          loading="lazy"
+        />
         {discount > 0 && (
-          <span className="absolute top-1.5 sm:top-2 left-1.5 sm:left-2 bg-primary text-primary-foreground text-[10px] sm:text-xs font-semibold px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md">{discount}% OFF</span>
+          <span className="absolute top-1.5 sm:top-2 left-1.5 sm:left-2 bg-primary text-primary-foreground text-[10px] sm:text-xs font-semibold px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md">
+            {discount}% OFF
+          </span>
         )}
+        {saleBadgeText?.trim() ? (
+          <span className="absolute top-1.5 sm:top-2 right-1.5 sm:right-2 rounded-md bg-orange-600 px-1.5 sm:px-2 py-0.5 sm:py-1 text-[10px] sm:text-xs font-semibold text-white">
+            {saleBadgeText.trim()}
+          </span>
+        ) : null}
         {product.isTrending && (
-          <span className="absolute top-1.5 sm:top-2 right-1.5 sm:right-2 bg-foreground text-background text-[10px] sm:text-xs font-semibold px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md">🔥</span>
+          <span
+            className={`absolute right-1.5 sm:right-2 bg-foreground text-background text-[10px] sm:text-xs font-semibold px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-md ${
+              saleBadgeText?.trim() ? 'top-8 sm:top-9' : 'top-1.5 sm:top-2'
+            }`}
+          >
+            {'\uD83D\uDD25'}
+          </span>
         )}
       </Link>
       <div className="p-2.5 sm:p-3">
@@ -36,9 +54,9 @@ export default function ProductCard({ product }: { product: Product }) {
           <h3 className="font-medium text-xs sm:text-sm truncate hover:text-primary transition-colors">{product.name}</h3>
         </Link>
         <div className="flex items-center gap-1.5 sm:gap-2 mt-1">
-          <span className="font-bold text-sm sm:text-base">₹{product.price}</span>
+          <span className="font-bold text-sm sm:text-base">{'\u20B9'}{product.price}</span>
           {product.originalPrice && (
-            <span className="text-[10px] sm:text-xs text-muted-foreground line-through">₹{product.originalPrice}</span>
+            <span className="text-[10px] sm:text-xs text-muted-foreground line-through">{'\u20B9'}{product.originalPrice}</span>
           )}
         </div>
         <div className="mt-0.5 sm:mt-1">
@@ -49,12 +67,19 @@ export default function ProductCard({ product }: { product: Product }) {
             textClassName="text-[10px] sm:text-xs text-muted-foreground"
           />
         </div>
-        <Button size="sm" className="w-full mt-2 sm:mt-3 h-8 sm:h-8 text-xs gap-1" onClick={() => addItem({
-          product, quantity: 1,
-          selectedSize: product.sizes?.[0],
-          selectedVariant: product.variantModel?.items?.[0]?.key ?? productVariantNames(product)[0],
-          selectedSleeve: product.sleeveTypes?.[0],
-        })}>
+        <Button
+          size="sm"
+          className="w-full mt-2 sm:mt-3 h-8 sm:h-8 text-xs gap-1"
+          onClick={() =>
+            addItem({
+              product,
+              quantity: 1,
+              selectedSize: product.sizes?.[0],
+              selectedVariant: product.variantModel?.items?.[0]?.key ?? productVariantNames(product)[0],
+              selectedSleeve: product.sleeveTypes?.[0],
+            })
+          }
+        >
           <ShoppingCart className="h-3 w-3" /> Add to Cart
         </Button>
       </div>

@@ -17,6 +17,7 @@ import CartPage from "@/pages/CartPage";
 import CheckoutPage from "@/pages/CheckoutPage";
 import CheckoutSuccessPage from "@/pages/CheckoutSuccessPage";
 import SearchPage from "@/pages/SearchPage";
+import SalePage from "@/pages/SalePage";
 import AdminLayout from "@/pages/admin/AdminLayout";
 import AdminDashboard from "@/pages/admin/AdminDashboard";
 import AdminProducts from "@/pages/admin/AdminProducts";
@@ -101,6 +102,7 @@ const App = () => (
                   <Route path="/checkout" element={<CheckoutPage />} />
                   <Route path="/checkout/success" element={<CheckoutSuccessPage />} />
                   <Route path="/search" element={<SearchPage />} />
+                  <Route path="/sale/:slug" element={<SalePage />} />
                   <Route path="/contact" element={<ContactPage />} />
                   <Route path="/faqs" element={<FaqsPage />} />
                   <Route path="/returns" element={<ReturnPolicyPage />} />

@@ -7,7 +7,7 @@ export interface ProductVariantOption {
 export type ProductCategory = 'fashion' | 'home' | 'electronics' | 'printed' | 'trending';
 
 export type SaleBannerTheme = 'default' | 'winter' | 'summer' | 'eid' | 'holi' | 'diwali' | 'flash';
-export type SaleBannerStatus = 'draft' | 'live' | 'disabled';
+export type SaleBannerStatus = 'draft' | 'live' | 'ended' | 'disabled';
 export type HeroFirstSlideMode = 'auto' | 'default' | 'banner';
 
 export interface HeroBannerSettings {
@@ -18,8 +18,11 @@ export interface HeroBannerSettings {
 
 export interface SaleBanner {
   id: string;
+  slug?: string;
   title: string;
   subtitle?: string;
+  bannerText?: string;
+  discountText?: string;
   desktopImage: string;
   mobileImage?: string;
   ctaText?: string;
@@ -31,6 +34,7 @@ export interface SaleBanner {
   priority: number;
   targetCategory?: string;
   targetProductIds?: string[];
+  selectedProducts?: string[];
   isActive?: boolean;
   createdAt?: string;
   updatedAt?: string;

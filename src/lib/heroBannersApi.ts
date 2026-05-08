@@ -2,10 +2,22 @@ import { apiUrl } from '@/lib/api';
 import type {
   HeroBannerSettings,
   HeroFirstSlideMode,
+  Product,
   SaleBanner,
   SaleBannerStatus,
   SaleBannerTheme,
 } from '@/types';
+
+function saleSlugify(raw: unknown): string {
+  return String(raw ?? '')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 90);
+}
 
 function adminHeaders(): HeadersInit {
   const key = sessionStorage.getItem('trendnest-admin-api-key');
@@ -22,6 +34,7 @@ function asDateIso(input: unknown): string {
 
 function normalizeTheme(input: unknown): SaleBannerTheme {
   const v = String(input ?? '').trim().toLowerCase();
+  if (v === 'normal') return 'default';
   if (v === 'winter' || v === 'summer' || v === 'eid' || v === 'holi' || v === 'diwali' || v === 'flash') {
     return v;
   }
@@ -30,7 +43,7 @@ function normalizeTheme(input: unknown): SaleBannerTheme {
 
 function normalizeStatus(input: unknown): SaleBannerStatus {
   const v = String(input ?? '').trim().toLowerCase();
-  if (v === 'live' || v === 'disabled') return v;
+  if (v === 'live' || v === 'disabled' || v === 'ended') return v;
   return 'draft';
 }
 
@@ -53,8 +66,11 @@ function normalizeHeroBannerSettings(raw: any): HeroBannerSettings {
 function normalizeSaleBanner(raw: any): SaleBanner {
   return {
     id: String(raw?.id ?? ''),
+    slug: String(raw?.slug ?? '').trim(),
     title: String(raw?.title ?? ''),
     subtitle: String(raw?.subtitle ?? ''),
+    bannerText: String(raw?.bannerText ?? ''),
+    discountText: String(raw?.discountText ?? ''),
     desktopImage: String(raw?.desktopImage ?? ''),
     mobileImage: String(raw?.mobileImage ?? ''),
     ctaText: String(raw?.ctaText ?? ''),
@@ -66,6 +82,11 @@ function normalizeSaleBanner(raw: any): SaleBanner {
     priority: Number.isFinite(Number(raw?.priority)) ? Math.floor(Number(raw.priority)) : 100,
     targetCategory: String(raw?.targetCategory ?? ''),
     targetProductIds: Array.isArray(raw?.targetProductIds) ? raw.targetProductIds.map((x: unknown) => String(x)).filter(Boolean) : [],
+    selectedProducts: Array.isArray(raw?.selectedProducts)
+      ? raw.selectedProducts.map((x: unknown) => String(x)).filter(Boolean)
+      : Array.isArray(raw?.targetProductIds)
+        ? raw.targetProductIds.map((x: unknown) => String(x)).filter(Boolean)
+        : [],
     isActive: !!raw?.isActive,
     createdAt: raw?.createdAt ? asDateIso(raw.createdAt) : undefined,
     updatedAt: raw?.updatedAt ? asDateIso(raw.updatedAt) : undefined,
@@ -73,8 +94,11 @@ function normalizeSaleBanner(raw: any): SaleBanner {
 }
 
 export type SaleBannerMutationInput = {
+  slug?: string;
   title: string;
   subtitle?: string;
+  bannerText?: string;
+  discountText?: string;
   desktopImage: string;
   mobileImage?: string;
   ctaText?: string;
@@ -104,6 +128,66 @@ export type ActiveHeroBannersResponse = {
   banners: SaleBanner[];
   settings: HeroBannerSettings;
 };
+
+export type PublicSaleDetailsResponse = {
+  sale: SaleBanner;
+  products: Product[];
+  state: 'live' | 'scheduled' | 'ended' | 'draft' | 'disabled';
+};
+
+function normalizePublicSaleState(input: unknown): PublicSaleDetailsResponse['state'] {
+  const v = String(input ?? '').trim().toLowerCase();
+  if (v === 'live' || v === 'scheduled' || v === 'ended' || v === 'draft' || v === 'disabled') return v;
+  return 'draft';
+}
+
+async function fetchProductsForSaleFallback(
+  selectedProductIds: string[],
+  targetCategory?: string
+): Promise<Product[]> {
+  try {
+    const res = await fetch(apiUrl(`/api/products?t=${Date.now()}`), { cache: 'no-store' });
+    if (!res.ok) return [];
+    const data = (await res.json().catch(() => [])) as Product[];
+    const products = Array.isArray(data) ? data : [];
+
+    if (selectedProductIds.length > 0) {
+      const byId = new Map(products.map((p) => [String((p as Product)?.id || '').trim(), p]));
+      return selectedProductIds.map((id) => byId.get(id)).filter((p): p is Product => !!p);
+    }
+
+    const category = String(targetCategory || '').trim().toLowerCase();
+    if (!category) return [];
+    return products.filter((p) => String((p as Product)?.category || '').trim().toLowerCase() === category);
+  } catch {
+    return [];
+  }
+}
+
+async function fetchPublicSaleFallbackByActiveBanner(slug: string): Promise<PublicSaleDetailsResponse | null> {
+  const targetSlug = saleSlugify(slug);
+  if (!targetSlug) return null;
+
+  const active = await fetchActiveHeroBannersWithSettingsApi();
+  const sale = active.banners.find((banner) => {
+    const candidate = saleSlugify(banner.slug || banner.title || banner.id);
+    return candidate === targetSlug;
+  });
+  if (!sale) return null;
+
+  const selectedProductIds = Array.isArray(sale.selectedProducts) && sale.selectedProducts.length > 0
+    ? sale.selectedProducts.map((x) => String(x).trim()).filter(Boolean)
+    : Array.isArray(sale.targetProductIds)
+      ? sale.targetProductIds.map((x) => String(x).trim()).filter(Boolean)
+      : [];
+
+  const products = await fetchProductsForSaleFallback(selectedProductIds, sale.targetCategory);
+  return {
+    sale,
+    products,
+    state: sale.isActive ? 'live' : 'draft',
+  };
+}
 
 export async function listAdminHeroBannersApi(): Promise<SaleBanner[]> {
   const data = await fetchAdminHeroBannersWithSettingsApi();
@@ -194,5 +278,25 @@ export async function fetchActiveHeroBannersWithSettingsApi(): Promise<ActiveHer
   return {
     banners: Array.isArray(data?.banners) ? data.banners.map(normalizeSaleBanner) : [],
     settings: normalizeHeroBannerSettings(data?.settings || {}),
+  };
+}
+
+export async function fetchPublicSaleBySlugApi(slug: string): Promise<PublicSaleDetailsResponse> {
+  const trimmed = String(slug || '').trim();
+  if (!trimmed) throw new Error('Missing sale slug');
+  const res = await fetch(apiUrl(`/api/sales/${encodeURIComponent(trimmed)}`), { cache: 'no-store' });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    // Compatibility fallback: older API builds may not have /api/sales/:slug yet.
+    if (res.status === 404) {
+      const fallback = await fetchPublicSaleFallbackByActiveBanner(trimmed);
+      if (fallback) return fallback;
+    }
+    throw new Error(typeof data.error === 'string' ? data.error : 'Failed to load sale');
+  }
+  return {
+    sale: normalizeSaleBanner(data?.sale || {}),
+    products: Array.isArray(data?.products) ? (data.products as Product[]) : [],
+    state: normalizePublicSaleState(data?.state),
   };
 }

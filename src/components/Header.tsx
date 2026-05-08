@@ -3,6 +3,7 @@ import { useCart } from '@/contexts/CartContext';
 import { useAuth } from '@/contexts/AuthContext';
 import { useEffect, useMemo, useState } from 'react';
 import { categories as storefrontCategories } from '@/data/mockData';
+import { useSaleBanners } from '@/contexts/SaleBannersContext';
 
 const HeaderEmojiIcon = ({
   emoji,
@@ -22,12 +23,39 @@ const HeaderEmojiIcon = ({
   </span>
 );
 
+function saleSlugify(raw: string): string {
+  return String(raw || '')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 90);
+}
+
+function countdownTo(endDateIso: string, nowMs: number) {
+  const endMs = new Date(endDateIso).getTime();
+  if (!Number.isFinite(endMs)) {
+    return { days: 0, hours: 0, minutes: 0, seconds: 0 };
+  }
+  const diff = Math.max(0, endMs - nowMs);
+  const totalSeconds = Math.floor(diff / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return { days, hours, minutes, seconds };
+}
+
 export default function Header() {
   const { itemCount } = useCart();
   const { user } = useAuth();
+  const { activeBanners } = useSaleBanners();
   const [search, setSearch] = useState('');
   const [mobileOpen, setMobileOpen] = useState(false);
   const [mobileCategoriesOpen, setMobileCategoriesOpen] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const navigate = useNavigate();
 
   const mobileCategories = useMemo(() => {
@@ -44,6 +72,17 @@ export default function Header() {
     setMobileOpen(false);
     setMobileCategoriesOpen(false);
   };
+
+  const liveSale = activeBanners[0] || null;
+  const liveSaleSlug = useMemo(() => {
+    if (!liveSale) return '';
+    return saleSlugify(liveSale.slug || liveSale.title || liveSale.id || '');
+  }, [liveSale]);
+  const liveSaleLink = liveSaleSlug ? `/sale/${liveSaleSlug}` : '/';
+  const saleCountdown = useMemo(
+    () => (liveSale ? countdownTo(String(liveSale.endDate || ''), nowMs) : null),
+    [liveSale, nowMs]
+  );
 
   const desktopNavClass = ({ isActive }: { isActive: boolean }) =>
     `relative px-2 py-1 rounded-md transition-colors ${
@@ -82,8 +121,54 @@ export default function Header() {
     }
   }, [mobileOpen]);
 
+  useEffect(() => {
+    if (!liveSale) return;
+    const t = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, [liveSale]);
+
   return (
     <header className="sticky top-0 z-50 border-b border-slate-100 bg-white/90 backdrop-blur-xl">
+      {liveSale ? (
+        <div
+          className={`border-b px-2 py-2.5 sm:px-4 sm:py-3 ${
+            liveSale.theme === 'summer'
+              ? 'bg-gradient-to-r from-amber-200 via-yellow-100 to-orange-100 border-amber-200'
+              : 'bg-orange-50 border-orange-100'
+          }`}
+        >
+          <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 text-sm sm:text-base">
+            <div className="min-w-0 truncate font-semibold text-slate-900">
+              <span className={liveSale.theme === 'summer' ? 'animate-pulse' : ''} aria-hidden>
+                {liveSale.theme === 'summer' ? '☀️' : '🔥'}
+              </span>{' '}
+              {liveSale.bannerText?.trim() || `${liveSale.title} is Live!`}{' '}
+              {liveSale.discountText?.trim() ? <span className="font-bold">{liveSale.discountText}</span> : null}
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              {saleCountdown ? (
+                <div className="flex items-center gap-1.5 text-[11px] sm:text-xs font-semibold text-slate-700">
+                  <span className="mr-1 hidden text-slate-800 sm:inline">Ends in:</span>
+                  <span className="hidden rounded bg-white/90 px-2 py-0.5 sm:inline">
+                    {String(saleCountdown.days).padStart(2, '0')}d
+                  </span>
+                  <span className="hidden rounded bg-white/90 px-2 py-0.5 sm:inline">
+                    {String(saleCountdown.hours).padStart(2, '0')}h
+                  </span>
+                  <span className="rounded bg-white/90 px-2 py-0.5">{String(saleCountdown.minutes).padStart(2, '0')}m</span>
+                  <span className="rounded bg-white/90 px-2 py-0.5">{String(saleCountdown.seconds).padStart(2, '0')}s</span>
+                </div>
+              ) : null}
+              <Link
+                to={liveSaleLink}
+                className="rounded-md bg-orange-600 px-3.5 py-1.5 text-xs font-bold text-white transition hover:bg-orange-700 sm:px-4 sm:py-2 sm:text-sm"
+              >
+                {liveSale.ctaText?.trim() || 'Shop Now'}
+              </Link>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <div className="mx-auto flex h-16 max-w-7xl items-center gap-4 px-4 md:px-8">
         <Link to="/" className="text-xl font-extrabold tracking-tight">
           Trend<span className="text-orange-600">Nest</span>99

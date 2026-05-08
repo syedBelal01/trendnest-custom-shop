@@ -72,7 +72,20 @@ function saleBadgeLabel(theme: SaleBanner['theme']): string {
   }
 }
 
-function toHref(raw: string | undefined): string {
+function saleSlugify(raw: string): string {
+  return String(raw || '')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 90);
+}
+
+function toHref(raw: string | undefined, banner?: SaleBanner): string {
+  const slug = saleSlugify(banner?.slug || banner?.title || banner?.id || '');
+  if (slug) return `/sale/${slug}`;
   const val = String(raw ?? '').trim();
   if (!val) return '/category/trending';
   if (val.startsWith('/')) return val;
@@ -80,6 +93,8 @@ function toHref(raw: string | undefined): string {
 }
 
 function SaleBannerSlide({ banner }: { banner: SaleBanner }) {
+  const hasBannerImage = Boolean(String(banner.mobileImage || banner.desktopImage || '').trim());
+
   return (
     <div
       className={cn(
@@ -87,22 +102,29 @@ function SaleBannerSlide({ banner }: { banner: SaleBanner }) {
         saleThemeClasses(banner.theme)
       )}
     >
-      <picture className="absolute inset-0">
-        {banner.desktopImage ? <source media="(min-width: 768px)" srcSet={banner.desktopImage} /> : null}
-        <img
-          src={banner.mobileImage || banner.desktopImage}
-          alt={banner.title}
-          className="h-full w-full object-cover object-center"
-          loading="lazy"
-          decoding="async"
-        />
-      </picture>
+      {hasBannerImage ? (
+        <picture className="absolute inset-0">
+          {banner.desktopImage ? <source media="(min-width: 768px)" srcSet={banner.desktopImage} /> : null}
+          <img
+            src={banner.mobileImage || banner.desktopImage}
+            alt={banner.title}
+            className="h-full w-full object-cover object-center"
+            loading="lazy"
+            decoding="async"
+          />
+        </picture>
+      ) : null}
 
-      <div className="absolute inset-0 bg-gradient-to-t from-black/35 via-black/10 to-transparent" />
+      <div
+        className={cn(
+          'absolute inset-0',
+          hasBannerImage ? 'bg-gradient-to-t from-black/35 via-black/10 to-transparent' : 'bg-transparent'
+        )}
+      />
 
       <div className="relative z-10 flex h-full items-end p-4 sm:p-5 md:p-8">
         <Link
-          to={toHref(banner.ctaLink)}
+          to={toHref(banner.ctaLink, banner)}
           className="inline-flex items-center rounded-xl bg-orange-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-orange-600/20 transition hover:bg-orange-700"
         >
           {banner.ctaText?.trim() || 'Shop Now'} <ArrowRight className="ml-1 h-4 w-4" aria-hidden />

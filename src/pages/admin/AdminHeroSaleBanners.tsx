@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { uploadProductImage } from '@/lib/api';
+import { useProducts } from '@/contexts/ProductsContext';
 import {
   createHeroBannerApi,
   deleteHeroBannerApi,
@@ -17,8 +18,11 @@ import {
 import type { HeroFirstSlideMode, SaleBanner, SaleBannerStatus, SaleBannerTheme } from '@/types';
 
 type BannerFormState = {
+  slug: string;
   title: string;
   subtitle: string;
+  bannerText: string;
+  discountText: string;
   desktopImage: string;
   mobileImage: string;
   ctaText: string;
@@ -29,11 +33,11 @@ type BannerFormState = {
   status: SaleBannerStatus;
   priority: string;
   targetCategory: string;
-  targetProductIds: string;
+  selectedProductIds: string[];
 };
 
 const THEMES: SaleBannerTheme[] = ['default', 'winter', 'summer', 'eid', 'holi', 'diwali', 'flash'];
-const STATUSES: SaleBannerStatus[] = ['draft', 'live', 'disabled'];
+const STATUSES: SaleBannerStatus[] = ['draft', 'live', 'ended', 'disabled'];
 const BANNER_UPLOAD_MAX_BYTES = 20 * 1024 * 1024;
 const BANNER_UPLOAD_MAX_MB_LABEL = Math.floor(BANNER_UPLOAD_MAX_BYTES / (1024 * 1024));
 const ALLOWED_BANNER_MIME_TYPES = new Set([
@@ -63,12 +67,31 @@ function localInputToIso(v: string): string {
   return d.toISOString();
 }
 
+function saleSlugify(raw: string): string {
+  return String(raw || '')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 90);
+}
+
+function themeLabel(theme: SaleBannerTheme): string {
+  if (theme === 'default') return 'normal';
+  return theme;
+}
+
 function defaultForm(): BannerFormState {
   const now = new Date();
   const end = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
   return {
+    slug: '',
     title: '',
     subtitle: '',
+    bannerText: '',
+    discountText: '',
     desktopImage: '',
     mobileImage: '',
     ctaText: 'Shop Now',
@@ -79,13 +102,14 @@ function defaultForm(): BannerFormState {
     status: 'draft',
     priority: '100',
     targetCategory: '',
-    targetProductIds: '',
+    selectedProductIds: [],
   };
 }
 
 function lifecycleStatus(b: SaleBanner): { label: 'Live' | 'Scheduled' | 'Expired' | 'Draft' | 'Disabled'; className: string } {
   if (b.status === 'draft') return { label: 'Draft', className: 'bg-slate-500/10 text-slate-700 border-slate-300' };
   if (b.status === 'disabled') return { label: 'Disabled', className: 'bg-red-500/10 text-red-700 border-red-200' };
+  if (b.status === 'ended') return { label: 'Expired', className: 'bg-amber-500/10 text-amber-700 border-amber-200' };
   const now = Date.now();
   const startMs = new Date(b.startDate).getTime();
   const endMs = new Date(b.endDate).getTime();
@@ -99,10 +123,13 @@ function lifecycleStatus(b: SaleBanner): { label: 'Live' | 'Scheduled' | 'Expire
 }
 
 function buildPayloadFromForm(form: BannerFormState): SaleBannerMutationInput {
+  const slug = saleSlugify(form.slug);
   const title = form.title.trim();
   const desktopImage = form.desktopImage.trim();
+  const bannerText = form.bannerText.trim();
+  const discountText = form.discountText.trim();
   if (!title) throw new Error('Sale title is required');
-  if (!desktopImage) throw new Error('Desktop banner image is required');
+  if (!slug) throw new Error('Sale slug is required');
 
   const startDate = localInputToIso(form.startDate);
   const endDate = localInputToIso(form.endDate);
@@ -111,18 +138,20 @@ function buildPayloadFromForm(form: BannerFormState): SaleBannerMutationInput {
   }
 
   const priority = Math.floor(Number(form.priority));
-  const targetProductIds = form.targetProductIds
-    .split(',')
-    .map((x) => x.trim())
-    .filter(Boolean);
+  const targetProductIds = Array.isArray(form.selectedProductIds)
+    ? form.selectedProductIds.map((x) => String(x).trim()).filter(Boolean)
+    : [];
 
   return {
+    slug,
     title,
     subtitle: form.subtitle.trim(),
+    bannerText,
+    discountText,
     desktopImage,
     mobileImage: form.mobileImage.trim(),
     ctaText: form.ctaText.trim(),
-    ctaLink: form.ctaLink.trim(),
+    ctaLink: form.ctaLink.trim() || `/sale/${slug}`,
     theme: form.theme,
     startDate,
     endDate,
@@ -157,6 +186,7 @@ function validateBannerFile(file: File): string | null {
 }
 
 export default function AdminHeroSaleBanners() {
+  const { products } = useProducts();
   const [rows, setRows] = useState<SaleBanner[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -167,6 +197,7 @@ export default function AdminHeroSaleBanners() {
   const [firstSlideMode, setFirstSlideMode] = useState<HeroFirstSlideMode>('auto');
   const [firstBannerId, setFirstBannerId] = useState('');
   const [form, setForm] = useState<BannerFormState>(defaultForm);
+  const [productSearch, setProductSearch] = useState('');
   const [uploadingDesktop, setUploadingDesktop] = useState(false);
   const [uploadingMobile, setUploadingMobile] = useState(false);
   const desktopFileRef = useRef<HTMLInputElement>(null);
@@ -201,6 +232,36 @@ export default function AdminHeroSaleBanners() {
       }),
     [sortedRows]
   );
+  const productOptions = useMemo(
+    () =>
+      products
+        .map((p) => ({
+          id: String(p.id),
+          label: String(p.name || p.id),
+          category: String(p.category || ''),
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [products]
+  );
+  const filteredProductOptions = useMemo(() => {
+    const q = String(productSearch || '').trim().toLowerCase();
+    if (!q) return productOptions;
+    return productOptions.filter((p) =>
+      [p.id, p.label, p.category].some((v) => String(v || '').toLowerCase().includes(q))
+    );
+  }, [productOptions, productSearch]);
+
+  const toggleSelectedProduct = (productId: string) => {
+    setForm((prev) => {
+      const has = prev.selectedProductIds.includes(productId);
+      return {
+        ...prev,
+        selectedProductIds: has
+          ? prev.selectedProductIds.filter((x) => x !== productId)
+          : [...prev.selectedProductIds, productId],
+      };
+    });
+  };
 
   const saveFirstSlidePreference = async () => {
     if (!supportsFirstSlideSettings) {
@@ -230,13 +291,18 @@ export default function AdminHeroSaleBanners() {
   const startNew = () => {
     setEditId(null);
     setForm(defaultForm());
+    setProductSearch('');
   };
 
   const beginEdit = (banner: SaleBanner) => {
     setEditId(banner.id);
+    setProductSearch('');
     setForm({
+      slug: String(banner.slug || saleSlugify(banner.title || banner.id || '') || ''),
       title: banner.title || '',
       subtitle: banner.subtitle || '',
+      bannerText: banner.bannerText || '',
+      discountText: banner.discountText || '',
       desktopImage: banner.desktopImage || '',
       mobileImage: banner.mobileImage || '',
       ctaText: banner.ctaText || '',
@@ -247,7 +313,11 @@ export default function AdminHeroSaleBanners() {
       status: banner.status,
       priority: String(Number.isFinite(Number(banner.priority)) ? banner.priority : 100),
       targetCategory: banner.targetCategory || '',
-      targetProductIds: (banner.targetProductIds || []).join(', '),
+      selectedProductIds: Array.isArray(banner.selectedProducts)
+        ? banner.selectedProducts.map(String)
+        : Array.isArray(banner.targetProductIds)
+          ? banner.targetProductIds.map(String)
+          : [],
     });
   };
 
@@ -372,19 +442,22 @@ export default function AdminHeroSaleBanners() {
 
   const previewBanner: SaleBanner = {
     id: editId || 'preview',
+    slug: saleSlugify(form.slug || form.title),
     title: form.title || 'Banner title preview',
     subtitle: form.subtitle || 'Subtitle preview',
+    bannerText: form.bannerText || '',
+    discountText: form.discountText || '',
     desktopImage: form.desktopImage || '/placeholder.svg',
     mobileImage: form.mobileImage || '',
     ctaText: form.ctaText || 'Shop Now',
-    ctaLink: form.ctaLink || '/category/trending',
+    ctaLink: form.ctaLink || `/sale/${saleSlugify(form.slug || form.title || 'sale')}`,
     theme: form.theme,
     startDate: localInputToIso(form.startDate),
     endDate: localInputToIso(form.endDate),
     status: form.status,
     priority: Number(form.priority) || 100,
     targetCategory: form.targetCategory || '',
-    targetProductIds: form.targetProductIds.split(',').map((x) => x.trim()).filter(Boolean),
+    targetProductIds: form.selectedProductIds,
   };
   const previewLifecycle = lifecycleStatus(previewBanner);
 
@@ -464,13 +537,31 @@ export default function AdminHeroSaleBanners() {
 
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="sm:col-span-2">
-              <Label htmlFor="sale-title">Sale title</Label>
+              <Label htmlFor="sale-title">Sale name</Label>
               <Input
                 id="sale-title"
                 value={form.title}
-                onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))}
+                onChange={(e) => {
+                  const nextTitle = e.target.value;
+                  setForm((p) => ({
+                    ...p,
+                    title: nextTitle,
+                    slug: p.slug.trim() ? p.slug : saleSlugify(nextTitle),
+                  }));
+                }}
                 placeholder="Summer Sale 2026"
               />
+            </div>
+
+            <div className="sm:col-span-2">
+              <Label htmlFor="sale-slug">Slug</Label>
+              <Input
+                id="sale-slug"
+                value={form.slug}
+                onChange={(e) => setForm((p) => ({ ...p, slug: saleSlugify(e.target.value) }))}
+                placeholder="summer-sale"
+              />
+              <p className="mt-1 text-xs text-muted-foreground">Sale page URL: /sale/{saleSlugify(form.slug || form.title || 'your-sale')}</p>
             </div>
 
             <div className="sm:col-span-2">
@@ -483,8 +574,27 @@ export default function AdminHeroSaleBanners() {
               />
             </div>
 
+            <div>
+              <Label htmlFor="sale-banner-text">Top banner text</Label>
+              <Input
+                id="sale-banner-text"
+                value={form.bannerText}
+                onChange={(e) => setForm((p) => ({ ...p, bannerText: e.target.value }))}
+                placeholder="Summer Sale is Live!"
+              />
+            </div>
+            <div>
+              <Label htmlFor="sale-discount-text">Discount text</Label>
+              <Input
+                id="sale-discount-text"
+                value={form.discountText}
+                onChange={(e) => setForm((p) => ({ ...p, discountText: e.target.value }))}
+                placeholder="Up to 60% OFF"
+              />
+            </div>
+
             <div className="sm:col-span-2">
-              <Label>Desktop banner image</Label>
+              <Label>Desktop banner image (optional)</Label>
               <p className="mt-1 text-xs text-muted-foreground">
                 Supports JPG, PNG, WebP, GIF (animated), AVIF up to {BANNER_UPLOAD_MAX_MB_LABEL}MB.
               </p>
@@ -558,7 +668,7 @@ export default function AdminHeroSaleBanners() {
                 id="sale-cta-link"
                 value={form.ctaLink}
                 onChange={(e) => setForm((p) => ({ ...p, ctaLink: e.target.value }))}
-                placeholder="/category/trending"
+                placeholder="/sale/summer-sale"
               />
             </div>
 
@@ -571,7 +681,7 @@ export default function AdminHeroSaleBanners() {
                 className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
               >
                 {THEMES.map((theme) => (
-                  <option key={theme} value={theme}>{theme}</option>
+                  <option key={theme} value={theme}>{themeLabel(theme)}</option>
                 ))}
               </select>
             </div>
@@ -585,7 +695,9 @@ export default function AdminHeroSaleBanners() {
                 className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
               >
                 {STATUSES.map((status) => (
-                  <option key={status} value={status}>{status}</option>
+                  <option key={status} value={status}>
+                    {status.charAt(0).toUpperCase() + status.slice(1)}
+                  </option>
                 ))}
               </select>
             </div>
@@ -629,13 +741,46 @@ export default function AdminHeroSaleBanners() {
             </div>
 
             <div className="sm:col-span-2">
-              <Label htmlFor="sale-target-products">Optional target product IDs (comma separated)</Label>
+              <Label htmlFor="sale-target-products">Selected products for this sale</Label>
               <Input
                 id="sale-target-products"
-                value={form.targetProductIds}
-                onChange={(e) => setForm((p) => ({ ...p, targetProductIds: e.target.value }))}
-                placeholder="p123, p456"
+                value={productSearch}
+                onChange={(e) => setProductSearch(e.target.value)}
+                placeholder="Search product by name, id, category..."
               />
+              <div className="mt-2 max-h-56 overflow-y-auto rounded-md border border-input p-2">
+                {filteredProductOptions.length === 0 ? (
+                  <p className="px-2 py-2 text-xs text-muted-foreground">No products matched your search.</p>
+                ) : (
+                  <div className="space-y-1">
+                    {filteredProductOptions.map((opt) => {
+                      const selected = form.selectedProductIds.includes(opt.id);
+                      return (
+                        <label
+                          key={opt.id}
+                          className={`flex cursor-pointer items-center justify-between gap-3 rounded-md px-2 py-1.5 text-sm transition ${
+                            selected ? 'bg-orange-50' : 'hover:bg-muted/60'
+                          }`}
+                        >
+                          <span className="min-w-0">
+                            <span className="block truncate font-medium">{opt.label}</span>
+                            <span className="block truncate text-xs text-muted-foreground">{opt.id} • {opt.category}</span>
+                          </span>
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={() => toggleSelectedProduct(opt.id)}
+                            className="h-4 w-4 accent-orange-600"
+                          />
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {form.selectedProductIds.length} product(s) selected.
+              </p>
             </div>
           </div>
 
@@ -710,6 +855,7 @@ export default function AdminHeroSaleBanners() {
                           <div>
                             <p className="font-medium">{b.title}</p>
                             <p className="text-xs text-muted-foreground line-clamp-1">{b.subtitle || '-'}</p>
+                            <p className="text-[11px] text-muted-foreground">/sale/{saleSlugify(b.slug || b.title || b.id)}</p>
                           </div>
                         </div>
                       </td>

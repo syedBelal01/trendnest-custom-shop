@@ -454,16 +454,19 @@ const ProductDraftSchema = new mongoose.Schema(
 const ProductDraft = mongoose.model('ProductDraft', ProductDraftSchema);
 
 const SALE_BANNER_THEMES = ['default', 'winter', 'summer', 'eid', 'holi', 'diwali', 'flash'];
-const SALE_BANNER_STATUSES = ['draft', 'live', 'disabled'];
+const SALE_BANNER_STATUSES = ['draft', 'live', 'ended', 'disabled'];
 const HERO_BANNER_SETTINGS_ID = 'hero-banner-settings';
 const HERO_FIRST_SLIDE_MODES = ['auto', 'default', 'banner'];
 
 const HeroSaleBannerSchema = new mongoose.Schema(
   {
     _id: { type: String, required: true }, // banner id
+    slug: { type: String, default: '', trim: true, index: true },
     title: { type: String, required: true, trim: true },
     subtitle: { type: String, default: '' },
-    desktopImage: { type: String, required: true, trim: true },
+    bannerText: { type: String, default: '', trim: true },
+    discountText: { type: String, default: '', trim: true },
+    desktopImage: { type: String, default: '', trim: true },
     mobileImage: { type: String, default: '', trim: true },
     ctaText: { type: String, default: '', trim: true },
     ctaLink: { type: String, default: '', trim: true },
@@ -477,7 +480,7 @@ const HeroSaleBannerSchema = new mongoose.Schema(
   },
   { versionKey: false, timestamps: true }
 );
-HeroSaleBannerSchema.index({ status: 1, startDate: 1, endDate: 1, priority: 1, createdAt: -1 });
+HeroSaleBannerSchema.index({ slug: 1, status: 1, startDate: 1, endDate: 1, priority: 1, createdAt: -1 });
 
 const HeroSaleBanner = mongoose.model('HeroSaleBanner', HeroSaleBannerSchema);
 
@@ -5789,12 +5792,13 @@ function normalizeDraftPatch(patch) {
 
 function normalizeSaleBannerStatus(raw) {
   const v = String(raw || '').trim().toLowerCase();
-  if (v === 'live' || v === 'disabled' || v === 'draft') return v;
+  if (v === 'live' || v === 'disabled' || v === 'draft' || v === 'ended') return v;
   return 'draft';
 }
 
 function normalizeSaleBannerTheme(raw) {
   const v = String(raw || '').trim().toLowerCase();
+  if (v === 'normal') return 'default';
   return SALE_BANNER_THEMES.includes(v) ? v : 'default';
 }
 
@@ -5802,6 +5806,32 @@ function normalizeSaleBannerPriority(raw) {
   const n = Math.floor(Number(raw));
   if (!Number.isFinite(n)) return 100;
   return Math.max(-9_999, Math.min(9_999, n));
+}
+
+function saleSlugify(raw) {
+  return String(raw || '')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[^a-z0-9\s-]/g, ' ')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 90);
+}
+
+function normalizeSaleBannerSlug(raw, fallbackRaw = 'sale') {
+  const direct = saleSlugify(raw);
+  if (direct) return direct;
+  const fallback = saleSlugify(fallbackRaw);
+  return fallback || 'sale';
+}
+
+function resolvedSaleSlugFromDoc(doc) {
+  const explicit = normalizeSaleBannerSlug(doc?.slug, '');
+  if (explicit && explicit !== 'sale') return explicit;
+  const fromTitle = normalizeSaleBannerSlug(doc?.title, '');
+  if (fromTitle && fromTitle !== 'sale') return fromTitle;
+  return normalizeSaleBannerSlug(doc?._id || doc?.id || 'sale', 'sale');
 }
 
 function normalizeHeroFirstSlideMode(raw) {
@@ -5843,7 +5873,6 @@ function normalizeSaleBannerCreateBodyOrThrow(body) {
   const title = String(body?.title ?? '').trim();
   const desktopImage = String(body?.desktopImage ?? '').trim();
   if (!title) throw new Error('title is required');
-  if (!desktopImage) throw new Error('desktopImage is required');
 
   const startDate = parseDateInputOrThrow(body?.startDate, 'startDate');
   const endDate = parseDateInputOrThrow(body?.endDate, 'endDate');
@@ -5852,8 +5881,11 @@ function normalizeSaleBannerCreateBodyOrThrow(body) {
   }
 
   return {
+    slug: normalizeSaleBannerSlug(body?.slug, title),
     title,
     subtitle: String(body?.subtitle ?? '').trim(),
+    bannerText: String(body?.bannerText ?? '').trim(),
+    discountText: String(body?.discountText ?? '').trim(),
     desktopImage,
     mobileImage: String(body?.mobileImage ?? '').trim(),
     ctaText: String(body?.ctaText ?? '').trim(),
@@ -5864,7 +5896,7 @@ function normalizeSaleBannerCreateBodyOrThrow(body) {
     status: normalizeSaleBannerStatus(body?.status),
     priority: normalizeSaleBannerPriority(body?.priority),
     targetCategory: String(body?.targetCategory ?? '').trim(),
-    targetProductIds: normalizeSaleBannerTargetProductIds(body?.targetProductIds),
+    targetProductIds: normalizeSaleBannerTargetProductIds(body?.targetProductIds ?? body?.selectedProducts),
   };
 }
 
@@ -5872,17 +5904,16 @@ function normalizeSaleBannerPatchBodyOrThrow(body) {
   if (body == null || typeof body !== 'object') return {};
   const out = {};
 
+  if (body.slug !== undefined) out.slug = normalizeSaleBannerSlug(body.slug, body.title ?? 'sale');
   if (body.title !== undefined) {
     const title = String(body.title ?? '').trim();
     if (!title) throw new Error('title cannot be empty');
     out.title = title;
   }
   if (body.subtitle !== undefined) out.subtitle = String(body.subtitle ?? '').trim();
-  if (body.desktopImage !== undefined) {
-    const desktopImage = String(body.desktopImage ?? '').trim();
-    if (!desktopImage) throw new Error('desktopImage cannot be empty');
-    out.desktopImage = desktopImage;
-  }
+  if (body.bannerText !== undefined) out.bannerText = String(body.bannerText ?? '').trim();
+  if (body.discountText !== undefined) out.discountText = String(body.discountText ?? '').trim();
+  if (body.desktopImage !== undefined) out.desktopImage = String(body.desktopImage ?? '').trim();
   if (body.mobileImage !== undefined) out.mobileImage = String(body.mobileImage ?? '').trim();
   if (body.ctaText !== undefined) out.ctaText = String(body.ctaText ?? '').trim();
   if (body.ctaLink !== undefined) out.ctaLink = String(body.ctaLink ?? '').trim();
@@ -5892,12 +5923,15 @@ function normalizeSaleBannerPatchBodyOrThrow(body) {
   if (body.startDate !== undefined) out.startDate = parseDateInputOrThrow(body.startDate, 'startDate');
   if (body.endDate !== undefined) out.endDate = parseDateInputOrThrow(body.endDate, 'endDate');
   if (body.targetCategory !== undefined) out.targetCategory = String(body.targetCategory ?? '').trim();
-  if (body.targetProductIds !== undefined) out.targetProductIds = normalizeSaleBannerTargetProductIds(body.targetProductIds);
+  if (body.targetProductIds !== undefined || body.selectedProducts !== undefined) {
+    out.targetProductIds = normalizeSaleBannerTargetProductIds(body.targetProductIds ?? body.selectedProducts);
+  }
 
   return out;
 }
 
 function isSaleBannerLive(doc, nowMs = Date.now()) {
+  if (normalizeSaleBannerStatus(doc?.status) === 'ended') return false;
   const status = String(doc?.status || '').trim().toLowerCase();
   if (status !== 'live') return false;
   const startMs = new Date(doc?.startDate).getTime();
@@ -5906,13 +5940,28 @@ function isSaleBannerLive(doc, nowMs = Date.now()) {
   return startMs <= nowMs && nowMs <= endMs;
 }
 
+function saleLifecycleState(doc, nowMs = Date.now()) {
+  const status = normalizeSaleBannerStatus(doc?.status);
+  if (status === 'draft') return 'draft';
+  if (status === 'disabled') return 'disabled';
+  if (status === 'ended') return 'ended';
+  const startMs = new Date(doc?.startDate).getTime();
+  const endMs = new Date(doc?.endDate).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return 'draft';
+  if (nowMs < startMs) return 'scheduled';
+  if (nowMs > endMs) return 'ended';
+  return 'live';
+}
+
 function serializeSaleBanner(doc, nowMs = Date.now()) {
   const o = serialize(doc);
   if (!o) return null;
+  o.slug = resolvedSaleSlugFromDoc(o);
   if (o.createdAt instanceof Date) o.createdAt = o.createdAt.toISOString();
   if (o.updatedAt instanceof Date) o.updatedAt = o.updatedAt.toISOString();
   if (o.startDate instanceof Date) o.startDate = o.startDate.toISOString();
   if (o.endDate instanceof Date) o.endDate = o.endDate.toISOString();
+  o.selectedProducts = Array.isArray(o.targetProductIds) ? o.targetProductIds : [];
   o.isActive = isSaleBannerLive(o, nowMs);
   return o;
 }
@@ -6145,6 +6194,11 @@ app.patch('/api/admin/hero-banners/settings', mongoReady, adminKeyRequired, asyn
 app.post('/api/admin/hero-banners', mongoReady, adminKeyRequired, async (req, res) => {
   try {
     const payload = normalizeSaleBannerCreateBodyOrThrow(req.body || {});
+    const existingSlug = await HeroSaleBanner.findOne({ slug: payload.slug }).select({ _id: 1 }).lean();
+    if (existingSlug) {
+      res.status(409).json({ error: 'Slug already exists. Use a different slug.' });
+      return;
+    }
     const id = `banner-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const doc = await HeroSaleBanner.create({ _id: id, ...payload });
     res.status(201).json({ banner: serializeSaleBanner(doc) });
@@ -6164,6 +6218,23 @@ app.patch('/api/admin/hero-banners/:bannerId', mongoReady, adminKeyRequired, asy
     }
 
     const patch = normalizeSaleBannerPatchBodyOrThrow(req.body || {});
+    if (patch.slug === undefined && !String(existing.slug || '').trim()) {
+      patch.slug = normalizeSaleBannerSlug(patch.title ?? existing.title, bannerId);
+    } else if (patch.slug !== undefined) {
+      patch.slug = normalizeSaleBannerSlug(patch.slug, patch.title ?? existing.title ?? bannerId);
+    }
+
+    const currentSlug = resolvedSaleSlugFromDoc(existing);
+    const nextSlug = patch.slug !== undefined ? normalizeSaleBannerSlug(patch.slug, currentSlug) : currentSlug;
+    if (nextSlug && nextSlug !== currentSlug) {
+      const slugTaken = await HeroSaleBanner.findOne({ slug: nextSlug, _id: { $ne: bannerId } }).select({ _id: 1 }).lean();
+      if (slugTaken) {
+        res.status(409).json({ error: 'Slug already exists. Use a different slug.' });
+        return;
+      }
+      patch.slug = nextSlug;
+    }
+
     const nextStart = patch.startDate ?? existing.startDate;
     const nextEnd = patch.endDate ?? existing.endDate;
     if (new Date(nextEnd).getTime() < new Date(nextStart).getTime()) {
@@ -6223,6 +6294,53 @@ app.get('/api/hero-banners/active', mongoReady, async (_req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Failed to list active hero banners' });
+  }
+});
+
+app.get('/api/sales/:slug', mongoReady, async (req, res) => {
+  try {
+    const rawSlug = String(req.params.slug || '').trim();
+    const normalizedSlug = saleSlugify(rawSlug);
+    if (!normalizedSlug) {
+      res.status(400).json({ error: 'Invalid sale slug' });
+      return;
+    }
+
+    let doc = await HeroSaleBanner.findOne({ slug: normalizedSlug }).lean();
+    if (!doc) {
+      const fallbackDocs = await HeroSaleBanner.find().sort({ priority: 1, createdAt: -1 }).limit(300).lean();
+      doc = fallbackDocs.find((row) => resolvedSaleSlugFromDoc(row) === normalizedSlug) || null;
+    }
+
+    if (!doc) {
+      res.status(404).json({ error: 'Sale not found' });
+      return;
+    }
+
+    const nowMs = Date.now();
+    const state = saleLifecycleState(doc, nowMs);
+    const selectedIds = normalizeSaleBannerTargetProductIds(doc?.targetProductIds);
+    let productDocs = [];
+
+    if (selectedIds.length > 0) {
+      const rawProducts = await Product.find({ _id: { $in: selectedIds } }).lean();
+      const byId = new Map(rawProducts.map((p) => [String(p?._id || ''), p]));
+      productDocs = selectedIds.map((id) => byId.get(id)).filter(Boolean);
+    } else if (String(doc?.targetCategory || '').trim()) {
+      productDocs = await Product.find({ category: String(doc.targetCategory).trim() })
+        .sort({ displayOrder: 1, _id: 1 })
+        .limit(40)
+        .lean();
+    }
+
+    res.json({
+      sale: serializeSaleBanner(doc, nowMs),
+      state,
+      products: productDocs.map((p) => serializeProductDoc(p)).filter(Boolean),
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to load sale' });
   }
 });
 
