@@ -51,7 +51,7 @@ const HOME_OG_IMAGE = `${CANONICAL_BASE}/img3.jpeg`;
 const HOME_TITLE = "Printed T-Shirts, Graphic Tees & Custom Print Store | TrendNest99";
 const HOME_DESC =
   ensureSeoMetaDescription(
-    "Shop printed t-shirts, men's oversized graphic tees, custom print products, trending fashion, and home essentials online in India at TrendNest99."
+    "Shop printed t-shirts, men's oversized graphic tees, custom print products, trending fashion, and home & kitchen products online in India at TrendNest99."
   );
 const HOME_KEYWORDS = [
   "printed t shirt",
@@ -230,7 +230,7 @@ export default function HomePage() {
                   Style Meets <span className="text-orange-600">Affordability</span>
                 </h1>
                 <p className="mt-5 max-w-md text-base leading-7 text-slate-600">
-                  Discover trending fashion, home essentials and custom prints — all at unbeatable prices.
+                  Discover trending fashion, home & kitchen products and custom prints — all at unbeatable prices.
                 </p>
                 <div className="mt-8 flex flex-wrap gap-3">
                   <Link
@@ -316,7 +316,7 @@ export default function HomePage() {
           </section>
 
           <section className="mt-12 rounded-3xl border border-slate-200 bg-white p-5 md:p-8">
-            <SectionHeader icon={icons.home} title="Home Essentials" linkTo="/category/home" />
+            <SectionHeader icon={icons.home} title="Home & Kitchen" linkTo="/category/home" />
             {homeEssentials.length > 0 ? (
               <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
                 {homeEssentials.map((product) => (
@@ -324,7 +324,7 @@ export default function HomePage() {
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-slate-500">No home essentials available right now.</p>
+              <p className="text-sm text-slate-500">No home & kitchen products available right now.</p>
             )}
           </section>
 

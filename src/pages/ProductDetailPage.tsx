@@ -717,7 +717,7 @@ export default function ProductDetailPage() {
             breadcrumbJsonLd({
               url: canonicalUrl,
               categoryId: product.category,
-              categoryName: product.category === 'home' ? 'Home Essentials' : product.category === 'fashion' ? 'Fashion' : product.category === 'trending' ? 'Trending' : product.category,
+              categoryName: product.category === 'home' ? 'Home & Kitchen' : product.category === 'fashion' ? 'Fashion' : product.category === 'trending' ? 'Trending' : product.category,
               productName: product.name,
             })
           )}

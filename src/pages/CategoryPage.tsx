@@ -22,12 +22,12 @@ type CategorySeoConfig = {
 
 const CATEGORY_SEO: Record<string, CategorySeoConfig> = {
   home: {
-    title: 'Home Essentials Online in India | TrendNest99',
+    title: 'Home & Kitchen Products Online in India | TrendNest99',
     description:
-      'Shop practical home essentials online in India, including stylish utility products for everyday living at TrendNest99.',
-    keywords: ['home essentials', 'home products online', 'kitchen and bath essentials', 'trendnest99'],
+      'Shop practical home & kitchen products online in India, including stylish utility products for everyday living at TrendNest99.',
+    keywords: ['home & kitchen', 'home products online', 'kitchen and bath essentials', 'trendnest99'],
     longIntro:
-      "Home essentials are no longer simple utility purchases. Most Indian shoppers now compare design, durability, and value before placing an order online. At TrendNest99, this category is curated for customers who want products that look clean, work reliably, and blend naturally into modern homes. Whether you are upgrading your bathroom setup, organizing a kitchen corner, or replacing daily-use accessories, the focus here is practical function with consistent finish quality. These listings are selected for everyday convenience so you can buy with confidence instead of trial and error.\n\nPeople searching for home essentials online India or bathroom accessories online usually want clear product choices, not clutter. That is why this collection is structured around straightforward options with transparent pricing and relevant details. You can compare utility features, match finishes with your decor, and shortlist items that support frequent use without adding maintenance stress. If your goal is to build a more organized, comfortable living space with affordable online shopping, this section helps you move from discovery to checkout quickly.",
+      "Home & kitchen products are no longer simple utility purchases. Most Indian shoppers now compare design, durability, and value before placing an order online. At TrendNest99, this category is curated for customers who want products that look clean, work reliably, and blend naturally into modern homes. Whether you are upgrading your bathroom setup, organizing a kitchen corner, or replacing daily-use accessories, the focus here is practical function with consistent finish quality. These listings are selected for everyday convenience so you can buy with confidence instead of trial and error.\n\nPeople searching for home & kitchen products online India or bathroom accessories online usually want clear product choices, not clutter. That is why this collection is structured around straightforward options with transparent pricing and relevant details. You can compare utility features, match finishes with your decor, and shortlist items that support frequent use without adding maintenance stress. If your goal is to build a more organized, comfortable living space with affordable online shopping, this section helps you move from discovery to checkout quickly.",
   },
   printed: {
     title: 'Printed T Shirts Online India for Men | TrendNest99',
@@ -51,7 +51,7 @@ const CATEGORY_SEO: Record<string, CategorySeoConfig> = {
   trending: {
     title: 'Trending Products Online | TrendNest99',
     description:
-      'Discover trending products and top customer picks in fashion, printed apparel, and home essentials at TrendNest99.',
+      'Discover trending products and top customer picks in fashion, printed apparel, and home & kitchen products at TrendNest99.',
     keywords: ['trending products online', 'best selling products', 'latest fashion picks', 'trendnest99'],
     longIntro:
       "Trending products show what customers are actively discovering and buying right now. This category is ideal for shoppers who want a fast way to explore current favorites across fashion accessories, printed apparel, and practical essentials. Instead of opening multiple sections and comparing everything manually, you can start here with a curated shortlist shaped by ongoing demand and shopper behavior. For users searching trending products online India or best selling products in India, this page reduces decision friction while still giving enough variety.\n\nTime-sensitive shopping usually depends on relevance and trust. That is why this collection highlights products that combine visual appeal, practical use, and value-oriented pricing for everyday buyers. Whether you are shopping for yourself, evaluating gift options, or trying to catch what is popular this month, this feed helps you identify strong choices quickly. Open any listing for deeper details, compare top picks, and move to checkout with confidence using products that are already attracting real customer attention.",

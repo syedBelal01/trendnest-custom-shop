@@ -46,7 +46,7 @@ export function productLongTailKeyword(product: Pick<Product, 'name' | 'category
   }
   if (subcategory.includes('belt') || name.includes('belt')) return 'men leather belt online india';
   if (category === 'fashion') return 'mens fashion accessories online india';
-  if (category === 'home') return 'home essentials online india';
+  if (category === 'home') return 'home & kitchen products online india';
   if (category === 'electronics') return 'electronics accessories online india';
   return 'online shopping india';
 }

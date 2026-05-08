@@ -214,7 +214,7 @@ export default function BestDealsPage() {
 
   const title = 'Best Deals | TrendNest99';
   const desc = ensureSeoMetaDescription(
-    `Browse ${sortedProducts.length} best deal products on TrendNest99. Discover fashion accessories, printed t-shirts, and home essentials with strong value pricing for Indian shoppers.`
+    `Browse ${sortedProducts.length} best deal products on TrendNest99. Discover fashion accessories, printed t-shirts, and home & kitchen products with strong value pricing for Indian shoppers.`
   );
 
   if (showSkeleton) {
@@ -260,7 +260,7 @@ export default function BestDealsPage() {
               </span>
               <h1 className="mt-2 text-4xl font-black tracking-tight text-slate-950 md:text-4xl">Best Deals</h1>
               <p className="mt-1 max-w-xl text-sm leading-5 text-slate-600">
-                Discover top discounts on fashion, custom prints, home essentials and trending products.
+                Discover top discounts on fashion, custom prints, home & kitchen products and trending products.
               </p>
             </div>
           </div>

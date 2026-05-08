@@ -148,7 +148,7 @@ function DefaultHeroSlide() {
             Style Meets <span className="text-orange-600">Affordability</span>
           </h1>
           <p className="mt-4 max-w-md text-sm leading-7 text-slate-600 md:text-base">
-            Discover trending fashion, home essentials and custom prints - all at unbeatable prices.
+            Discover trending fashion, home & kitchen products and custom prints - all at unbeatable prices.
           </p>
           <div className="mt-6 flex flex-wrap gap-3">
             <Link

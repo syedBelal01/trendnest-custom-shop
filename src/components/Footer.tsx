@@ -12,7 +12,7 @@ export default function Footer() {
             TrendNest<span className="text-orange-600">99</span>
           </div>
           <p className="mt-3 max-w-xs text-sm leading-6 text-slate-500">
-            Your one-stop shop for trendy fashion, home essentials, and custom prints.
+            Your one-stop shop for trendy fashion, home & kitchen products, and custom prints.
           </p>
           <div className="mt-5 flex gap-3">
             <a
@@ -59,7 +59,7 @@ export default function Footer() {
           <ul className="mt-4 space-y-2 text-sm text-slate-500">
             <li>
               <Link to="/category/home" className="hover:text-orange-600 transition-colors">
-                Home
+                Home & Kitchen
               </Link>
             </li>
             <li>

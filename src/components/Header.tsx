@@ -189,7 +189,7 @@ export default function Header() {
           <NavLink to="/category/home" className={desktopNavClass}>
             {({ isActive }) => (
               <>
-                Home
+                Home & Kitchen
                 {isActive ? <span className="absolute -bottom-2 left-2 right-2 h-0.5 rounded-full bg-orange-600" /> : null}
               </>
             )}

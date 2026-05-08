@@ -117,7 +117,7 @@ export const coupons: Coupon[] = [
 
 export const categories = [
   { id: 'fashion', name: 'Fashion', icon: '👔', description: 'Style & apparel', image: '/img3.png' },
-  { id: 'home', name: 'Home Essentials', icon: '🏠', description: 'Soap dispensers & more', image: unsplash('1556909114-f6e7ad7d3136') },
+  { id: 'home', name: 'Home & Kitchen', icon: '🏠', description: 'Soap dispensers & more', image: unsplash('1556909114-f6e7ad7d3136') },
   { id: 'electronics', name: 'Electronics', icon: '🔌', description: 'Gadgets & accessories', image: unsplash('1518779578993-ec3579fee39f') },
   { id: 'printed', name: 'Printed Products', icon: '🎨', description: 'Tees, cups & custom prints', image: unsplash('1523381210434-271e8be1f52b') },
   { id: 'trending', name: 'Trending', icon: '🔥', description: 'Popular picks', image: unsplash('1513506003901-1e6a229e2d15') },
