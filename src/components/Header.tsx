@@ -137,35 +137,46 @@ export default function Header() {
               : 'bg-orange-50 border-orange-100'
           }`}
         >
-          <div className="mx-auto flex max-w-7xl items-center justify-between gap-3 text-sm sm:text-base">
-            <div className="min-w-0 truncate font-semibold text-slate-900">
-              <span className={liveSale.theme === 'summer' ? 'animate-pulse' : ''} aria-hidden>
-                {liveSale.theme === 'summer' ? '☀️' : '🔥'}
-              </span>{' '}
-              {liveSale.bannerText?.trim() || `${liveSale.title} is Live!`}{' '}
-              {liveSale.discountText?.trim() ? <span className="font-bold">{liveSale.discountText}</span> : null}
+          <div className="mx-auto max-w-7xl text-sm sm:text-base">
+            <div className="flex flex-nowrap items-center justify-between gap-2">
+              <div className="min-w-0 truncate whitespace-nowrap text-xs font-semibold text-slate-900 sm:text-base">
+                <span className={liveSale.theme === 'summer' ? 'animate-pulse' : ''} aria-hidden>
+                  {liveSale.theme === 'summer' ? '☀️' : '🔥'}
+                </span>{' '}
+                {liveSale.bannerText?.trim() || `${liveSale.title} is Live!`}{' '}
+                {liveSale.discountText?.trim() ? <span className="font-bold">{liveSale.discountText}</span> : null}
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+                {saleCountdown ? (
+                  <div className="hidden items-center gap-1.5 text-xs font-semibold text-slate-700 lg:flex">
+                    <span className="mr-1 hidden text-slate-800 sm:inline">Ends in:</span>
+                    <span className="hidden rounded bg-white/90 px-2 py-0.5 sm:inline">
+                      {String(saleCountdown.days).padStart(2, '0')}d
+                    </span>
+                    <span className="hidden rounded bg-white/90 px-2 py-0.5 sm:inline">
+                      {String(saleCountdown.hours).padStart(2, '0')}h
+                    </span>
+                    <span className="rounded bg-white/90 px-2 py-0.5">{String(saleCountdown.minutes).padStart(2, '0')}m</span>
+                    <span className="rounded bg-white/90 px-2 py-0.5">{String(saleCountdown.seconds).padStart(2, '0')}s</span>
+                  </div>
+                ) : null}
+                <Link
+                  to={liveSaleLink}
+                  className="whitespace-nowrap rounded-md bg-orange-600 px-2.5 py-1 text-[11px] font-bold text-white transition hover:bg-orange-700 sm:px-4 sm:py-2 sm:text-sm"
+                >
+                  {liveSale.ctaText?.trim() || 'Shop Now'}
+                </Link>
+              </div>
             </div>
-            <div className="flex shrink-0 items-center gap-2">
-              {saleCountdown ? (
-                <div className="flex items-center gap-1.5 text-[11px] sm:text-xs font-semibold text-slate-700">
-                  <span className="mr-1 hidden text-slate-800 sm:inline">Ends in:</span>
-                  <span className="hidden rounded bg-white/90 px-2 py-0.5 sm:inline">
-                    {String(saleCountdown.days).padStart(2, '0')}d
-                  </span>
-                  <span className="hidden rounded bg-white/90 px-2 py-0.5 sm:inline">
-                    {String(saleCountdown.hours).padStart(2, '0')}h
-                  </span>
-                  <span className="rounded bg-white/90 px-2 py-0.5">{String(saleCountdown.minutes).padStart(2, '0')}m</span>
-                  <span className="rounded bg-white/90 px-2 py-0.5">{String(saleCountdown.seconds).padStart(2, '0')}s</span>
-                </div>
-              ) : null}
-              <Link
-                to={liveSaleLink}
-                className="rounded-md bg-orange-600 px-3.5 py-1.5 text-xs font-bold text-white transition hover:bg-orange-700 sm:px-4 sm:py-2 sm:text-sm"
-              >
-                {liveSale.ctaText?.trim() || 'Shop Now'}
-              </Link>
-            </div>
+            {saleCountdown ? (
+              <div className="mt-1.5 flex items-center justify-center gap-1 text-[10px] font-semibold text-slate-700 lg:hidden">
+                <span className="mr-1 text-slate-800">Ends in:</span>
+                <span className="rounded bg-white/90 px-1.5 py-0.5">{String(saleCountdown.days).padStart(2, '0')}d</span>
+                <span className="rounded bg-white/90 px-1.5 py-0.5">{String(saleCountdown.hours).padStart(2, '0')}h</span>
+                <span className="rounded bg-white/90 px-1.5 py-0.5">{String(saleCountdown.minutes).padStart(2, '0')}m</span>
+                <span className="rounded bg-white/90 px-1.5 py-0.5">{String(saleCountdown.seconds).padStart(2, '0')}s</span>
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}
