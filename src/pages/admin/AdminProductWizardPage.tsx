@@ -12,6 +12,7 @@ import { ADMIN_CATEGORY_TREE, ADMIN_MAIN_CATEGORIES } from '@/data/adminCategori
 import { publishProductDraftApi } from '@/lib/adminDraftsApi';
 import { ProductDraftProvider, useProductDraft } from '@/contexts/ProductDraftContext';
 import { useProducts } from '@/contexts/ProductsContext';
+import { Trash2 } from 'lucide-react';
 
 type DraftVariantType = { name: string; values: string[] };
 type DraftVariantItem = {
@@ -76,6 +77,18 @@ function buildVariantCombos(types: DraftVariantType[]): Array<{ key: string; att
   };
   walk(0, {});
   return combos;
+}
+
+function removeImageAtWithPrimary(items: string[], primaryIndex: number, removeAt: number): { items: string[]; primaryIndex: number } {
+  const nextItems = items.filter((_, idx) => idx !== removeAt);
+  if (nextItems.length === 0) return { items: [], primaryIndex: 0 };
+
+  let nextPrimary = primaryIndex;
+  if (removeAt === primaryIndex) nextPrimary = 0;
+  else if (removeAt < primaryIndex) nextPrimary = Math.max(0, primaryIndex - 1);
+  nextPrimary = Math.min(nextPrimary, Math.max(0, nextItems.length - 1));
+
+  return { items: nextItems, primaryIndex: nextPrimary };
 }
 
 function upsertDefaultVariantItem(
@@ -549,11 +562,32 @@ function QuickPrimaryImageUpload() {
     }
   };
 
+  const clearPrimary = () => {
+    if (!draft) return;
+    const items = Array.isArray(draft.images?.items) ? draft.images.items.map((u) => String(u)).filter(Boolean) : [];
+    const idx = Number.isFinite(Number(draft.images?.primaryIndex)) ? Number(draft.images?.primaryIndex) : 0;
+    if (!items.length || idx < 0 || idx >= items.length) return;
+    const next = removeImageAtWithPrimary(items, idx, idx);
+    updateDraftLocal({ images: next });
+    toast.success('Primary image removed');
+  };
+
   return (
     <div className="rounded-lg border border-border bg-background p-3 flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
       <div className="flex items-center gap-3">
-        <div className="h-16 w-16 rounded-md border bg-muted/30 overflow-hidden flex items-center justify-center">
+        <div className="relative h-16 w-16 rounded-md border bg-muted/30 overflow-hidden flex items-center justify-center">
           {primary ? <img src={primary} alt="" className="h-full w-full object-cover" /> : <div className="text-[10px] text-muted-foreground">No image</div>}
+          {primary ? (
+            <button
+              type="button"
+              className="absolute right-1 top-1 grid h-5 w-5 place-items-center rounded-full bg-black/65 text-white transition hover:bg-black/80"
+              onClick={clearPrimary}
+              aria-label="Delete primary image"
+              title="Delete image"
+            >
+              <Trash2 className="h-3 w-3" />
+            </button>
+          ) : null}
         </div>
         <div>
           <p className="text-sm font-medium">Primary image</p>
@@ -606,6 +640,14 @@ function ImagesInlineUploader() {
     }
   };
 
+  const removeImageAt = (idxToRemove: number) => {
+    const safeImages = images.map((u) => String(u)).filter(Boolean);
+    if (idxToRemove < 0 || idxToRemove >= safeImages.length) return;
+    const next = removeImageAtWithPrimary(safeImages, primaryIndex, idxToRemove);
+    updateDraftLocal({ images: next });
+    toast.success('Image removed');
+  };
+
   return (
     <div className="rounded-xl border border-border bg-card p-4 shadow-sm space-y-3">
       <div className="flex items-center justify-between gap-2">
@@ -634,6 +676,27 @@ function ImagesInlineUploader() {
               title={idx === primaryIndex ? 'Primary image' : 'Set as primary'}
             >
               <img src={src} alt="" className="w-full h-28 object-cover" />
+              <span
+                role="button"
+                tabIndex={0}
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  removeImageAt(idx);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    removeImageAt(idx);
+                  }
+                }}
+                className="absolute right-1 top-1 grid h-6 w-6 place-items-center rounded-full bg-black/65 text-white transition hover:bg-black/80"
+                aria-label="Delete image"
+                title="Delete image"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </span>
               <div className="absolute bottom-1 left-1 text-[10px] bg-background/90 px-1.5 py-0.5 rounded">
                 {idx === primaryIndex ? 'Primary' : 'Tap to set primary'}
               </div>
@@ -680,6 +743,14 @@ function ImagesStep() {
     }
   };
 
+  const removeImageAt = (idxToRemove: number) => {
+    const safeImages = images.map((u) => String(u)).filter(Boolean);
+    if (idxToRemove < 0 || idxToRemove >= safeImages.length) return;
+    const next = removeImageAtWithPrimary(safeImages, primaryIndex, idxToRemove);
+    updateDraftLocal({ images: next });
+    toast.success('Image removed');
+  };
+
   return (
     <StepShell
       step={1}
@@ -720,6 +791,27 @@ function ImagesStep() {
                 title={idx === primaryIndex ? 'Primary image' : 'Set as primary'}
               >
                 <img src={src} alt="" className="w-full h-28 object-cover" />
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    removeImageAt(idx);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      removeImageAt(idx);
+                    }
+                  }}
+                  className="absolute right-1 top-1 grid h-6 w-6 place-items-center rounded-full bg-black/65 text-white transition hover:bg-black/80"
+                  aria-label="Delete image"
+                  title="Delete image"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </span>
                 <div className="absolute bottom-1 left-1 text-[10px] bg-background/90 px-1.5 py-0.5 rounded">
                   {idx === primaryIndex ? 'Primary' : 'Tap to set primary'}
                 </div>
@@ -1032,6 +1124,14 @@ function VariantRow(props: {
     }
   };
 
+  const removeVariantImageAt = (idxToRemove: number) => {
+    if (idxToRemove < 0 || idxToRemove >= images.length) return;
+    const next = [...props.items];
+    next[props.idx] = { ...props.item, images: images.filter((_, i) => i !== idxToRemove) };
+    props.onChangeItems(next);
+    toast.success('Variant image removed');
+  };
+
   return (
     <div className="rounded-lg border p-3 space-y-2">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -1143,6 +1243,27 @@ function VariantRow(props: {
                 title={i === 0 ? 'Primary image' : 'Set as primary'}
               >
                 <img src={src} alt="" className={`h-14 w-14 object-cover rounded-md border ${i === 0 ? 'ring-2 ring-primary' : ''}`} />
+                <span
+                  role="button"
+                  tabIndex={0}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    removeVariantImageAt(i);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      removeVariantImageAt(i);
+                    }
+                  }}
+                  className="absolute -right-1 -top-1 grid h-5 w-5 place-items-center rounded-full bg-black/65 text-white transition hover:bg-black/80"
+                  aria-label="Delete variant image"
+                  title="Delete image"
+                >
+                  <Trash2 className="h-3 w-3" />
+                </span>
               </button>
             ))}
           </div>

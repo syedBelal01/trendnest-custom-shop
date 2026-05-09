@@ -8,7 +8,7 @@ export type AdminCategoryTree = Record<ProductCategory, string[]>;
  */
 export const ADMIN_CATEGORY_TREE: AdminCategoryTree = {
   fashion: ['Belts', 'Shirts', 'T-Shirts', 'Jeans', 'Shoes', 'Accessories'],
-  home: ['Shop Dispenser', 'Furniture', 'Bath', 'Kitchen', 'Decor'],
+  home: ['Soap Dispenser', 'Furniture', 'Bath', 'Kitchen', 'Decor'],
   electronics: ['Mobiles', 'Headphones', 'Chargers', 'Smart Watches', 'Accessories'],
   printed: ['Printed Tees', 'Printed Cups', 'Custom Print'],
   trending: ['Trending'],

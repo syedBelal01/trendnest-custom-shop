@@ -75,9 +75,18 @@ export function resolveProductFromRouteParam(
 ): Pick<Product, 'id' | 'name' | 'category' | 'subcategory'> | undefined {
   const normalized = normalizeRouteProductParam(routeParam);
   if (!normalized) return undefined;
-  const byId = products.find((p) => String(p.id).trim().toLowerCase() === normalized);
-  if (byId) return byId;
-  return products.find((p) => productSeoSlug(p) === normalized);
+  const candidates = [normalized];
+  if (normalized.includes('shop-dispenser')) {
+    candidates.push(normalized.replace(/shop-dispenser/g, 'soap-dispenser'));
+  }
+
+  for (const candidate of candidates) {
+    const byId = products.find((p) => String(p.id).trim().toLowerCase() === candidate);
+    if (byId) return byId;
+    const bySlug = products.find((p) => productSeoSlug(p) === candidate);
+    if (bySlug) return bySlug;
+  }
+  return undefined;
 }
 
 export function productImageAlt(

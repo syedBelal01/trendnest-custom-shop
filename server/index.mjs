@@ -49,6 +49,22 @@ function sanitizeProductDescription(raw) {
   }).trim();
 }
 
+function normalizeSoapDispenserTypos(raw) {
+  const s = String(raw ?? '');
+  if (!s) return s;
+  return s.replace(/\bshop\s*dispenser\b/gi, 'Soap Dispenser');
+}
+
+const LEGACY_PRODUCT_IMAGE_URL = 'https://res.cloudinary.com/diclcqwnm/image/upload/v1778159066/';
+const REPLACEMENT_PRODUCT_IMAGE_URL =
+  'https://res.cloudinary.com/diclcqwnm/image/upload/v1778159071/trendnest/products/pbddeuehzcxxhwg9b1em.jpg';
+
+function normalizeLegacyProductImageUrl(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s) return s;
+  return s === LEGACY_PRODUCT_IMAGE_URL ? REPLACEMENT_PRODUCT_IMAGE_URL : s;
+}
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Always load .env from project root (folder above server/), not only from process.cwd()
 // In local/dev, prefer values from the repo .env even if the parent process already has env vars set.
@@ -1319,6 +1335,19 @@ function serialize(doc) {
 function serializeProductDoc(doc) {
   const o = serialize(doc);
   if (!o) return null;
+  o.name = normalizeSoapDispenserTypos(o.name).trim();
+  if (typeof o.subcategory === 'string') o.subcategory = normalizeSoapDispenserTypos(o.subcategory).trim();
+  if (Array.isArray(o.images)) {
+    o.images = o.images.map((u) => normalizeLegacyProductImageUrl(u)).filter(Boolean);
+  }
+  if (Array.isArray(o.variantOptions)) {
+    o.variantOptions = o.variantOptions.map((v) => ({
+      ...v,
+      images: Array.isArray(v?.images)
+        ? v.images.map((u) => normalizeLegacyProductImageUrl(u)).filter(Boolean)
+        : [],
+    }));
+  }
   // Internal-only shipping attributes should not be exposed to storefront clients.
   delete o.shipWeightKg;
   delete o.shipLengthCm;
@@ -1343,7 +1372,15 @@ function serializeProductDoc(doc) {
     o.variantModel.items = o.variantModel.items.map((it) => {
       const s = Math.max(0, Math.floor(Number(it?.stock) || 0));
       sum += s;
-      return { ...it, stock: s };
+      return {
+        ...it,
+        stock: s,
+        previewImage: it?.previewImage != null ? normalizeLegacyProductImageUrl(it.previewImage) : it?.previewImage,
+        image: it?.image != null ? normalizeLegacyProductImageUrl(it.image) : it?.image,
+        images: Array.isArray(it?.images)
+          ? it.images.map((u) => normalizeLegacyProductImageUrl(u)).filter(Boolean)
+          : it?.images,
+      };
     });
     o.stock = sum;
   } else {
@@ -5050,8 +5087,12 @@ app.get('/api/review-invites/verify', mongoReady, async (req, res) => {
     res.json({
       status: 'ok',
       product: product
-        ? { id: String(product._id), name: String(product.name || ''), image: Array.isArray(product.images) ? product.images[0] : undefined }
-        : { id: String(inv.productId), name: String(it?.name || 'Product') },
+        ? {
+            id: String(product._id),
+            name: normalizeSoapDispenserTypos(String(product.name || '')),
+            image: Array.isArray(product.images) ? product.images[0] : undefined,
+          }
+        : { id: String(inv.productId), name: normalizeSoapDispenserTypos(String(it?.name || 'Product')) },
       orderId: String(inv.orderId),
       expiresAt: inv.expiresAt instanceof Date ? inv.expiresAt.toISOString() : inv.expiresAt,
     });
@@ -5737,7 +5778,7 @@ function normalizeVariantOptionsFromBody(raw) {
     .map((v) => ({
       name: (typeof v?.name === 'string' ? v.name : String(v?.name ?? '')).trim(),
       images: Array.isArray(v?.images)
-        ? v.images.map((u) => String(u)).filter(Boolean)
+        ? v.images.map((u) => normalizeLegacyProductImageUrl(u)).filter(Boolean)
         : [],
     }))
     .filter((v) => v.name.length > 0);
@@ -5781,7 +5822,9 @@ function normalizeDraftPatch(patch) {
   if (patch.subcategory !== undefined) out.subcategory = String(patch.subcategory ?? '').trim();
   if (patch.details !== undefined) out.details = patch.details && typeof patch.details === 'object' ? patch.details : {};
   if (patch.images !== undefined) {
-    const items = Array.isArray(patch.images?.items) ? patch.images.items.map((u) => String(u)).filter(Boolean).slice(0, 8) : [];
+    const items = Array.isArray(patch.images?.items)
+      ? patch.images.items.map((u) => normalizeLegacyProductImageUrl(u)).filter(Boolean).slice(0, 8)
+      : [];
     const primaryIndex = clampImagePrimaryIndex(items, patch.images?.primaryIndex);
     out.images = { items, primaryIndex };
   }
@@ -5992,7 +6035,9 @@ function requireUniqueSkus(rows) {
 function draftToProductPayload(draft) {
   const d = draft?.details && typeof draft.details === 'object' ? draft.details : {};
   const ship = draft?.shipping && typeof draft.shipping === 'object' ? draft.shipping : {};
-  const images = Array.isArray(draft?.images?.items) ? draft.images.items.map((u) => String(u)).filter(Boolean).slice(0, 8) : [];
+  const images = Array.isArray(draft?.images?.items)
+    ? draft.images.items.map((u) => normalizeLegacyProductImageUrl(u)).filter(Boolean).slice(0, 8)
+    : [];
   const primaryIndex = clampImagePrimaryIndex(images, draft?.images?.primaryIndex);
   const orderedImages = images.length
     ? [images[primaryIndex], ...images.filter((_, i) => i !== primaryIndex)]
@@ -6003,7 +6048,7 @@ function draftToProductPayload(draft) {
   const hasVariants = !!v.hasVariants || (Array.isArray(v.items) && v.items.length > 0);
 
   const base = {
-    name: String(d.name ?? '').trim(),
+    name: normalizeSoapDispenserTypos(String(d.name ?? '').trim()),
     description: sanitizeProductDescription(d.description ?? ''),
     originalPrice: d.originalPrice != null && d.originalPrice !== '' ? Number(d.originalPrice) : undefined,
     category: String(draft.categoryMain ?? '').trim(),
@@ -6086,8 +6131,10 @@ function draftToProductPayload(draft) {
               .map((it) => {
                 const attrs = it?.attrs && typeof it.attrs === 'object' ? it.attrs : {};
                 const name = String(attrs?.[firstTypeName] ?? '').trim();
-                const imgs = Array.isArray(it?.images) ? it.images.map((u) => String(u)).filter(Boolean).slice(0, 8) : [];
-                const legacy = it?.image ? [String(it.image)] : [];
+                const imgs = Array.isArray(it?.images)
+                  ? it.images.map((u) => normalizeLegacyProductImageUrl(u)).filter(Boolean).slice(0, 8)
+                  : [];
+                const legacy = it?.image ? [normalizeLegacyProductImageUrl(it.image)] : [];
                 const images = [...imgs, ...legacy].map((u) => String(u)).filter(Boolean);
                 return name ? [name, { name, images }] : null;
               })
@@ -6119,9 +6166,12 @@ function draftToProductPayload(draft) {
         onlinePrice: it?.onlinePrice != null ? Number(it.onlinePrice) : undefined,
         codPrice: Number.isFinite(Number(it?.price)) ? Number(it.price) : undefined,
         stock: Number(it?.stock ?? 0) || 0,
-        previewImage: it?.previewImage != null ? String(it.previewImage).trim() || undefined : undefined,
-        image: it?.image ? String(it.image) : undefined,
-        images: Array.isArray(it?.images) ? it.images.map((u) => String(u)).filter(Boolean).slice(0, 8) : undefined,
+        previewImage:
+          it?.previewImage != null ? normalizeLegacyProductImageUrl(it.previewImage) || undefined : undefined,
+        image: it?.image ? normalizeLegacyProductImageUrl(it.image) : undefined,
+        images: Array.isArray(it?.images)
+          ? it.images.map((u) => normalizeLegacyProductImageUrl(u)).filter(Boolean).slice(0, 8)
+          : undefined,
         sizes: Array.isArray(it?.sizes)
           ? it.sizes.map((s) => String(s).trim()).filter(Boolean)
           : undefined,
@@ -6491,16 +6541,19 @@ app.post('/api/products', mongoReady, async (req, res) => {
     const nextOrder = Number.isFinite(maxVal) ? maxVal + 10 : 10;
     const doc = await Product.create({
       _id: id,
-      name: body.name,
+      name: normalizeSoapDispenserTypos(body.name),
       description: sanitizeProductDescription(body.description ?? ''),
       sku: body.sku != null ? String(body.sku) : '',
       price: Number(body.price),
       onlinePrice: body.onlinePrice != null ? Number(body.onlinePrice) : undefined,
       codPrice: Number.isFinite(forcedCodPrice) ? forcedCodPrice : undefined,
       originalPrice: body.originalPrice != null ? Number(body.originalPrice) : undefined,
-      images: Array.isArray(body.images) && body.images.length ? body.images : ['https://images.unsplash.com/photo-1553062407-98d43420e9e7?w=600'],
+      images:
+        Array.isArray(body.images) && body.images.length
+          ? body.images.map((u) => normalizeLegacyProductImageUrl(u)).filter(Boolean)
+          : ['https://images.unsplash.com/photo-1553062407-98d43420e9e7?w=600'],
       category: body.category,
-      subcategory: body.subcategory,
+      subcategory: body.subcategory != null ? normalizeSoapDispenserTypos(body.subcategory) : body.subcategory,
       displayOrder: nextOrder,
       sizes: body.sizes,
       variantOptions: normalizeVariantOptionsFromBody(body.variantOptions),
@@ -6518,9 +6571,12 @@ app.post('/api/products', mongoReady, async (req, res) => {
               ...it,
               codPrice: Number.isFinite(price) ? price : undefined,
               displayName: it?.displayName != null ? String(it.displayName).trim() || undefined : undefined,
-              previewImage: it?.previewImage != null ? String(it.previewImage).trim() || undefined : undefined,
-              image: it?.image != null ? String(it.image).trim() || undefined : undefined,
-              images: Array.isArray(it?.images) ? it.images.map((u) => String(u).trim()).filter(Boolean) : undefined,
+              previewImage:
+                it?.previewImage != null ? normalizeLegacyProductImageUrl(it.previewImage) || undefined : undefined,
+              image: it?.image != null ? normalizeLegacyProductImageUrl(it.image) || undefined : undefined,
+              images: Array.isArray(it?.images)
+                ? it.images.map((u) => normalizeLegacyProductImageUrl(u)).filter(Boolean)
+                : undefined,
               sizes: Array.isArray(it?.sizes) ? it.sizes.map((s) => String(s).trim()).filter(Boolean) : undefined,
             };
           }),
@@ -6605,7 +6661,7 @@ app.patch('/api/admin/products/reorder', mongoReady, adminKeyRequired, async (re
  */
 function buildProductUpdateSet(src) {
   const out = {};
-  if (src.name !== undefined) out.name = String(src.name);
+  if (src.name !== undefined) out.name = normalizeSoapDispenserTypos(String(src.name));
   if (src.description !== undefined) out.description = sanitizeProductDescription(src.description ?? '');
   if (src.sku !== undefined) out.sku = String(src.sku ?? '');
   if (src.price !== undefined) {
@@ -6633,10 +6689,10 @@ function buildProductUpdateSet(src) {
   }
   if (src.images !== undefined) {
     if (!Array.isArray(src.images)) throw new Error('images must be an array');
-    out.images = src.images.map((u) => String(u)).filter(Boolean);
+    out.images = src.images.map((u) => normalizeLegacyProductImageUrl(u)).filter(Boolean);
   }
   if (src.category !== undefined) out.category = String(src.category);
-  if (src.subcategory !== undefined) out.subcategory = src.subcategory != null ? String(src.subcategory) : '';
+  if (src.subcategory !== undefined) out.subcategory = src.subcategory != null ? normalizeSoapDispenserTypos(String(src.subcategory)) : '';
   if (src.sizes !== undefined) {
     out.sizes = Array.isArray(src.sizes) ? src.sizes.map((s) => String(s)) : [];
   }
@@ -6653,9 +6709,11 @@ function buildProductUpdateSet(src) {
       if (Array.isArray(vm.items)) {
         const normalizedItems = vm.items.map((it) => {
           const price = Number(it?.price);
-          const images = Array.isArray(it?.images) ? it.images.map((u) => String(u).trim()).filter(Boolean) : undefined;
-          const image = it?.image != null ? String(it.image).trim() : undefined;
-          const previewImage = it?.previewImage != null ? String(it.previewImage).trim() : undefined;
+          const images = Array.isArray(it?.images)
+            ? it.images.map((u) => normalizeLegacyProductImageUrl(u)).filter(Boolean)
+            : undefined;
+          const image = it?.image != null ? normalizeLegacyProductImageUrl(it.image) : undefined;
+          const previewImage = it?.previewImage != null ? normalizeLegacyProductImageUrl(it.previewImage) : undefined;
           const displayName = it?.displayName != null ? String(it.displayName).trim() : undefined;
           const sizes = Array.isArray(it?.sizes) ? it.sizes.map((s) => String(s).trim()).filter(Boolean) : undefined;
           const stock = Math.max(0, Math.floor(Number(it?.stock) || 0));

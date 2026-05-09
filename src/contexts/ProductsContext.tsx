@@ -15,6 +15,50 @@ export type ProductApiIssue = {
   message: string;
 };
 
+function normalizeSoapDispenserTypos(text: unknown): string {
+  return String(text ?? '').replace(/\bshop\s*dispenser\b/gi, 'Soap Dispenser');
+}
+
+const LEGACY_PRODUCT_IMAGE_URL = 'https://res.cloudinary.com/diclcqwnm/image/upload/v1778159066/';
+const REPLACEMENT_PRODUCT_IMAGE_URL =
+  'https://res.cloudinary.com/diclcqwnm/image/upload/v1778159071/trendnest/products/pbddeuehzcxxhwg9b1em.jpg';
+
+function normalizeLegacyProductImageUrl(raw: unknown): string {
+  const s = String(raw ?? '').trim();
+  if (!s) return s;
+  return s === LEGACY_PRODUCT_IMAGE_URL ? REPLACEMENT_PRODUCT_IMAGE_URL : s;
+}
+
+function normalizeProductTypos(product: Product): Product {
+  const next: Product = {
+    ...product,
+    name: normalizeSoapDispenserTypos(product.name),
+    subcategory: product.subcategory != null ? normalizeSoapDispenserTypos(product.subcategory) : product.subcategory,
+    images: Array.isArray(product.images)
+      ? product.images.map((u) => normalizeLegacyProductImageUrl(u)).filter(Boolean)
+      : product.images,
+  };
+  if (Array.isArray(next.variantOptions)) {
+    next.variantOptions = next.variantOptions.map((opt) => ({
+      ...opt,
+      images: Array.isArray(opt.images) ? opt.images.map((u) => normalizeLegacyProductImageUrl(u)).filter(Boolean) : [],
+    }));
+  }
+  if (next.variantModel?.items?.length) {
+    next.variantModel = {
+      ...next.variantModel,
+      items: next.variantModel.items.map((it) => ({
+        ...it,
+        displayName: it.displayName != null ? normalizeSoapDispenserTypos(it.displayName) : it.displayName,
+        previewImage: it.previewImage != null ? normalizeLegacyProductImageUrl(it.previewImage) : it.previewImage,
+        image: it.image != null ? normalizeLegacyProductImageUrl(it.image) : it.image,
+        images: Array.isArray(it.images) ? it.images.map((u) => normalizeLegacyProductImageUrl(u)).filter(Boolean) : it.images,
+      })),
+    };
+  }
+  return next;
+}
+
 type ProductsContextValue = {
   products: Product[];
   ratingSummary: Record<string, RatingSummary>;
@@ -61,7 +105,7 @@ export function ProductsProvider({ children }: { children: ReactNode }) {
   const refreshProducts = useCallback(async () => {
     try {
       const list = await fetchProductsApi();
-      setProducts(list);
+      setProducts(list.map(normalizeProductTypos));
       try {
         const summary = await fetchReviewsSummaryApi(list.map(p => p.id));
         setRatingSummary(summary);
@@ -72,7 +116,7 @@ export function ProductsProvider({ children }: { children: ReactNode }) {
       setApiIssue(null);
     } catch (e) {
       setApiAvailable(false);
-      setProducts([...initialProducts]);
+      setProducts(initialProducts.map(normalizeProductTypos));
       setRatingSummary({});
       if (e instanceof ProductsApiError) {
         setApiIssue({ code: e.code, message: e.message });
@@ -114,7 +158,7 @@ export function ProductsProvider({ children }: { children: ReactNode }) {
       try {
         const list = await fetchProductsApi();
         if (!cancelled) {
-          setProducts(list);
+          setProducts(list.map(normalizeProductTypos));
           try {
             const summary = await fetchReviewsSummaryApi(list.map(p => p.id));
             if (!cancelled) setRatingSummary(summary);
@@ -127,7 +171,7 @@ export function ProductsProvider({ children }: { children: ReactNode }) {
       } catch (e) {
         if (!cancelled) {
           setApiAvailable(false);
-          setProducts([...initialProducts]);
+          setProducts(initialProducts.map(normalizeProductTypos));
           setRatingSummary({});
           if (e instanceof ProductsApiError) {
             setApiIssue({ code: e.code, message: e.message });
