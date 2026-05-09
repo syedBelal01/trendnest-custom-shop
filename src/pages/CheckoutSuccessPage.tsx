@@ -3,8 +3,10 @@ import { useCart } from '@/contexts/CartContext';
 import { useEffect, useMemo } from 'react';
 import { CheckCircle2 } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useAuth } from '@/contexts/AuthContext';
 
 const LAST_ORDER_ID_KEY = 'tn:last_order_id_v1';
+const LAST_GUEST_CHECKOUT_KEY = 'tn:last_guest_checkout_v1';
 
 function ConfettiBurst() {
   const pieces = useMemo(
@@ -49,6 +51,7 @@ export default function CheckoutSuccessPage() {
   const { clearCart } = useCart();
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useAuth();
 
   const orderId = (() => {
     const fromState = (location.state as any)?.orderId;
@@ -61,6 +64,20 @@ export default function CheckoutSuccessPage() {
     // Ensure cart is cleared even if user refreshes success page.
     clearCart();
   }, [clearCart]);
+
+  const guestSeed = (() => {
+    try {
+      const raw = sessionStorage.getItem(LAST_GUEST_CHECKOUT_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as { email?: string; phone?: string; orderId?: string; name?: string };
+      return parsed && typeof parsed === 'object' ? parsed : null;
+    } catch {
+      return null;
+    }
+  })();
+
+  const isGuestFlow = !user;
+  const viewOrdersHref = isGuestFlow ? '/account/claim' : '/account/orders';
 
   return (
     <div className="relative min-h-[calc(100vh-4rem)] sm:min-h-[calc(100vh-5rem)]">
@@ -95,8 +112,21 @@ export default function CheckoutSuccessPage() {
               Continue Shopping
             </Button>
             <Button asChild variant="outline" className="h-11">
-              <Link to="/account/orders" replace>
-                View Orders
+              <Link
+                to={viewOrdersHref}
+                replace
+                state={
+                  isGuestFlow
+                    ? {
+                        orderId: orderId || guestSeed?.orderId || '',
+                        name: guestSeed?.name || '',
+                        email: guestSeed?.email || '',
+                        phone: guestSeed?.phone || '',
+                      }
+                    : undefined
+                }
+              >
+                {isGuestFlow ? 'Claim Account & View Orders' : 'View Orders'}
               </Link>
             </Button>
           </div>

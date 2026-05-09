@@ -60,6 +60,24 @@ import { clampIndianPhoneInput, isCompleteValidIndianMobile, isIndianPhoneValid,
 import { validateCouponApi } from '@/lib/couponsApi';
 
 const LAST_ORDER_ID_KEY = 'tn:last_order_id_v1';
+const LAST_GUEST_CHECKOUT_KEY = 'tn:last_guest_checkout_v1';
+
+function saveGuestCheckoutSeed(input: { orderId: string; email: string; phone: string; name?: string }) {
+  try {
+    sessionStorage.setItem(
+      LAST_GUEST_CHECKOUT_KEY,
+      JSON.stringify({
+        orderId: String(input.orderId || '').trim(),
+        name: String(input.name || '').trim(),
+        email: String(input.email || '').trim(),
+        phone: String(input.phone || '').trim(),
+        createdAt: new Date().toISOString(),
+      })
+    );
+  } catch {
+    // ignore storage issues
+  }
+}
 
 function itemSummary(i: CartItem): string {
   const parts: string[] = [];
@@ -171,6 +189,8 @@ export default function CheckoutPage() {
   const [shippingQuoteLoading, setShippingQuoteLoading] = useState(false);
   /** Mirrors server ALLOW_CHECKOUT_WITHOUT_SHIPPING_QUOTE (null until /api/health loads). */
   const [allowRelaxedShipping, setAllowRelaxedShipping] = useState<boolean | null>(null);
+  /** Mirrors server CHECKOUT_OTP_REQUIRED (null until /api/health loads). */
+  const [checkoutOtpRequiredByConfig, setCheckoutOtpRequiredByConfig] = useState<boolean | null>(null);
 
   const set = (key: keyof CustomerInfo, val: string) => setForm(p => ({ ...p, [key]: val }));
 
@@ -473,9 +493,15 @@ export default function CheckoutPage() {
     void (async () => {
       try {
         const h = await fetchPublicHealthApi();
-        if (!cancelled) setAllowRelaxedShipping(!!h.allowCheckoutWithoutShippingQuote);
+        if (!cancelled) {
+          setAllowRelaxedShipping(!!h.allowCheckoutWithoutShippingQuote);
+          setCheckoutOtpRequiredByConfig(h.checkoutOtpRequired === false ? false : true);
+        }
       } catch {
-        if (!cancelled) setAllowRelaxedShipping(false);
+        if (!cancelled) {
+          setAllowRelaxedShipping(false);
+          setCheckoutOtpRequiredByConfig(true);
+        }
       }
     })();
     return () => {
@@ -546,8 +572,23 @@ export default function CheckoutPage() {
     };
   }, [form.pincode, paymentMethod, items, couponCode, couponValidatedFor, totalsForPaymentMethod]);
 
+  const checkoutOtpEnabled = checkoutOtpRequiredByConfig === true;
+
   // Background check: if email exists, skip OTP. If new email, auto-send OTP.
   useEffect(() => {
+    if (!checkoutOtpEnabled) {
+      setEmailKnown('unknown');
+      setOtpRequired(false);
+      setOtpChallengeId(null);
+      setOtpVerified(false);
+      setOtpCode('');
+      setCheckoutNewPass('');
+      setCheckoutConfirmPass('');
+      setCheckoutPasswordSaved(false);
+      lastOtpEmail.current = null;
+      return;
+    }
+
     const email = form.email.trim();
     if (!simpleEmailValid(email)) {
       setEmailKnown('unknown');
@@ -605,7 +646,7 @@ export default function CheckoutPage() {
 
     return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.email]);
+  }, [form.email, checkoutOtpEnabled]);
 
   const deliveryValid = useMemo(() => {
     return !!(
@@ -729,6 +770,12 @@ export default function CheckoutPage() {
         clearCart();
         await refreshProducts();
         window.dispatchEvent(new CustomEvent('trendnest:products-updated'));
+        saveGuestCheckoutSeed({
+          orderId: created.id,
+          name: form.name.trim(),
+          email: form.email.trim(),
+          phone: phoneCheck.digits,
+        });
         sessionStorage.setItem(LAST_ORDER_ID_KEY, created.id);
         setOrderPlaced(created.id);
         navigate('/checkout/success', { replace: true, state: { orderId: created.id } });
@@ -766,6 +813,12 @@ export default function CheckoutPage() {
             clearCart();
             await refreshProducts();
             window.dispatchEvent(new CustomEvent('trendnest:products-updated'));
+            saveGuestCheckoutSeed({
+              orderId: verified.order.id,
+              name: form.name.trim(),
+              email: form.email.trim(),
+              phone: phoneCheck.digits,
+            });
             sessionStorage.setItem(LAST_ORDER_ID_KEY, verified.order.id);
             setOrderPlaced(verified.order.id);
             navigate('/checkout/success', { replace: true, state: { orderId: verified.order.id } });

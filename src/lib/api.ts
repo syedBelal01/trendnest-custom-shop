@@ -32,6 +32,7 @@ export type PublicHealthResponse = {
   mongo?: boolean;
   cloudinary?: boolean;
   allowCheckoutWithoutShippingQuote?: boolean;
+  checkoutOtpRequired?: boolean;
 };
 
 const PUBLIC_HEALTH_TTL_MS = 60_000;
@@ -40,6 +41,7 @@ let publicHealthCache: { expiresAt: number; data: PublicHealthResponse } | null 
 const STRICT_HEALTH_FALLBACK: PublicHealthResponse = {
   ok: false,
   allowCheckoutWithoutShippingQuote: false,
+  checkoutOtpRequired: true,
 };
 
 /**
@@ -56,6 +58,7 @@ export async function fetchPublicHealthApi(): Promise<PublicHealthResponse> {
     const data: PublicHealthResponse = {
       ...raw,
       allowCheckoutWithoutShippingQuote: !!raw.allowCheckoutWithoutShippingQuote,
+      checkoutOtpRequired: raw.checkoutOtpRequired === false ? false : true,
     };
     publicHealthCache = { expiresAt: now + PUBLIC_HEALTH_TTL_MS, data };
     return data;

@@ -16,6 +16,7 @@ import BestDealsPage from "@/pages/BestDealsPage";
 import CartPage from "@/pages/CartPage";
 import CheckoutPage from "@/pages/CheckoutPage";
 import CheckoutSuccessPage from "@/pages/CheckoutSuccessPage";
+import AccountClaimPage from "@/pages/AccountClaimPage";
 import SearchPage from "@/pages/SearchPage";
 import SalePage from "@/pages/SalePage";
 import AdminLayout from "@/pages/admin/AdminLayout";
@@ -101,6 +102,7 @@ const App = () => (
                   <Route path="/cart" element={<CartPage />} />
                   <Route path="/checkout" element={<CheckoutPage />} />
                   <Route path="/checkout/success" element={<CheckoutSuccessPage />} />
+                  <Route path="/account/claim" element={<AccountClaimPage />} />
                   <Route path="/search" element={<SearchPage />} />
                   <Route path="/sale/:slug" element={<SalePage />} />
                   <Route path="/contact" element={<ContactPage />} />

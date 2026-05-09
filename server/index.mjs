@@ -125,6 +125,14 @@ const SHIPROCKET_FALLBACK_ETA_DAYS = Math.max(1, Math.floor(Number(process.env.S
  */
 const ALLOW_CHECKOUT_WITHOUT_SHIPPING_QUOTE =
   (process.env.ALLOW_CHECKOUT_WITHOUT_SHIPPING_QUOTE || '').trim().toLowerCase() === 'true';
+/**
+ * Checkout email OTP gate.
+ * - true: keep existing OTP-based checkout behavior.
+ * - false: allow guest checkout without OTP (login/register OTP remains unchanged).
+ */
+const CHECKOUT_OTP_REQUIRED = !['false', '0', 'no', 'off'].includes(
+  String(process.env.CHECKOUT_OTP_REQUIRED ?? 'true').trim().toLowerCase()
+);
 
 const SHIPROCKET_BASE_URL = 'https://apiv2.shiprocket.in/v1/external';
 
@@ -1661,6 +1669,45 @@ function normalizeEmailOrThrow(raw) {
   return { normalizedEmail: email, domainLower };
 }
 
+async function findExistingUserForCheckoutIdentity({ normalizedEmail, normalizedPhone }) {
+  const phone = String(normalizedPhone || '').trim();
+  if (phone) {
+    const byPhone = await User.findOne({ phone }).exec();
+    if (byPhone) return byPhone;
+  }
+  const email = String(normalizedEmail || '').trim();
+  if (email) {
+    const byEmail = await User.findOne({ email }).exec();
+    if (byEmail) return byEmail;
+  }
+  return null;
+}
+
+async function backfillGuestCheckoutOwnershipForUser(userLike) {
+  const userId = String(userLike?._id || userLike?.id || '').trim();
+  if (!userId) return { orders: 0, paymentSessions: 0 };
+
+  const email = String(userLike?.email || '').trim();
+  const phone = normalizeIndianMobileOptional(userLike?.phone);
+  const identity = [];
+  // Primary key for guest order linking: phone.
+  if (phone) identity.push({ 'customer.phone': phone });
+  else if (email) identity.push({ 'customer.email': email });
+  if (!identity.length) return { orders: 0, paymentSessions: 0 };
+
+  const missingUser = { $or: [{ userId: { $exists: false } }, { userId: null }, { userId: '' }] };
+  const filter = { $and: [missingUser, { $or: identity }] };
+  const [ordersResult, paymentSessionsResult] = await Promise.all([
+    Order.updateMany(filter, { $set: { userId } }),
+    PaymentSession.updateMany(filter, { $set: { userId } }),
+  ]);
+
+  return {
+    orders: Number(ordersResult?.modifiedCount || 0),
+    paymentSessions: Number(paymentSessionsResult?.modifiedCount || 0),
+  };
+}
+
 function getIsoDayKey(d = new Date()) {
   const yyyy = d.getUTCFullYear();
   const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
@@ -3060,6 +3107,8 @@ app.get('/api/health', (_req, res) => {
     cloudinary: !!(cloudName && cloudKey && cloudSecret),
     /** When true, storefront may complete checkout without a Shiprocket quote (see ALLOW_CHECKOUT_WITHOUT_SHIPPING_QUOTE). */
     allowCheckoutWithoutShippingQuote: ALLOW_CHECKOUT_WITHOUT_SHIPPING_QUOTE,
+    /** Checkout OTP gate for guest checkout UX. */
+    checkoutOtpRequired: CHECKOUT_OTP_REQUIRED,
   });
 });
 
@@ -3883,12 +3932,14 @@ app.post('/api/auth/logout', requireTrustedBrowserOrigin, async (req, res) => {
 
 app.get('/api/auth/email-exists', async (req, res) => {
   try {
-    const email = String(req.query?.email || '').trim();
-    if (!email || !simpleEmailValid(email)) {
+    let normalizedEmail;
+    try {
+      normalizedEmail = normalizeEmailOrThrow(req.query?.email).normalizedEmail;
+    } catch {
       res.status(400).json({ error: 'Invalid email' });
       return;
     }
-    const exists = !!(await User.exists({ email }));
+    const exists = !!(await User.exists({ email: normalizedEmail }));
     res.json({ exists });
   } catch (e) {
     console.error(e);
@@ -4296,9 +4347,10 @@ app.post(
     const purpose = String(req.body?.purpose || 'checkout');
 
     const phoneHint = req.body?.phone;
+    let normalizedPhoneHint;
     if (phoneHint != null && String(phoneHint).trim()) {
       try {
-        normalizeIndianMobileOrThrow(phoneHint);
+        normalizedPhoneHint = normalizeIndianMobileOrThrow(phoneHint);
       } catch (e) {
         res.status(400).json({ error: e instanceof Error ? e.message : 'Invalid phone number' });
         return;
@@ -4339,7 +4391,13 @@ app.post(
       return;
     }
 
-    const existingUser = await User.findOne({ email: normalizedEmail }).exec();
+    const existingUser =
+      purpose === 'checkout'
+        ? await findExistingUserForCheckoutIdentity({
+            normalizedEmail,
+            normalizedPhone: normalizedPhoneHint,
+          })
+        : await User.findOne({ email: normalizedEmail }).exec();
     if (purpose === 'password_reset' && !existingUser) {
       // Avoid account enumeration. Still respond with a generic success.
       res.json({ ok: true });
@@ -4499,6 +4557,13 @@ app.post(
     }
 
     const user = userId ? await User.findById(userId).lean() : null;
+    if (user) {
+      try {
+        await backfillGuestCheckoutOwnershipForUser(user);
+      } catch (linkErr) {
+        console.error('guest-order-link after OTP verify failed:', linkErr);
+      }
+    }
     if (userId) {
       await saveSession(req);
     }
@@ -5471,6 +5536,11 @@ app.post(
 
     req.session.userId = user._id;
     await saveSession(req);
+    try {
+      await backfillGuestCheckoutOwnershipForUser(user);
+    } catch (linkErr) {
+      console.error('guest-order-link after login failed:', linkErr);
+    }
 
     const serialized = serializeUser(await User.findById(user._id).lean());
     let authToken;
@@ -5582,6 +5652,13 @@ app.post('/api/auth/password/reset', requireTrustedBrowserOrigin, async (req, re
     req.session.userId = challenge.userId;
     await saveSession(req);
     const u = await User.findById(challenge.userId).lean();
+    if (u) {
+      try {
+        await backfillGuestCheckoutOwnershipForUser(u);
+      } catch (linkErr) {
+        console.error('guest-order-link after password reset failed:', linkErr);
+      }
+    }
     const serialized = u ? serializeUser(u) : null;
     let authToken;
     try {
@@ -7489,16 +7566,19 @@ app.post('/api/orders', orderCreateRateLimit, requireTrustedBrowserOrigin, mongo
     const body = req.body || {};
     const c = body.customer || {};
     const name = String(c.name || '').trim();
-    const email = String(c.email || '').trim();
+    const emailInput = String(c.email || '').trim();
     const address = String(c.address || '').trim();
     const city = String(c.city || '').trim();
     const state = c.state != null ? String(c.state).trim() : '';
     const pincode = String(c.pincode || '').trim();
-    if (!name || !email || !address || !city || !pincode) {
+    if (!name || !emailInput || !address || !city || !pincode) {
       res.status(400).json({ error: 'All customer fields including email are required.' });
       return;
     }
-    if (!simpleEmailValid(email)) {
+    let email;
+    try {
+      email = normalizeEmailOrThrow(emailInput).normalizedEmail;
+    } catch {
       res.status(400).json({ error: 'Invalid email address.' });
       return;
     }
@@ -7513,7 +7593,7 @@ app.post('/api/orders', orderCreateRateLimit, requireTrustedBrowserOrigin, mongo
     // Ensure authenticated user relation when email exists (needed for coupons + per-user limits).
     let sessionTouched = false;
     if (!req.session?.userId) {
-      const u = await User.findOne({ email }).exec();
+      const u = await findExistingUserForCheckoutIdentity({ normalizedEmail: email, normalizedPhone: phone });
       if (u) {
         req.session.userId = u._id;
         sessionTouched = true;
@@ -7683,16 +7763,19 @@ app.post('/api/payments/razorpay/session', paymentCreateRateLimit, requireTruste
     const body = req.body || {};
     const c = body.customer || {};
     const name = String(c.name || '').trim();
-    const email = String(c.email || '').trim();
+    const emailInput = String(c.email || '').trim();
     const address = String(c.address || '').trim();
     const city = String(c.city || '').trim();
     const state = c.state != null ? String(c.state).trim() : '';
     const pincode = String(c.pincode || '').trim();
-    if (!name || !email || !address || !city || !pincode) {
+    if (!name || !emailInput || !address || !city || !pincode) {
       res.status(400).json({ error: 'All customer fields including email are required.' });
       return;
     }
-    if (!simpleEmailValid(email)) {
+    let email;
+    try {
+      email = normalizeEmailOrThrow(emailInput).normalizedEmail;
+    } catch {
       res.status(400).json({ error: 'Invalid email address.' });
       return;
     }
@@ -7707,7 +7790,7 @@ app.post('/api/payments/razorpay/session', paymentCreateRateLimit, requireTruste
     // Attach session userId when email exists (same behavior as /api/orders).
     let sessionTouched = false;
     if (!req.session?.userId) {
-      const u = await User.findOne({ email }).exec();
+      const u = await findExistingUserForCheckoutIdentity({ normalizedEmail: email, normalizedPhone: phone });
       if (u) {
         req.session.userId = u._id;
         sessionTouched = true;
