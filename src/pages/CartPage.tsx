@@ -245,10 +245,29 @@ export default function CartPage() {
   const [code, setCode] = useState("");
   const couponRecheckBusyRef = useRef(false);
 
+  const originalUnitPriceForItem = (item: CartItem): number | null => {
+    const productAny = item.product as any;
+    if (productAny?.variantModel?.items?.length && item.selectedVariant) {
+      const key = String(item.selectedVariant);
+      const variantHit = productAny.variantModel.items.find((x: any) => String(x?.key) === key);
+      const variantOriginal = Number(variantHit?.originalPrice);
+      if (Number.isFinite(variantOriginal) && variantOriginal > 0) return variantOriginal;
+    }
+    const productOriginal = Number(productAny?.originalPrice);
+    return Number.isFinite(productOriginal) && productOriginal > 0 ? productOriginal : null;
+  };
+
   const computed = totalsForPaymentMethod(paymentMethod);
   const subtotal = computed.subtotal;
   const total = computed.total;
-  const savings = computed.discount;
+  const couponSavings = computed.discount;
+  const productSavings = items.reduce((sum, item) => {
+    const currentUnit = unitPriceForItem(item, paymentMethod);
+    const originalUnit = originalUnitPriceForItem(item);
+    if (!originalUnit || originalUnit <= currentUnit) return sum;
+    return sum + (originalUnit - currentUnit) * item.quantity;
+  }, 0);
+  const savings = productSavings + couponSavings;
   const paymentLabel = paymentMethod === "razorpay" ? "online payment" : "COD";
 
   const handleCoupon = async () => {
@@ -340,7 +359,7 @@ export default function CartPage() {
             {items.map((item) => {
               const image = productImageForVariant(item.product, item.selectedVariant);
               const unitPrice = unitPriceForItem(item, paymentMethod);
-              const oldUnitPrice = item.product.originalPrice;
+              const oldUnitPrice = originalUnitPriceForItem(item) ?? undefined;
 
               return (
                 <CartItemCard
@@ -415,7 +434,7 @@ export default function CartPage() {
 
               {couponCode ? (
                 <p className="mt-2 text-xs text-slate-600">
-                  Applied: <span className="font-bold">{couponCode}</span>{savings > 0 ? "" : ` (not applicable on ${paymentLabel})`}
+                  Applied: <span className="font-bold">{couponCode}</span>{couponSavings > 0 ? "" : ` (not applicable on ${paymentLabel})`}
                 </p>
               ) : null}
             </div>

@@ -3033,12 +3033,25 @@ function getOrCreateVisitorId(req, res) {
 
 function isAdminRequest(req) {
   const path = String(req.originalUrl || req.url || '').toLowerCase();
+  if (path.startsWith('/admin')) return true;
   if (path.startsWith('/api/admin')) return true;
   if (path.startsWith('/api/orders')) return true;
   const expected = String(process.env.ADMIN_API_KEY || '');
   const sent = String(req.get('x-admin-key') || req.get('X-Admin-Key') || '').trim();
   if (expected && sent && sent === expected) return true;
   return false;
+}
+
+function isAdminReferer(referer) {
+  const raw = String(referer || '').trim();
+  if (!raw) return false;
+  try {
+    const u = new URL(raw);
+    const p = String(u.pathname || '').toLowerCase();
+    return p.startsWith('/admin');
+  } catch {
+    return false;
+  }
 }
 
 // Best-effort unique visitor counter: assigns an anonymous cookie and upserts a Visitor record.
@@ -3049,6 +3062,9 @@ app.use(async (req, res, next) => {
       return next();
     }
     if (isAdminRequest(req)) {
+      return next();
+    }
+    if (isAdminReferer(req.get('referer'))) {
       return next();
     }
     // Avoid counting the webhook endpoints.
@@ -3146,7 +3162,7 @@ app.get('/api/health', (_req, res) => {
   });
 });
 
-app.post('/api/analytics/events', requireTrustedBrowserOrigin, analyticsEventRateLimit, mongoReady, async (req, res) => {
+app.post('/api/analytics/events', analyticsEventRateLimit, mongoReady, async (req, res) => {
   try {
     const body = req.body && typeof req.body === 'object' ? req.body : {};
     const eventType = String(body.eventType || '').trim().toLowerCase();

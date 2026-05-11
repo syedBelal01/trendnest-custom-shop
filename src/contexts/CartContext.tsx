@@ -309,7 +309,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     if (qty !== desired) toast.message(`Quantity adjusted to ${qty} (available stock).`);
     const payload: CartItem = normalizeCartItem({ ...(item as CartItem), quantity: qty });
     dispatch({ type: 'ADD_ITEM', payload });
-    toast.success(`${item.product.name} added to cart`);
     void trackAddToCartEvent({
       productId: String(item.product.id || ''),
       productName: String(item.product.name || ''),

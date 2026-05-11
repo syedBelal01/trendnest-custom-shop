@@ -77,7 +77,6 @@ export default function CustomPrintPage() {
         customDesignName: designFile.name,
         customProductType: productType,
       });
-      toast.success('Added to cart');
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Could not upload design');
     } finally {
