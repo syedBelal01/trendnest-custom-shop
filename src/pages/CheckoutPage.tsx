@@ -133,6 +133,7 @@ export default function CheckoutPage() {
   const { method: paymentMethod, setMethod: setPaymentMethod } = usePaymentMethod();
   const [couponDraft, setCouponDraft] = useState('');
   const [couponBusy, setCouponBusy] = useState(false);
+  const [couponLoginPrompt, setCouponLoginPrompt] = useState(false);
   const couponRecheckBusyRef = useRef(false);
   const [form, setForm] = useState<CustomerInfo>({
     name: '',
@@ -858,12 +859,18 @@ export default function CheckoutPage() {
   };
 
   const applyCheckoutCoupon = async () => {
+    if (!user && !authLoading) {
+      setCouponLoginPrompt(true);
+      return;
+    }
+
     const trimmed = couponDraft.trim();
     if (!trimmed) {
       toast.error('Enter coupon code');
       return;
     }
     setCouponBusy(true);
+    setCouponLoginPrompt(false);
     try {
       const computed = totalsForPaymentMethod(paymentMethod);
       const r = await validateCouponApi({
@@ -881,6 +888,10 @@ export default function CheckoutPage() {
       setCouponBusy(false);
     }
   };
+
+  useEffect(() => {
+    if (user) setCouponLoginPrompt(false);
+  }, [user]);
 
   useEffect(() => {
     if (!couponCode || couponValidatedFor === paymentMethod) return;
@@ -935,6 +946,14 @@ export default function CheckoutPage() {
                 : !shippingGateReady
                   ? 'Waiting for delivery estimate…'
                   : `Place Order — ₹${payableGrandTotal}`;
+  const checkoutCouponDiscountLabel =
+    !couponCode
+      ? 'No coupon applied'
+      : checkoutMerchandise.discount > 0
+        ? `-₹${checkoutMerchandise.discount}`
+        : `Not valid for ${paymentMethod === 'razorpay' ? 'online payment' : 'COD'}`;
+  const checkoutCouponDiscountClass =
+    checkoutMerchandise.discount > 0 ? 'font-black text-emerald-700' : 'font-semibold text-slate-400';
 
   return (
     <div className="bg-white font-sans text-slate-900">
@@ -1531,6 +1550,21 @@ export default function CheckoutPage() {
                   </button>
                 </div>
                 <p className="mt-2 text-xs text-slate-500">Coupons are validated automatically for items in your cart.</p>
+                {couponLoginPrompt && !user ? (
+                  <div className="mt-3 rounded-xl border border-orange-200 bg-white p-3">
+                    <p className="text-xs font-semibold text-orange-700">
+                      Coupon can be applied only when you are logged in.
+                    </p>
+                    <Link to="/login" className="mt-2 inline-block">
+                      <button
+                        type="button"
+                        className="rounded-lg bg-orange-600 px-3 py-2 text-xs font-black text-white transition hover:bg-orange-700"
+                      >
+                        Go to Login
+                      </button>
+                    </Link>
+                  </div>
+                ) : null}
               </div>
 
               <div className="mt-5 space-y-3 text-sm">
@@ -1538,12 +1572,10 @@ export default function CheckoutPage() {
                   <span className="text-slate-500">Subtotal</span>
                   <span className="font-black text-slate-950">₹{checkoutMerchandise.subtotal}</span>
                 </div>
-                {checkoutMerchandise.discount > 0 && (
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500">Discount {couponCode ? `(${couponCode})` : ''}</span>
-                    <span className="font-black text-emerald-700">-₹{checkoutMerchandise.discount}</span>
-                  </div>
-                )}
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">Coupon discount {couponCode ? `(${couponCode})` : ''}</span>
+                  <span className={checkoutCouponDiscountClass}>{checkoutCouponDiscountLabel}</span>
+                </div>
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500">Shipping</span>
                   <span className="font-black text-orange-600">

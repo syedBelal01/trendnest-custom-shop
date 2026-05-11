@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useCart } from "@/contexts/CartContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { usePaymentMethod } from "@/contexts/PaymentMethodContext";
 import { productImageForVariant } from "@/lib/productImages";
 import { validateCouponApi } from "@/lib/couponsApi";
@@ -240,9 +241,11 @@ export default function CartPage() {
     unitPriceForItem,
     totalsForPaymentMethod,
   } = useCart();
+  const { user, loading: authLoading } = useAuth();
   const { method: paymentMethod, setMethod: setPaymentMethod } = usePaymentMethod();
 
   const [code, setCode] = useState("");
+  const [couponLoginPrompt, setCouponLoginPrompt] = useState(false);
   const couponRecheckBusyRef = useRef(false);
 
   const originalUnitPriceForItem = (item: CartItem): number | null => {
@@ -269,14 +272,26 @@ export default function CartPage() {
   }, 0);
   const savings = productSavings + couponSavings;
   const paymentLabel = paymentMethod === "razorpay" ? "online payment" : "COD";
+  const couponDiscountLabel =
+    !couponCode
+      ? "No coupon applied"
+      : couponSavings > 0
+        ? `-₹${couponSavings}`
+        : `Not valid on ${paymentLabel}`;
 
   const handleCoupon = async () => {
+    if (!user && !authLoading) {
+      setCouponLoginPrompt(true);
+      return;
+    }
+
     const trimmed = code.trim();
     if (!trimmed) {
       toast.error("Enter coupon code");
       return;
     }
 
+    setCouponLoginPrompt(false);
     try {
       const r = await validateCouponApi({
         code: trimmed,
@@ -291,6 +306,10 @@ export default function CartPage() {
       toast.error(e instanceof Error ? e.message : "Invalid or expired coupon");
     }
   };
+
+  useEffect(() => {
+    if (user) setCouponLoginPrompt(false);
+  }, [user]);
 
   useEffect(() => {
     if (!couponCode || couponValidatedFor === paymentMethod) return;
@@ -399,6 +418,12 @@ export default function CartPage() {
                 <span className="font-black text-orange-600">Free</span>
               </div>
               <div className="flex items-center justify-between text-sm">
+                <span className="text-slate-500">Coupon discount</span>
+                <span className={couponSavings > 0 ? "font-black text-emerald-700" : "font-semibold text-slate-400"}>
+                  {couponDiscountLabel}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
                 <span className="text-slate-500">You saved</span>
                 <span className="font-black text-emerald-600">₹{savings}</span>
               </div>
@@ -431,6 +456,21 @@ export default function CartPage() {
                   Apply
                 </button>
               </div>
+              {couponLoginPrompt && !user ? (
+                <div className="mt-3 rounded-xl border border-orange-200 bg-white p-3">
+                  <p className="text-xs font-semibold text-orange-700">
+                    Coupon can be applied only when you are logged in.
+                  </p>
+                  <Link to="/login" className="mt-2 inline-block">
+                    <button
+                      type="button"
+                      className="rounded-lg bg-orange-600 px-3 py-2 text-xs font-black text-white transition hover:bg-orange-700"
+                    >
+                      Go to Login
+                    </button>
+                  </Link>
+                </div>
+              ) : null}
 
               {couponCode ? (
                 <p className="mt-2 text-xs text-slate-600">
