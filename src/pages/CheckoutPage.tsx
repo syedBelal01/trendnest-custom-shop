@@ -1545,13 +1545,7 @@ export default function CheckoutPage() {
                 {shippingQuote?.ok && (shippingQuote.estimatedDeliveryDays != null || shippingQuote.estimatedDeliveryDate) && (
                   <div className="flex items-center justify-between">
                     <span className="text-slate-500">Estimated delivery</span>
-                    <span className="font-bold text-slate-700">
-                      {shippingQuote.estimatedDeliveryDays != null
-                        ? `${shippingQuote.estimatedDeliveryDays} day(s)`
-                        : shippingQuote.estimatedDeliveryDate
-                          ? new Date(shippingQuote.estimatedDeliveryDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
-                          : '—'}
-                    </span>
+                    <span className="font-bold text-slate-700">4-6 days</span>
                   </div>
                 )}
                 <div className="flex items-center justify-between">

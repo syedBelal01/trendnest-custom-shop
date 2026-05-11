@@ -340,7 +340,7 @@ export default function AccountOrderDetailPage() {
             <div className="min-w-0">
               <div className="font-semibold">Delivery ETA</div>
               <div className="text-muted-foreground text-xs">
-                {shipping?.estimatedDeliveryDate ? fmtDate(shipping.estimatedDeliveryDate) : '—'}
+                4-6 days
               </div>
             </div>
           </div>
