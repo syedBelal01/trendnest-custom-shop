@@ -7,6 +7,7 @@ import { useEffect } from 'react';
 import { useProducts } from '@/contexts/ProductsContext';
 import { useSaleBanners } from '@/contexts/SaleBannersContext';
 import GlobalSaleThemeLayer from '@/components/GlobalSaleThemeLayer';
+import FloatingCartAccess from '@/components/FloatingCartAccess';
 
 export default function Layout() {
   const loc = useLocation();
@@ -40,6 +41,7 @@ export default function Layout() {
         <Header />
         <ReviewPromptBar />
         <ReviewReminderPopup />
+        <FloatingCartAccess />
         <main className="flex-1">
           <Outlet />
         </main>
