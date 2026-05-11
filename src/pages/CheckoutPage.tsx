@@ -58,6 +58,7 @@ import { fetchShippingServiceabilityApi, isShippingServiceabilityError, type Shi
 import { IndianPhoneInput } from '@/components/forms/IndianPhoneInput';
 import { clampIndianPhoneInput, isCompleteValidIndianMobile, isIndianPhoneValid, validateIndianPhone } from '@/lib/indianPhone';
 import { validateCouponApi } from '@/lib/couponsApi';
+import { trackCheckoutViewEvent } from '@/lib/engagementAnalyticsApi';
 
 const LAST_ORDER_ID_KEY = 'tn:last_order_id_v1';
 const LAST_GUEST_CHECKOUT_KEY = 'tn:last_guest_checkout_v1';
@@ -191,8 +192,15 @@ export default function CheckoutPage() {
   const [allowRelaxedShipping, setAllowRelaxedShipping] = useState<boolean | null>(null);
   /** Mirrors server CHECKOUT_OTP_REQUIRED (null until /api/health loads). */
   const [checkoutOtpRequiredByConfig, setCheckoutOtpRequiredByConfig] = useState<boolean | null>(null);
+  const checkoutViewTrackedRef = useRef(false);
 
   const set = (key: keyof CustomerInfo, val: string) => setForm(p => ({ ...p, [key]: val }));
+
+  useEffect(() => {
+    if (checkoutViewTrackedRef.current) return;
+    checkoutViewTrackedRef.current = true;
+    void trackCheckoutViewEvent();
+  }, []);
 
   const applyFromSaved = useCallback((u: NonNullable<typeof user>, addr: Address) => {
     setForm({

@@ -2,6 +2,7 @@ import React, { createContext, useContext, useMemo, useReducer, useEffect, useCa
 import { CartItem, type CouponPaymentMethodScope, type Product } from '@/types';
 import { toast } from 'sonner';
 import { useProducts } from '@/contexts/ProductsContext';
+import { trackAddToCartEvent } from '@/lib/engagementAnalyticsApi';
 
 interface CartState {
   items: CartItem[];
@@ -309,6 +310,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     const payload: CartItem = normalizeCartItem({ ...(item as CartItem), quantity: qty });
     dispatch({ type: 'ADD_ITEM', payload });
     toast.success(`${item.product.name} added to cart`);
+    void trackAddToCartEvent({
+      productId: String(item.product.id || ''),
+      productName: String(item.product.name || ''),
+    });
   };
 
   return (

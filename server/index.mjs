@@ -694,6 +694,8 @@ const ORDER_CREATE_RATE_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.ORDE
 const ORDER_CREATE_RATE_LIMIT_MAX = Math.max(1, Number(process.env.ORDER_CREATE_RATE_LIMIT_MAX || 8));
 const ORDER_CANCEL_RATE_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.ORDER_CANCEL_RATE_LIMIT_WINDOW_MS || 60_000));
 const ORDER_CANCEL_RATE_LIMIT_MAX = Math.max(1, Number(process.env.ORDER_CANCEL_RATE_LIMIT_MAX || 8));
+const ANALYTICS_EVENT_RATE_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.ANALYTICS_EVENT_RATE_LIMIT_WINDOW_MS || 60_000));
+const ANALYTICS_EVENT_RATE_LIMIT_MAX = Math.max(1, Number(process.env.ANALYTICS_EVENT_RATE_LIMIT_MAX || 120));
 const ADMIN_KEY_RATE_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.ADMIN_KEY_RATE_LIMIT_WINDOW_MS || 60_000));
 const ADMIN_KEY_RATE_LIMIT_MAX = Math.max(1, Number(process.env.ADMIN_KEY_RATE_LIMIT_MAX || 25));
 const WEBHOOK_RATE_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.WEBHOOK_RATE_LIMIT_WINDOW_MS || 60_000));
@@ -758,6 +760,11 @@ const orderCancelRateLimit = rateLimitByIp({
   keyPrefix: 'order_cancel',
   limit: ORDER_CANCEL_RATE_LIMIT_MAX,
   windowMs: ORDER_CANCEL_RATE_LIMIT_WINDOW_MS,
+});
+const analyticsEventRateLimit = rateLimitByIp({
+  keyPrefix: 'analytics_event',
+  limit: ANALYTICS_EVENT_RATE_LIMIT_MAX,
+  windowMs: ANALYTICS_EVENT_RATE_LIMIT_WINDOW_MS,
 });
 const adminKeyRateLimit = rateLimitByIp({
   keyPrefix: 'admin_key',
@@ -859,6 +866,28 @@ const VisitorSchema = new mongoose.Schema(
 );
 
 const Visitor = mongoose.model('Visitor', VisitorSchema);
+
+const EngagementEventSchema = new mongoose.Schema(
+  {
+    eventType: { type: String, required: true, enum: ['add_to_cart', 'checkout_view'], index: true },
+    visitorId: { type: String, required: true, index: true },
+    userId: { type: String, default: '', index: true },
+    productId: { type: String, default: '', index: true },
+    productName: { type: String, default: '' },
+    path: { type: String, default: '' },
+  },
+  {
+    versionKey: false,
+    collection: 'engagement_events',
+    timestamps: { createdAt: true, updatedAt: false },
+  }
+);
+
+EngagementEventSchema.index({ eventType: 1, createdAt: -1 });
+EngagementEventSchema.index({ eventType: 1, productId: 1, createdAt: -1 });
+EngagementEventSchema.index({ eventType: 1, visitorId: 1, createdAt: -1 });
+
+const EngagementEvent = mongoose.model('EngagementEvent', EngagementEventSchema);
 
 const ReviewSchema = new mongoose.Schema(
   {
@@ -2986,6 +3015,22 @@ function looksLikeHex(s, minLen = 16) {
   return /^[a-f0-9]+$/i.test(v);
 }
 
+function getOrCreateVisitorId(req, res) {
+  const cookies = parseCookieHeader(req?.headers?.cookie);
+  let vid = String(cookies.tn_vid || '').trim();
+  if (!looksLikeHex(vid, 24)) {
+    vid = crypto.randomBytes(16).toString('hex');
+    res.cookie('tn_vid', vid, {
+      httpOnly: true,
+      sameSite: cookieSameSite,
+      secure: cookieSecure,
+      maxAge: 365 * 24 * 60 * 60 * 1000,
+      path: '/',
+    });
+  }
+  return vid;
+}
+
 function isAdminRequest(req) {
   const path = String(req.originalUrl || req.url || '').toLowerCase();
   if (path.startsWith('/api/admin')) return true;
@@ -3012,18 +3057,7 @@ app.use(async (req, res, next) => {
       return next();
     }
 
-    const cookies = parseCookieHeader(req.headers.cookie);
-    let vid = String(cookies.tn_vid || '').trim();
-    if (!looksLikeHex(vid, 24)) {
-      vid = crypto.randomBytes(16).toString('hex');
-      res.cookie('tn_vid', vid, {
-        httpOnly: true,
-        sameSite: cookieSameSite,
-        secure: cookieSecure,
-        maxAge: 365 * 24 * 60 * 60 * 1000,
-        path: '/',
-      });
-    }
+    const vid = getOrCreateVisitorId(req, res);
 
     const now = new Date();
     // Upsert visitor row; unique visitor = first insert.
@@ -3110,6 +3144,51 @@ app.get('/api/health', (_req, res) => {
     /** Checkout OTP gate for guest checkout UX. */
     checkoutOtpRequired: CHECKOUT_OTP_REQUIRED,
   });
+});
+
+app.post('/api/analytics/events', requireTrustedBrowserOrigin, analyticsEventRateLimit, mongoReady, async (req, res) => {
+  try {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const eventType = String(body.eventType || '').trim().toLowerCase();
+    if (eventType !== 'add_to_cart' && eventType !== 'checkout_view') {
+      res.status(400).json({ error: 'Invalid event type' });
+      return;
+    }
+
+    const visitorId = getOrCreateVisitorId(req, res);
+    if (!looksLikeHex(visitorId, 24)) {
+      res.status(400).json({ error: 'Invalid visitor' });
+      return;
+    }
+
+    let productId = '';
+    let productName = '';
+    if (eventType === 'add_to_cart') {
+      productId = String(body.productId || '').trim().slice(0, 120);
+      productName = String(body.productName || '').trim().slice(0, 200);
+      if (!productId && !productName) {
+        res.status(400).json({ error: 'Product is required for add_to_cart event' });
+        return;
+      }
+    }
+
+    const userId = req.session?.userId ? String(req.session.userId).trim().slice(0, 120) : '';
+    const path = String(body.path || req.path || '').trim().slice(0, 200);
+
+    await EngagementEvent.create({
+      eventType,
+      visitorId,
+      userId,
+      productId,
+      productName,
+      path,
+    });
+
+    res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to track analytics event' });
+  }
 });
 
 /**
@@ -4157,9 +4236,66 @@ app.get('/api/admin/analytics/visitors', mongoReady, adminKeyRequired, async (_r
     res.set('Cache-Control', 'no-store');
     res.set('Content-Type', 'application/json; charset=utf-8');
     if (typeof res.flushHeaders === 'function') res.flushHeaders();
-    const totalUniqueVisitors = await Visitor.countDocuments({});
+    const [
+      totalUniqueVisitors,
+      addToCartTotalEvents,
+      addToCartUniqueVisitorIds,
+      checkoutTotalVisits,
+      checkoutUniqueVisitorIds,
+      topAddToCartProductsRaw,
+    ] = await Promise.all([
+      Visitor.countDocuments({}),
+      EngagementEvent.countDocuments({ eventType: 'add_to_cart' }),
+      EngagementEvent.distinct('visitorId', { eventType: 'add_to_cart' }),
+      EngagementEvent.countDocuments({ eventType: 'checkout_view' }),
+      EngagementEvent.distinct('visitorId', { eventType: 'checkout_view' }),
+      EngagementEvent.aggregate([
+        { $match: { eventType: 'add_to_cart', productId: { $ne: '' } } },
+        {
+          $group: {
+            _id: { productId: '$productId', visitorId: '$visitorId' },
+            addsByVisitor: { $sum: 1 },
+            productName: { $last: '$productName' },
+          },
+        },
+        {
+          $group: {
+            _id: '$_id.productId',
+            totalAdds: { $sum: '$addsByVisitor' },
+            uniqueVisitors: { $sum: 1 },
+            productName: { $last: '$productName' },
+          },
+        },
+        { $sort: { totalAdds: -1, uniqueVisitors: -1, _id: 1 } },
+        { $limit: 25 },
+      ]),
+    ]);
+
+    const topAddToCartProducts = Array.isArray(topAddToCartProductsRaw)
+      ? topAddToCartProductsRaw.map((row) => ({
+          productId: String(row?._id || ''),
+          productName: String(row?.productName || '').trim() || String(row?._id || ''),
+          totalAdds: Number(row?.totalAdds || 0),
+          uniqueVisitors: Number(row?.uniqueVisitors || 0),
+        }))
+      : [];
+
     if (!res.writableEnded) {
-      res.end(JSON.stringify({ totalUniqueVisitors, updatedAt: new Date().toISOString() }));
+      res.end(
+        JSON.stringify({
+          totalUniqueVisitors: Number(totalUniqueVisitors || 0),
+          addToCart: {
+            totalEvents: Number(addToCartTotalEvents || 0),
+            uniqueVisitors: Array.isArray(addToCartUniqueVisitorIds) ? addToCartUniqueVisitorIds.length : 0,
+            topProducts: topAddToCartProducts,
+          },
+          checkout: {
+            totalVisits: Number(checkoutTotalVisits || 0),
+            uniqueVisitors: Array.isArray(checkoutUniqueVisitorIds) ? checkoutUniqueVisitorIds.length : 0,
+          },
+          updatedAt: new Date().toISOString(),
+        })
+      );
     }
   } catch (e) {
     console.error(e);
