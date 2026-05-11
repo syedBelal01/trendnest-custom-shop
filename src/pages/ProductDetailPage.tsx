@@ -881,7 +881,7 @@ export default function ProductDetailPage() {
                 {shippingBusy
                   ? 'Checking serviceability…'
                   : shippingQuote?.ok
-                    ? 'Free shipping - ETA 4-6 days'
+                    ? 'Free shipping - ETA 3-5 days'
                     : isShippingServiceabilityError(shippingQuote) && shippingQuote.reason === 'not_serviceable'
                       ? 'Not serviceable for this pincode'
                       : pincode.replace(/[^\d]/g, '').length === 6

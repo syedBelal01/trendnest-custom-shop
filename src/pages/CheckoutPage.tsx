@@ -1545,7 +1545,7 @@ export default function CheckoutPage() {
                 {shippingQuote?.ok && (shippingQuote.estimatedDeliveryDays != null || shippingQuote.estimatedDeliveryDate) && (
                   <div className="flex items-center justify-between">
                     <span className="text-slate-500">Estimated delivery</span>
-                    <span className="font-bold text-slate-700">4-6 days</span>
+                    <span className="font-bold text-slate-700">3-5 days</span>
                   </div>
                 )}
                 <div className="flex items-center justify-between">

@@ -340,7 +340,7 @@ export default function AccountOrderDetailPage() {
             <div className="min-w-0">
               <div className="font-semibold">Delivery ETA</div>
               <div className="text-muted-foreground text-xs">
-                4-6 days
+                3-5 days
               </div>
             </div>
           </div>
