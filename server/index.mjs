@@ -1793,14 +1793,10 @@ function normalizeOrderItemsFromBody(items) {
     const price = Number(row.price ?? product?.price);
     const quantity = Math.max(1, Math.floor(Number(row.quantity) || 1));
     if (!productId || !name || !Number.isFinite(price)) throw new Error(`Invalid line item ${i + 1}`);
-    let customDesignUrl = row.customDesignUrl != null ? String(row.customDesignUrl) : row.customDesignFile != null ? String(row.customDesignFile) : '';
-    const hasCustomHint = !!(row.customProductType || row.customDesignName);
-    if (
-      hasCustomHint &&
-      customDesignUrl &&
-      !/^https:\/\//i.test(customDesignUrl) &&
-      !customDesignUrl.startsWith('data:')
-    ) {
+    let customDesignUrl =
+      row.customDesignUrl != null ? String(row.customDesignUrl) : row.customDesignFile != null ? String(row.customDesignFile) : '';
+    customDesignUrl = customDesignUrl.trim();
+    if (customDesignUrl && !/^https:\/\//i.test(customDesignUrl) && !customDesignUrl.startsWith('data:')) {
       throw new Error(
         'Custom design must be uploaded before checkout (use Add to Cart after the file finishes uploading).'
       );
@@ -7676,6 +7672,13 @@ async function computeServerCheckoutPricing({ req, body, rawItems, paymentMethod
     if (!p) {
       const err = new Error(`Product not found: ${String(line.productId)}`);
       err.statusCode = 404;
+      throw err;
+    }
+    const customDesignUrl = line.customDesignUrl != null ? String(line.customDesignUrl).trim() : '';
+    const hasValidCustomDesign = /^https:\/\//i.test(customDesignUrl) || customDesignUrl.startsWith('data:');
+    if (p.isCustomPrint && !hasValidCustomDesign) {
+      const err = new Error('You need to upload your design first before placing this custom print order.');
+      err.statusCode = 400;
       throw err;
     }
     let unit = Number(p.price) || 0;

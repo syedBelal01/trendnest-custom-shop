@@ -93,6 +93,12 @@ function simpleEmailValid(s: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
 }
 
+function hasValidCustomDesignForCheckout(item: CartItem): boolean {
+  if (!item?.product?.isCustomPrint) return true;
+  const raw = String(item.customDesignFile || '').trim();
+  return /^https:\/\//i.test(raw) || raw.startsWith('data:');
+}
+
 function normAddr(s: string) {
   return s.trim().toLowerCase().replace(/\s+/g, ' ');
 }
@@ -742,6 +748,11 @@ export default function CheckoutPage() {
       toast.error('Please fill all required fields');
       return;
     }
+    const missingDesignLine = items.find((it) => !hasValidCustomDesignForCheckout(it));
+    if (missingDesignLine) {
+      toast.error('You need to upload your design first before placing this custom print order.');
+      return;
+    }
     const phoneCheck = validateIndianPhone(form.phone);
     if (!isIndianPhoneValid(phoneCheck)) {
       toast.error(phoneCheck.error);
@@ -925,14 +936,22 @@ export default function CheckoutPage() {
     return null;
   }
 
+  const hasMissingCustomDesign = items.some((it) => !hasValidCustomDesignForCheckout(it));
   const placeOrderDisabled =
-    submitting || !deliveryValid || (otpRequired && !otpVerified) || !shippingGateReady || !healthShippingLoaded;
+    submitting ||
+    !deliveryValid ||
+    (otpRequired && !otpVerified) ||
+    !shippingGateReady ||
+    !healthShippingLoaded ||
+    hasMissingCustomDesign;
 
   const placeOrderLabel =
     submitting
       ? 'Placing order…'
       : !healthShippingLoaded
         ? 'Loading checkout…'
+        : hasMissingCustomDesign
+          ? 'Upload design first'
         : !deliveryPinValid
           ? 'Enter 6-digit pincode'
           : allowRelaxedShipping === true
@@ -1496,6 +1515,11 @@ export default function CheckoutPage() {
                     ? 'We cannot deliver to this pincode. Try a different address.'
                     : 'Could not load delivery estimate. Check the pincode or try again shortly.'
                   : 'Confirming delivery timeline…'}
+            </p>
+          )}
+          {hasMissingCustomDesign && (
+            <p className="text-xs text-red-600 -mt-2 text-center">
+              You need to upload your design first for custom print products.
             </p>
           )}
           </form>
