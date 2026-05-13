@@ -703,9 +703,37 @@ const WEBHOOK_RATE_LIMIT_MAX = Math.max(1, Number(process.env.WEBHOOK_RATE_LIMIT
 /** @type {Map<string, { count: number, resetAtMs: number }>} */
 const ipRateLimitMap = new Map();
 
+function firstCsvToken(value) {
+  return String(value || '').split(',')[0]?.trim() || '';
+}
+
+function normalizeIpToken(raw) {
+  let token = String(raw || '').trim();
+  if (!token) return '';
+  // RFC7239 style: for=1.2.3.4 or for="[2001:db8::1]:1234"
+  const forMatch = token.match(/for=(?:"?\[?)([^;"\],]+)/i);
+  if (forMatch?.[1]) token = String(forMatch[1]).trim();
+  if (token.startsWith('[') && token.includes(']')) {
+    token = token.slice(1, token.indexOf(']')).trim();
+  }
+  if (/^\d{1,3}(?:\.\d{1,3}){3}:\d+$/.test(token)) {
+    token = token.split(':')[0] || token;
+  }
+  if (token.startsWith('::ffff:')) {
+    token = token.slice(7);
+  }
+  return token;
+}
+
 function getClientIp(req) {
-  const ip = req?.ip ? String(req.ip) : '';
-  return ip || 'unknown';
+  const forwarded = normalizeIpToken(firstCsvToken(req?.get?.('x-forwarded-for') || ''));
+  if (forwarded) return forwarded;
+  const candidates = [req?.ip, req?.socket?.remoteAddress, req?.connection?.remoteAddress];
+  for (const candidate of candidates) {
+    const normalized = normalizeIpToken(candidate);
+    if (normalized) return normalized;
+  }
+  return 'unknown';
 }
 
 function rateLimitByIp({ keyPrefix, limit, windowMs }) {
@@ -3015,15 +3043,81 @@ function looksLikeHex(s, minLen = 16) {
   return /^[a-f0-9]+$/i.test(v);
 }
 
+function requestIsHttps(req) {
+  if (req?.secure) return true;
+  const forwardedProto = firstCsvToken(req?.get?.('x-forwarded-proto') || '');
+  if (forwardedProto) return forwardedProto === 'https';
+  const originRaw = String(req?.get?.('origin') || '').trim();
+  if (originRaw) {
+    try {
+      return new URL(originRaw).protocol === 'https:';
+    } catch {
+      // ignore parse errors
+    }
+  }
+  return false;
+}
+
+function visitorCookieSettings(req) {
+  const secure = cookieSecure && requestIsHttps(req);
+  // Browsers reject SameSite=None without Secure.
+  const sameSite = secure ? cookieSameSite : cookieSameSite === 'none' ? 'lax' : cookieSameSite;
+  return { secure, sameSite };
+}
+
+function buildVisitorFingerprintId(req) {
+  const ip = getClientIp(req);
+  const ua = String(req?.get?.('user-agent') || '').trim().toLowerCase();
+  const lang = String(req?.get?.('accept-language') || '').trim().toLowerCase();
+  const host = String(req?.get?.('host') || '').trim().toLowerCase();
+  return crypto
+    .createHash('sha256')
+    .update(`tn_vid_fallback_v1|${ip}|${ua}|${lang}|${host}`)
+    .digest('hex')
+    .slice(0, 32);
+}
+
+function isLikelyBotRequest(req) {
+  const ua = String(req?.get?.('user-agent') || '').toLowerCase();
+  if (!ua) return true;
+  // Lightweight filter for common bots/crawlers/monitors.
+  return /(bot|spider|crawler|crawl|slurp|headless|lighthouse|pingdom|uptimerobot|curl|wget|python-requests|postmanruntime)/i.test(
+    ua
+  );
+}
+
+function isTrackablePublicVisitorRequest(req) {
+  if (String(req?.method || '').toUpperCase() !== 'GET') return false;
+  const path = String(req?.path || req?.url || '').toLowerCase();
+  if (!path || path.startsWith('/api/')) return false;
+  const hostToken = firstCsvToken(req?.get?.('host') || '').toLowerCase();
+  let hostName = hostToken.split(':')[0];
+  if (hostToken.startsWith('[')) {
+    const end = hostToken.indexOf(']');
+    hostName = end > 1 ? hostToken.slice(1, end) : hostToken.replace(/^\[/, '');
+  }
+  // Ignore localhost/devhost reloads from admin machines; only count real public traffic.
+  if (hostName === 'localhost' || hostName === '127.0.0.1' || hostName === '::1') return false;
+  if (path.startsWith('/assets/') || path.startsWith('/static/')) return false;
+  if (path === '/favicon.ico' || path === '/robots.txt' || path.startsWith('/sitemap')) return false;
+  if (path.endsWith('.js') || path.endsWith('.css') || path.endsWith('.map')) return false;
+  if (path.endsWith('.png') || path.endsWith('.jpg') || path.endsWith('.jpeg') || path.endsWith('.webp') || path.endsWith('.gif') || path.endsWith('.svg') || path.endsWith('.ico')) return false;
+  if (path.endsWith('.woff') || path.endsWith('.woff2') || path.endsWith('.ttf') || path.endsWith('.eot')) return false;
+  const fetchDest = String(req?.get?.('sec-fetch-dest') || '').trim().toLowerCase();
+  if (fetchDest && fetchDest !== 'document') return false;
+  return true;
+}
+
 function getOrCreateVisitorId(req, res) {
   const cookies = parseCookieHeader(req?.headers?.cookie);
   let vid = String(cookies.tn_vid || '').trim();
   if (!looksLikeHex(vid, 24)) {
-    vid = crypto.randomBytes(16).toString('hex');
+    vid = buildVisitorFingerprintId(req);
+    const cookieCfg = visitorCookieSettings(req);
     res.cookie('tn_vid', vid, {
       httpOnly: true,
-      sameSite: cookieSameSite,
-      secure: cookieSecure,
+      sameSite: cookieCfg.sameSite,
+      secure: cookieCfg.secure,
       maxAge: 365 * 24 * 60 * 60 * 1000,
       path: '/',
     });
@@ -3036,6 +3130,8 @@ function isAdminRequest(req) {
   if (path.startsWith('/admin')) return true;
   if (path.startsWith('/api/admin')) return true;
   if (path.startsWith('/api/orders')) return true;
+  const cookies = parseCookieHeader(req?.headers?.cookie);
+  if (String(cookies.tn_admin || '').trim() === '1') return true;
   const expected = String(process.env.ADMIN_API_KEY || '');
   const sent = String(req.get('x-admin-key') || req.get('X-Admin-Key') || '').trim();
   if (expected && sent && sent === expected) return true;
@@ -3058,7 +3154,7 @@ function isAdminReferer(referer) {
 // Never blocks requests; skips admin routes/requests.
 app.use(async (req, res, next) => {
   try {
-    if (req.method !== 'GET') {
+    if (!isTrackablePublicVisitorRequest(req)) {
       return next();
     }
     if (isAdminRequest(req)) {
@@ -3070,6 +3166,9 @@ app.use(async (req, res, next) => {
     // Avoid counting the webhook endpoints.
     const p = String(req.path || req.url || '');
     if (p.startsWith('/api/webhooks')) {
+      return next();
+    }
+    if (isLikelyBotRequest(req)) {
       return next();
     }
 

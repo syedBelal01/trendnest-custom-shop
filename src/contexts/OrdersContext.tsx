@@ -21,6 +21,16 @@ type OrdersContextValue = {
 };
 
 const OrdersContext = createContext<OrdersContextValue | undefined>(undefined);
+const ADMIN_VISITOR_COOKIE = 'tn_admin';
+
+function setAdminVisitorExclusionCookie(enabled: boolean) {
+  if (typeof document === 'undefined') return;
+  if (enabled) {
+    document.cookie = `${ADMIN_VISITOR_COOKIE}=1; path=/; SameSite=Lax`;
+    return;
+  }
+  document.cookie = `${ADMIN_VISITOR_COOKIE}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax`;
+}
 
 export function OrdersProvider({ children }: { children: ReactNode }) {
   const [orders, setOrders] = useState<Order[]>([]);
@@ -55,6 +65,10 @@ export function OrdersProvider({ children }: { children: ReactNode }) {
     }
     void refreshOrders();
   }, [adminKeySet, refreshOrders]);
+
+  useEffect(() => {
+    setAdminVisitorExclusionCookie(adminKeySet);
+  }, [adminKeySet]);
 
   const setAdminApiKey = useCallback((key: string) => {
     const t = key.trim();

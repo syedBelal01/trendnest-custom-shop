@@ -115,7 +115,7 @@ export class ProductsApiError extends Error {
 export async function fetchProductsApi(): Promise<import('@/types').Product[]> {
   let res: Response;
   try {
-    res = await fetch(apiUrl(`/api/products?t=${Date.now()}`), productFetchInit);
+    res = await fetch(apiUrl(`/api/products?t=${Date.now()}`), productFetchInit());
   } catch {
     throw new ProductsApiError(
       import.meta.env.DEV
@@ -190,9 +190,15 @@ export async function reorderProductsAdminApi(input: { category: string; ordered
   }
 }
 
-const productFetchInit: RequestInit = {
-  cache: 'no-store',
-};
+function productFetchInit(): RequestInit {
+  const h: Record<string, string> = {};
+  const key = getAdminApiKey();
+  if (key && key.trim()) h['X-Admin-Key'] = key.trim();
+  return {
+    cache: 'no-store',
+    headers: h,
+  };
+}
 
 /** Single product by id (includes `specifications` when set in MongoDB). */
 export async function fetchProductByIdApi(id: string): Promise<import('@/types').Product | null> {
@@ -201,7 +207,7 @@ export async function fetchProductByIdApi(id: string): Promise<import('@/types')
   try {
     const res = await fetch(
       apiUrl(`/api/products/${encodeURIComponent(trimmed)}?t=${Date.now()}`),
-      productFetchInit
+      productFetchInit()
     );
     if (res.status === 404) return null;
     if (!res.ok) return null;
