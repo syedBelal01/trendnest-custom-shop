@@ -287,20 +287,30 @@ export default function HomePage() {
             </div>
           </section>
 
-          <section className="mt-12">
-            <SectionHeader icon={icons.tag} title="Shop by Category" />
-            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-5">
-              {mockCategories.map(({ id, name, description, image, icon }) => (
-                <Link key={id} to={`/category/${id}`} className="group relative h-44 overflow-hidden rounded-2xl shadow-sm">
-                  <img src={image} alt={name} className="h-full w-full object-cover transition duration-500 group-hover:scale-110" />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/75 via-black/25 to-transparent" />
-                  <div className="absolute bottom-4 left-4 right-4 text-white">
-                    <Icon size={22} className="mb-2">
-                      {icon}
-                    </Icon>
-                    <h3 className="font-extrabold">{name}</h3>
-                    <p className="text-xs text-white/80">{description}</p>
+          <section className="mt-12 rounded-3xl bg-slate-50 px-3 py-6 sm:px-4 md:px-8 md:py-10">
+            <div className="mb-4 text-center md:mb-7">
+              <h2 className="text-2xl font-black tracking-tight text-red-600 md:text-3xl md:text-slate-900">
+                Top Categories
+              </h2>
+            </div>
+            <div className="grid grid-cols-4 gap-x-2 gap-y-6 sm:gap-x-3 sm:gap-y-8 md:grid-cols-5 md:gap-x-8 md:gap-y-10 lg:grid-cols-6">
+              {mockCategories.map(({ id, name, image }) => (
+                <Link
+                  key={id}
+                  to={`/category/${id}`}
+                  className="group flex flex-col items-center text-center"
+                >
+                  <div className="relative h-16 w-16 overflow-hidden rounded-full bg-[#cfe2f5] shadow-sm ring-1 ring-slate-200/80 sm:h-20 sm:w-20 md:h-32 md:w-32 lg:h-36 lg:w-36">
+                    <img
+                      src={image}
+                      alt={name}
+                      className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                      loading="lazy"
+                    />
                   </div>
+                  <h3 className="mt-2 max-w-[96%] text-xs font-bold leading-tight text-slate-900 sm:text-sm md:mt-3 md:text-base md:font-extrabold md:text-red-600">
+                    {name}
+                  </h3>
                 </Link>
               ))}
             </div>
