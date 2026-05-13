@@ -94,6 +94,7 @@ function toHref(raw: string | undefined, banner?: SaleBanner): string {
 
 function SaleBannerSlide({ banner }: { banner: SaleBanner }) {
   const hasBannerImage = Boolean(String(banner.mobileImage || banner.desktopImage || '').trim());
+  const saleHref = toHref(banner.ctaLink, banner);
 
   return (
     <div
@@ -121,11 +122,16 @@ function SaleBannerSlide({ banner }: { banner: SaleBanner }) {
           hasBannerImage ? 'bg-gradient-to-t from-black/35 via-black/10 to-transparent' : 'bg-transparent'
         )}
       />
+      <Link
+        to={saleHref}
+        aria-label={`Open ${banner.title} sale`}
+        className="absolute inset-0 z-[5]"
+      />
 
-      <div className="relative z-10 flex h-full items-end p-4 sm:p-5 md:p-8">
+      <div className="pointer-events-none relative z-10 flex h-full items-end p-4 sm:p-5 md:p-8">
         <Link
-          to={toHref(banner.ctaLink, banner)}
-          className="inline-flex items-center rounded-xl bg-orange-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-orange-600/20 transition hover:bg-orange-700"
+          to={saleHref}
+          className="pointer-events-auto inline-flex items-center rounded-xl bg-orange-600 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-orange-600/20 transition hover:bg-orange-700"
         >
           {banner.ctaText?.trim() || 'Shop Now'} <ArrowRight className="ml-1 h-4 w-4" aria-hidden />
         </Link>
