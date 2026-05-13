@@ -78,8 +78,8 @@ function ProductCard({ product, ratingSummary }: { product: Product; ratingSumma
   const filledStars = Math.max(0, Math.min(5, Math.round(Number(avg) || 0)));
 
   return (
-    <div className="group overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-xl">
-      <Link to={productSeoPath(product)} className="block relative aspect-square overflow-hidden rounded-t-2xl bg-slate-100">
+    <div className="group overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm transition-all duration-300 sm:rounded-2xl hover:shadow-xl">
+      <Link to={productSeoPath(product)} className="block relative aspect-square overflow-hidden rounded-t-xl bg-slate-100 sm:rounded-t-2xl">
         <img
           src={productPrimaryImage(product)}
           alt={productImageAlt(product, "homepage product photo")}
@@ -87,7 +87,7 @@ function ProductCard({ product, ratingSummary }: { product: Product; ratingSumma
           loading="lazy"
         />
         {dp > 0 ? (
-          <span className="absolute left-3 top-3 rounded-md bg-orange-600 px-2.5 py-1 text-xs font-bold text-white">
+          <span className="absolute left-2 top-2 rounded-md bg-orange-600 px-2 py-0.5 text-[10px] font-bold text-white sm:left-3 sm:top-3 sm:px-2.5 sm:py-1 sm:text-xs">
             {dp}% OFF
           </span>
         ) : null}
@@ -97,34 +97,35 @@ function ProductCard({ product, ratingSummary }: { product: Product; ratingSumma
             e.preventDefault();
             e.stopPropagation();
           }}
-          className="absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-full bg-white/95 text-slate-700 shadow-sm transition hover:text-orange-600"
+          className="absolute right-2 top-2 grid h-8 w-8 place-items-center rounded-full bg-white/95 text-slate-700 shadow-sm transition hover:text-orange-600 sm:right-3 sm:top-3 sm:h-9 sm:w-9"
         >
-          <Icon size={18}>{icons.heart}</Icon>
+          <Icon size={16}>{icons.heart}</Icon>
         </button>
       </Link>
-      <div className="p-4">
+      <div className="p-2.5 sm:p-4">
         <Link to={productSeoPath(product)} className="block">
-          <h3 className="line-clamp-1 text-sm font-bold text-slate-900 transition-colors hover:text-orange-600">
+          <h3 className="line-clamp-3 min-h-[3.2rem] text-[13px] font-bold leading-tight text-slate-900 transition-colors hover:text-orange-600 sm:line-clamp-2 sm:min-h-0 sm:text-sm">
             {product.name}
           </h3>
         </Link>
-        <div className="mt-2 flex items-end gap-2">
-          <span className="text-lg font-extrabold text-slate-900">₹{product.price}</span>
+        <div className="mt-1.5 flex items-end gap-1.5 sm:mt-2 sm:gap-2">
+          <span className="text-base font-extrabold text-slate-900 sm:text-lg">₹{product.price}</span>
           {product.originalPrice ? (
-            <span className="text-xs text-slate-400 line-through">₹{product.originalPrice}</span>
+            <span className="text-[11px] text-slate-400 line-through sm:text-xs">₹{product.originalPrice}</span>
           ) : null}
         </div>
-        <div className="mt-2 flex items-center gap-1 text-xs text-slate-500">
+        <div className="mt-1.5 flex items-center gap-1 text-[11px] text-slate-500 sm:mt-2 sm:text-xs">
           <div className="flex text-amber-400">
             {Array.from({ length: 5 }).map((_, i) => (
-              <Icon key={i} size={12} className={i < filledStars ? "text-amber-400" : "text-slate-200"}>
+              <Icon key={i} size={10} className={i < filledStars ? "text-amber-400" : "text-slate-200"}>
                 {i < filledStars ? icons.star : "☆"}
               </Icon>
             ))}
           </div>
-          <span>
-            {avg.toFixed(1)} ({reviewCount} reviews)
-          </span>
+          <span className="font-medium text-slate-600">{avg.toFixed(1)}</span>
+        </div>
+        <div className="text-[10px] leading-none text-slate-500 sm:text-[11px]">
+          {reviewCount} review{reviewCount === 1 ? '' : 's'}
         </div>
         <button
           type="button"
@@ -137,9 +138,9 @@ function ProductCard({ product, ratingSummary }: { product: Product; ratingSumma
               selectedSleeve: product.sleeveTypes?.[0],
             })
           }
-          className="mt-4 flex h-10 w-full items-center justify-center gap-2 rounded-lg bg-orange-600 text-sm font-bold text-white transition hover:bg-orange-700 active:scale-[0.98]"
+          className="mt-2.5 flex h-9 w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-orange-600 px-2 text-xs font-bold text-white transition hover:bg-orange-700 active:scale-[0.98] sm:mt-4 sm:h-10 sm:gap-2 sm:text-sm"
         >
-          <Icon size={15}>{icons.cart}</Icon> Add to Cart
+          <Icon size={12}>{icons.cart}</Icon> Add to Cart
         </button>
       </div>
     </div>
@@ -280,7 +281,7 @@ export default function HomePage() {
 
           <section className="mt-12">
             <SectionHeader icon={icons.flame} title="Trending Now" linkTo="/category/trending" />
-            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-4">
               {trendingNow.map((product) => (
                 <ProductCard key={product.id} product={product} ratingSummary={ratingSummary} />
               ))}
@@ -316,9 +317,9 @@ export default function HomePage() {
             </div>
           </section>
 
-          <section className="mt-12 rounded-3xl bg-orange-50/70 p-5 md:p-8">
+          <section className="mt-12 rounded-3xl bg-orange-50/70 p-3 sm:p-5 md:p-8">
             <SectionHeader icon={icons.gift} title="Best Deals" linkTo="/best-deals" />
-            <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-4">
               {deals.map((product) => (
                 <ProductCard key={`deal-${product.id}`} product={product} ratingSummary={ratingSummary} />
               ))}
@@ -328,7 +329,7 @@ export default function HomePage() {
           <section className="mt-12 rounded-3xl border border-slate-200 bg-white p-5 md:p-8">
             <SectionHeader icon={icons.home} title="Home & Kitchen" linkTo="/category/home" />
             {homeEssentials.length > 0 ? (
-              <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-4">
                 {homeEssentials.map((product) => (
                   <ProductCard key={`home-${product.id}`} product={product} ratingSummary={ratingSummary} />
                 ))}
