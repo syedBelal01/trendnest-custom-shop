@@ -295,7 +295,7 @@ export default function HomePage() {
 
           <section className="mt-12 rounded-3xl bg-slate-50 px-3 py-6 sm:px-4 md:px-8 md:py-10">
             <div className="mb-4 text-center md:mb-7">
-              <h2 className="text-2xl font-black tracking-tight text-red-600 md:text-3xl md:text-slate-900">
+              <h2 className="text-2xl font-black tracking-tight text-orange-600 md:text-3xl">
                 Top Categories
               </h2>
             </div>
@@ -314,7 +314,7 @@ export default function HomePage() {
                       loading="lazy"
                     />
                   </div>
-                  <h3 className="mt-2 max-w-[96%] text-xs font-bold leading-tight text-slate-900 sm:text-sm md:mt-3 md:text-base md:font-extrabold md:text-red-600">
+                  <h3 className="mt-2 max-w-[96%] text-xs font-bold leading-tight text-slate-900 sm:text-sm md:mt-3 md:text-base md:font-extrabold md:text-slate-900 group-hover:text-orange-600">
                     {name}
                   </h3>
                 </Link>
