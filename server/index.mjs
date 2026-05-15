@@ -417,6 +417,7 @@ const ProductSchema = new mongoose.Schema(
     originalPrice: Number,
     images: { type: [String], default: [] },
     category: { type: String, required: true },
+    categories: { type: [String], default: [] },
     subcategory: String,
     /** Manual ordering within a category (lower comes first). */
     displayOrder: { type: Number, default: undefined, index: true },
@@ -1041,7 +1042,7 @@ async function validateCouponForCart({ code, subtotal, items, userId, paymentMet
   const cartProductIds = new Set(productIds);
   const cartCategories = new Set(
     products
-      .map(p => p?.category)
+      .flatMap(p => [p?.category, ...(Array.isArray(p?.categories) ? p.categories : [])])
       .filter(Boolean)
       .map(String)
   );
@@ -1400,6 +1401,9 @@ function serialize(doc) {
 function serializeProductDoc(doc) {
   const o = serialize(doc);
   if (!o) return null;
+  const primaryCategory = String(o.category || '').trim();
+  const categoryList = Array.isArray(o.categories) ? o.categories : [];
+  o.categories = [...new Set([primaryCategory, ...categoryList].map((c) => String(c || '').trim()).filter(Boolean))];
   o.name = normalizeSoapDispenserTypos(o.name).trim();
   if (typeof o.subcategory === 'string') o.subcategory = normalizeSoapDispenserTypos(o.subcategory).trim();
   if (Array.isArray(o.images)) {
@@ -5991,11 +5995,21 @@ app.get('/sitemap.xml', async (req, res) => {
       { loc: `${SITE}/`, lastmod: nowIso },
       { loc: `${SITE}/best-deals`, lastmod: nowIso },
       { loc: `${SITE}/custom-print`, lastmod: nowIso },
+      { loc: `${SITE}/category/new-arrivals`, lastmod: nowIso },
+      { loc: `${SITE}/category/summer`, lastmod: nowIso },
+      { loc: `${SITE}/category/deal-of-the-day`, lastmod: nowIso },
+      { loc: `${SITE}/category/kitchen`, lastmod: nowIso },
+      { loc: `${SITE}/category/car-motorbike`, lastmod: nowIso },
+      { loc: `${SITE}/category/gardening`, lastmod: nowIso },
+      { loc: `${SITE}/category/jewellery`, lastmod: nowIso },
+      { loc: `${SITE}/category/gifts`, lastmod: nowIso },
+      { loc: `${SITE}/category/electronics`, lastmod: nowIso },
       { loc: `${SITE}/category/home`, lastmod: nowIso },
+      { loc: `${SITE}/category/kids-baby`, lastmod: nowIso },
+      { loc: `${SITE}/category/health-beauty`, lastmod: nowIso },
       { loc: `${SITE}/category/printed`, lastmod: nowIso },
       { loc: `${SITE}/category/trending`, lastmod: nowIso },
       { loc: `${SITE}/category/fashion`, lastmod: nowIso },
-      { loc: `${SITE}/category/electronics`, lastmod: nowIso },
       { loc: `${SITE}/contact`, lastmod: nowIso },
     ];
 
@@ -6003,7 +6017,8 @@ app.get('/sitemap.xml', async (req, res) => {
     const categoryUrls = Array.from(
       new Set(
         products
-          .map((p) => String(p?.category || '').trim())
+          .flatMap((p) => [p?.category, ...(Array.isArray(p?.categories) ? p.categories : [])])
+          .map((category) => String(category || '').trim())
           .filter(Boolean)
           .map((category) => `${SITE}/category/${encodeURIComponent(category)}`)
       )
@@ -6877,6 +6892,13 @@ app.post('/api/products', mongoReady, async (req, res) => {
           ? body.images.map((u) => normalizeLegacyProductImageUrl(u)).filter(Boolean)
           : ['https://images.unsplash.com/photo-1553062407-98d43420e9e7?w=600'],
       category: body.category,
+      categories: [
+        ...new Set(
+          [body.category, ...(Array.isArray(body.categories) ? body.categories : [])]
+            .map((c) => String(c || '').trim())
+            .filter(Boolean)
+        ),
+      ],
       subcategory: body.subcategory != null ? normalizeSoapDispenserTypos(body.subcategory) : body.subcategory,
       displayOrder: nextOrder,
       sizes: body.sizes,
@@ -7015,7 +7037,15 @@ function buildProductUpdateSet(src) {
     if (!Array.isArray(src.images)) throw new Error('images must be an array');
     out.images = src.images.map((u) => normalizeLegacyProductImageUrl(u)).filter(Boolean);
   }
-  if (src.category !== undefined) out.category = String(src.category);
+  if (src.category !== undefined) {
+    out.category = String(src.category);
+    if (src.categories === undefined) out.categories = [String(src.category)].filter(Boolean);
+  }
+  if (src.categories !== undefined) {
+    const primary = src.category !== undefined ? String(src.category) : '';
+    const list = Array.isArray(src.categories) ? src.categories : [];
+    out.categories = [...new Set([primary, ...list].map((c) => String(c || '').trim()).filter(Boolean))];
+  }
   if (src.subcategory !== undefined) out.subcategory = src.subcategory != null ? normalizeSoapDispenserTypos(String(src.subcategory)) : '';
   if (src.sizes !== undefined) {
     out.sizes = Array.isArray(src.sizes) ? src.sizes.map((s) => String(s)) : [];

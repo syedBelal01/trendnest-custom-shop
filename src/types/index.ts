@@ -4,7 +4,22 @@ export interface ProductVariantOption {
   images: string[];
 }
 
-export type ProductCategory = 'fashion' | 'home' | 'electronics' | 'printed' | 'trending';
+export type ProductCategory =
+  | 'new-arrivals'
+  | 'summer'
+  | 'deal-of-the-day'
+  | 'kitchen'
+  | 'car-motorbike'
+  | 'gardening'
+  | 'jewellery'
+  | 'gifts'
+  | 'electronics'
+  | 'home'
+  | 'kids-baby'
+  | 'health-beauty'
+  | 'fashion'
+  | 'printed'
+  | 'trending';
 
 export type SaleBannerTheme = 'default' | 'winter' | 'summer' | 'eid' | 'holi' | 'diwali' | 'flash';
 export type SaleBannerStatus = 'draft' | 'live' | 'ended' | 'disabled';
@@ -54,6 +69,7 @@ export interface Product {
   originalPrice?: number;
   images: string[];
   category: ProductCategory;
+  categories?: ProductCategory[];
   subcategory?: string;
   /** Manual ordering within a category (lower comes first). */
   displayOrder?: number;

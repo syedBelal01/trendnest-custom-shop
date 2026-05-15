@@ -169,6 +169,12 @@ function isPrintedShirt(product: Product | null | undefined): boolean {
   return category === 'printed' && (name.includes('t-shirt') || name.includes('tshirt') || subcategory.includes('tee'));
 }
 
+function productCategoryIds(product: Product): string[] {
+  return Array.from(
+    new Set([product.category, ...(Array.isArray(product.categories) ? product.categories : [])].map((c) => String(c || '')).filter(Boolean))
+  );
+}
+
 const pillBtn = (active: boolean) =>
   `rounded-xl px-4 py-2 text-sm font-medium border-2 transition-all duration-200 ${
     active
@@ -599,11 +605,12 @@ export default function ProductDetailPage() {
 
   const related = useMemo(() => {
     if (!product?.id) return [];
+    const currentCategories = productCategoryIds(product);
     return (products ?? [])
       .filter(p => p.id !== product.id)
-      .filter(p => (p.category || '') === (product.category || ''))
+      .filter(p => productCategoryIds(p).some((c) => currentCategories.includes(c)))
       .slice(0, 5);
-  }, [products, product?.id, product?.category]);
+  }, [products, product]);
 
   if (!product && showSkeleton) {
     return (

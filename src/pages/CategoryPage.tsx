@@ -8,6 +8,7 @@ import { Helmet } from 'react-helmet-async';
 import ProductCardSkeleton from '@/components/ProductCardSkeleton';
 import { useDelayedFlag } from '@/hooks/useDelayedFlag';
 import { ensureSeoMetaDescription, productCanonicalUrl } from '@/lib/seo';
+import type { Product } from '@/types';
 
 const CANONICAL_BASE = 'https://trendnest99.in';
 const DEFAULT_OG_IMAGE = `${CANONICAL_BASE}/img3.jpeg`;
@@ -85,6 +86,13 @@ function truncate(input: string, max = 160): string {
   return `${input.slice(0, max - 1).trimEnd()}...`;
 }
 
+function productShowsInCategory(product: Product, categoryId: string | undefined): boolean {
+  const id = String(categoryId || '').trim();
+  if (!id) return false;
+  if (String(product.category || '') === id) return true;
+  return Array.isArray(product.categories) && product.categories.some((c) => String(c) === id);
+}
+
 export default function CategoryPage() {
   const { id } = useParams<{ id: string }>();
   const { products, loading } = useProducts();
@@ -93,7 +101,7 @@ export default function CategoryPage() {
 
   const category = categories.find((c) => c.id === id);
   let filtered =
-    id === 'trending' ? products.filter((p) => p.isTrending) : products.filter((p) => p.category === id);
+    id === 'trending' ? products.filter((p) => p.isTrending) : products.filter((p) => productShowsInCategory(p, id));
   if (id === 'trending') {
     const ts = (pid: string) => {
       const m = String(pid || '').match(/\d{10,}/);

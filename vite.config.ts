@@ -101,11 +101,21 @@ export default defineConfig(async ({ mode }) => {
       "/",
       "/best-deals",
       "/custom-print",
+      "/category/new-arrivals",
+      "/category/summer",
+      "/category/deal-of-the-day",
+      "/category/kitchen",
+      "/category/car-motorbike",
+      "/category/gardening",
+      "/category/jewellery",
+      "/category/gifts",
+      "/category/electronics",
       "/category/home",
+      "/category/kids-baby",
+      "/category/health-beauty",
       "/category/printed",
       "/category/trending",
       "/category/fashion",
-      "/category/electronics",
     ];
 
     const apiBase =
@@ -139,7 +149,13 @@ export default defineConfig(async ({ mode }) => {
         row.slug = productSeoSlug(row);
         productById[id] = row;
         if (row.slug) productBySlug[row.slug] = row;
-        if (row.category) categories.add(String(row.category));
+          if (row.category) categories.add(String(row.category));
+          if (Array.isArray(p?.categories)) {
+            for (const category of p.categories) {
+              const c = String(category || "").trim();
+              if (c) categories.add(c);
+            }
+          }
       }
       const categoryRoutes = Array.from(categories).map((c) => `/category/${encodeURIComponent(c)}`);
       const productRoutes = Array.from(new Set(Object.values(productById).map((p) => `/product/${encodeURIComponent(String(p.slug || p.id))}`)));
@@ -208,7 +224,17 @@ export default defineConfig(async ({ mode }) => {
     };
 
     const categoryMeta: Record<string, { name: string; description: string; keywords?: string }> = {
+      "new-arrivals": { name: "New Arrivals", description: "Shop freshly added products and latest arrivals at TrendNest99." },
+      summer: { name: "Summer", description: "Shop the Summer collection 2026 with seasonal essentials and fresh picks." },
+      "deal-of-the-day": { name: "Deal of the Day", description: "Shop deal of the day bestsellers and limited-time offers." },
+      kitchen: { name: "Kitchen", description: "Shop kitchen essentials, tools, storage, and everyday cooking accessories." },
+      "car-motorbike": { name: "Car & Motorbike", description: "Shop car and motorbike accessories for everyday care and utility." },
+      gardening: { name: "Gardening", description: "Shop gardening tools and outdoor essentials online." },
+      jewellery: { name: "Jewellery", description: "Shop jewellery and everyday accessories online." },
+      gifts: { name: "Gifts", description: "Shop useful gifts and thoughtful picks for every occasion." },
       home: { name: "Home Essentials", description: "Shop home essentials for your kitchen, bath, and everyday living." },
+      "kids-baby": { name: "Kids & Baby", description: "Shop kids and baby essentials for daily care and comfort." },
+      "health-beauty": { name: "Health & Beauty", description: "Shop health and beauty essentials for everyday personal care." },
       printed: {
         name: "Printed T-Shirts & Graphic Shirts",
         description:

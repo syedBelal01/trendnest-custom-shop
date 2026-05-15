@@ -116,9 +116,19 @@ export const coupons: Coupon[] = [
 ];
 
 export const categories = [
+  { id: 'new-arrivals', name: 'New Arrivals', icon: '\u2728', description: 'Freshly added products', image: '/New_Arrivals_3.avif' },
+  { id: 'summer', name: 'Summer', icon: '\u2600\uFE0F', description: 'Summer collection 2026', image: '/summer_collection_1_d2253e3a-180a-496d-8ec9-c77d75c2acfd.avif' },
+  { id: 'deal-of-the-day', name: 'Deal of the Day', icon: '\u26A1', description: 'Deal of the day - Bestsellers', image: '/Best_selling_1_1_1.avif' },
+  { id: 'kitchen', name: 'Kitchen', icon: '\u2615', description: 'Kitchen Essentials', image: '/Kitchen_8.avif' },
+  { id: 'car-motorbike', name: 'Car & Motorbike', icon: '\u26FD', description: 'Car and Motorbike Accessories', image: '/Car_Motorbike_1.avif' },
+  { id: 'gardening', name: 'Gardening', icon: '\u2698', description: 'Gardening Tools', image: '/Gardening_2_8f3b2f05-2748-48a1-b787-1466e0c4a47d.avif' },
+  { id: 'jewellery', name: 'Jewellery', icon: '\u25C7', description: 'Jewellery', image: '/Jewellery_3f9cddb3-7ae9-4065-a51e-b09b2057d8f7.avif' },
+  { id: 'gifts', name: 'Gifts', icon: '\u2726', description: 'Gifts', image: '/Gifts_1_bc64900b-8d29-4c32-8f47-c4ec19ac1a77.avif' },
+  { id: 'electronics', name: 'Electronics', icon: '🔌', description: 'Electronics', image: '/Electronics_2_1.avif' },
+  { id: 'home', name: 'Home Essentials', icon: '🏠', description: 'Home Essentials', image: '/Home_Essentials_4.avif' },
+  { id: 'kids-baby', name: 'Kids & Baby', icon: '\u2606', description: 'Kids and Baby Essentials', image: '/Kids_Baby_2.avif' },
+  { id: 'health-beauty', name: 'Health & Beauty', icon: '\u2661', description: 'Health and Beauty Essentials', image: '/Health_Beauty_2.avif' },
   { id: 'fashion', name: 'Fashion', icon: '👔', description: 'Style & apparel', image: '/img3.png' },
-  { id: 'home', name: 'Home & Kitchen', icon: '🏠', description: 'Soap dispensers & more', image: unsplash('1556909114-f6e7ad7d3136') },
-  { id: 'electronics', name: 'Electronics', icon: '🔌', description: 'Gadgets & accessories', image: unsplash('1518779578993-ec3579fee39f') },
   { id: 'printed', name: 'Printed Products', icon: '🎨', description: 'Tees, cups & custom prints', image: unsplash('1523381210434-271e8be1f52b') },
   { id: 'trending', name: 'Trending', icon: '🔥', description: 'Popular picks', image: unsplash('1513506003901-1e6a229e2d15') },
 ];

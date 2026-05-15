@@ -35,6 +35,7 @@ import {
 } from '@/lib/api';
 import { productPrimaryImage } from '@/lib/productImages';
 import { suggestedSpecLabelsForCategory } from '@/data/productSpecPresets';
+import { ADMIN_CATEGORY_TREE, ADMIN_MAIN_CATEGORIES } from '@/data/adminCategories';
 import {
   DndContext,
   PointerSensor,
@@ -143,6 +144,27 @@ function normalizeCsvList(values: string[] | undefined): string[] {
   return values.map((s) => String(s).trim()).filter(Boolean);
 }
 
+function normalizeCategoryList(category: Product['category'] | undefined, categories: Product['categories'] | undefined): Product['categories'] {
+  const primary = String(category || 'fashion').trim() as Product['category'];
+  const list = Array.isArray(categories) ? categories : [];
+  return Array.from(new Set([primary, ...list].map((c) => String(c || '').trim()).filter(Boolean))) as Product['categories'];
+}
+
+function productMatchesAdminCategory(product: Product, categoryId: string): boolean {
+  if (categoryId === 'all') return true;
+  if (String(product.category) === categoryId) return true;
+  return Array.isArray(product.categories) && product.categories.some((c) => String(c) === categoryId);
+}
+
+function categoryLabel(categoryId: string): string {
+  return ADMIN_MAIN_CATEGORIES.find((c) => c.id === categoryId)?.label || categoryId;
+}
+
+function categoryDisplayText(product: Product): string {
+  const cats = normalizeCategoryList(product.category, product.categories) || [];
+  return cats.map((c) => categoryLabel(String(c))).join(', ');
+}
+
 const emptyProduct = (): Partial<Product> => ({
   name: '',
   description: '',
@@ -150,6 +172,7 @@ const emptyProduct = (): Partial<Product> => ({
   originalPrice: undefined,
   images: [],
   category: 'fashion',
+  categories: ['fashion'],
   subcategory: '',
   stock: 0,
   rating: 4,
@@ -168,6 +191,7 @@ const emptyProduct = (): Partial<Product> => ({
 const PRESETS: Record<string, Partial<Product>> = {
   belt: {
     category: 'fashion',
+    categories: ['fashion'],
     subcategory: 'Belts',
     sizes: ['28', '30', '32', '34', '36', '38', '40', '42'],
     variantOptions: [
@@ -181,6 +205,7 @@ const PRESETS: Record<string, Partial<Product>> = {
   },
   soap: {
     category: 'home',
+    categories: ['home'],
     subcategory: 'Bath',
     sizes: [],
     variantOptions: [
@@ -193,6 +218,7 @@ const PRESETS: Record<string, Partial<Product>> = {
   },
   printedTee: {
     category: 'printed',
+    categories: ['printed'],
     subcategory: 'Printed Tees',
     sizes: ['XS', 'S', 'M', 'L', 'XL', 'XXL'],
     variantOptions: [
@@ -205,6 +231,7 @@ const PRESETS: Record<string, Partial<Product>> = {
   },
   printedCup: {
     category: 'printed',
+    categories: ['printed'],
     subcategory: 'Printed Cups',
     sizes: [],
     variantOptions: [
@@ -216,6 +243,7 @@ const PRESETS: Record<string, Partial<Product>> = {
   },
   customTee: {
     category: 'printed',
+    categories: ['printed'],
     subcategory: 'Custom Print',
     sizes: ['XS', 'S', 'M', 'L', 'XL', 'XXL'],
     variantOptions: [
@@ -228,6 +256,7 @@ const PRESETS: Record<string, Partial<Product>> = {
   },
   customCup: {
     category: 'printed',
+    categories: ['printed'],
     subcategory: 'Custom Print',
     sizes: [],
     variantOptions: [
@@ -249,6 +278,7 @@ function normalizeProductForEditing(p: Product): Partial<Product> {
     return {
       ...p,
       specifications,
+      categories: normalizeCategoryList(p.category, p.categories),
       variantModel: {
         types: Array.isArray(vm.types)
           ? vm.types.map(t => ({
@@ -306,6 +336,7 @@ function normalizeProductForEditing(p: Product): Partial<Product> {
     return {
       ...p,
       specifications,
+      categories: normalizeCategoryList(p.category, p.categories),
       // When variantOptions exist, treat them as the source of truth for storefront images.
       // Clear root images to avoid the save flow preferring `product.images` over variant images.
       images: [],
@@ -316,6 +347,7 @@ function normalizeProductForEditing(p: Product): Partial<Product> {
     return {
       ...p,
       specifications,
+      categories: normalizeCategoryList(p.category, p.categories),
       variantOptions: p.variants.map((name, i) => ({
         name,
         images: i === 0 ? [...(p.images ?? [])] : [],
@@ -325,6 +357,7 @@ function normalizeProductForEditing(p: Product): Partial<Product> {
   return {
     ...p,
     specifications,
+    categories: normalizeCategoryList(p.category, p.categories),
     variantOptions: [{ name: '', images: [...(p.images ?? [])] }],
   };
 }
@@ -1121,6 +1154,7 @@ export default function AdminProducts() {
           originalPrice: snap.originalPrice,
           images,
           category: snap.category || 'fashion',
+          categories: normalizeCategoryList(snap.category || 'fashion', snap.categories),
           subcategory: snap.subcategory,
           sizes: sizes.length ? sizes : undefined,
           sleeveTypes: sleeveTypes?.length ? sleeveTypes : undefined,
@@ -1155,6 +1189,7 @@ export default function AdminProducts() {
           originalPrice: snap.originalPrice,
           images,
           category: snap.category || 'fashion',
+          categories: normalizeCategoryList(snap.category || 'fashion', snap.categories),
           subcategory: snap.subcategory,
           sizes: sizes.length ? sizes : undefined,
           variants: variantsList.length ? variantsList : undefined,
@@ -1204,17 +1239,21 @@ export default function AdminProducts() {
 
   const categoryOptions = useMemo(() => {
     const set = new Set<string>();
+    for (const c of ADMIN_MAIN_CATEGORIES) set.add(c.id);
     for (const p of products) {
-      const c = String(p?.category || '').trim();
-      if (c && c !== 'trending') set.add(c);
+      const cats = normalizeCategoryList(p.category, p.categories);
+      for (const c of cats || []) {
+        const id = String(c || '').trim();
+        if (id && id !== 'trending') set.add(id);
+      }
     }
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
+    return ADMIN_MAIN_CATEGORIES.filter((c) => set.has(c.id));
   }, [products]);
 
   const filtered = useMemo(() => {
     const query = q.trim().toLowerCase();
     return products
-      .filter((p) => (categoryFilter === 'all' ? true : String(p.category) === String(categoryFilter)))
+      .filter((p) => productMatchesAdminCategory(p, categoryFilter))
       .filter((p) => {
         if (!query) return true;
         const hay = `${p.name || ''} ${p.subcategory || ''} ${p.sku || ''}`.toLowerCase();
@@ -1222,6 +1261,31 @@ export default function AdminProducts() {
       });
   }, [products, categoryFilter, q]);
   const derivedVmStock = useMemo(() => variantModelTotalStock(editing?.variantModel), [editing?.variantModel]);
+  const selectedCategoryIds = useMemo(
+    () => normalizeCategoryList(editing?.category as Product['category'] | undefined, editing?.categories as Product['categories'] | undefined) || [],
+    [editing?.category, editing?.categories]
+  );
+  const selectedSubcategoryOptions = useMemo(
+    () => ((editing?.category ? ADMIN_CATEGORY_TREE[editing.category as Product['category']] : undefined) || []),
+    [editing?.category]
+  );
+
+  const toggleEditingCategory = (categoryId: Product['category'], checked: boolean) => {
+    setEditing((prev) => {
+      if (!prev) return prev;
+      const current = normalizeCategoryList(prev.category as Product['category'] | undefined, prev.categories as Product['categories'] | undefined) || [];
+      let next = checked ? [...current, categoryId] : current.filter((c) => c !== categoryId);
+      next = Array.from(new Set(next)) as Product['categories'];
+      if (!next.length) next = [categoryId];
+      const primary = (next.includes(prev.category as Product['category']) ? prev.category : next[0]) as Product['category'];
+      return {
+        ...prev,
+        category: primary,
+        categories: normalizeCategoryList(primary, next),
+        subcategory: primary !== prev.category ? '' : prev.subcategory,
+      };
+    });
+  };
 
   return (
     <div>
@@ -1298,8 +1362,8 @@ export default function AdminProducts() {
             <SelectContent>
               <SelectItem value="all">All categories</SelectItem>
               {categoryOptions.map((c) => (
-                <SelectItem key={c} value={c}>
-                  {c}
+                <SelectItem key={c.id} value={c.id}>
+                  {c.label}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -1701,17 +1765,33 @@ export default function AdminProducts() {
                     onAddVariantRow={addVariantRow}
                   />
                 )}
-                <div className="grid grid-cols-2 gap-3">
-                  <Select value={editing.category || 'fashion'} onValueChange={v => setEditing(p => ({ ...p, category: v as Product['category'] }))}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label>Primary category</Label>
+                    <Select
+                      value={editing.category || 'fashion'}
+                      onValueChange={v =>
+                        setEditing(p => {
+                          const category = v as Product['category'];
+                          return {
+                            ...p,
+                            category,
+                            categories: normalizeCategoryList(category, p?.categories as Product['categories'] | undefined),
+                            subcategory: category !== p?.category ? '' : p?.subcategory,
+                          };
+                        })
+                      }
+                    >
+                    <SelectTrigger><SelectValue placeholder="Primary category" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="fashion">Fashion</SelectItem>
-                      <SelectItem value="home">Home</SelectItem>
-                    <SelectItem value="electronics">Electronics</SelectItem>
-                      <SelectItem value="printed">Printed</SelectItem>
-                      <SelectItem value="trending">Trending</SelectItem>
+                      {ADMIN_MAIN_CATEGORIES.map((category) => (
+                        <SelectItem key={category.id} value={category.id}>
+                          {category.label}
+                        </SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
+                  </div>
                   <Input
                     type="number"
                     placeholder={editing.variantModel ? 'Stock is derived from variants' : 'Stock'}
@@ -1720,7 +1800,53 @@ export default function AdminProducts() {
                     onChange={e => setEditing(p => ({ ...p, stock: +e.target.value }))}
                   />
                 </div>
-                <Input placeholder="Subcategory" value={editing.subcategory || ''} onChange={e => setEditing(p => ({ ...p, subcategory: e.target.value }))} />
+                <div className="rounded-lg border bg-muted/20 p-3">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <Label>Show product in categories</Label>
+                    <span className="text-xs text-muted-foreground">{selectedCategoryIds.length} selected</span>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {ADMIN_MAIN_CATEGORIES.map((category) => {
+                      const checked = selectedCategoryIds.includes(category.id);
+                      const isPrimary = editing.category === category.id;
+                      return (
+                        <label
+                          key={category.id}
+                          className={`flex items-center gap-2 rounded-md border px-2.5 py-2 text-sm ${
+                            checked ? 'border-orange-200 bg-orange-50 text-orange-900' : 'bg-background'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => toggleEditingCategory(category.id, e.target.checked)}
+                          />
+                          <span className="min-w-0 flex-1 truncate">{category.label}</span>
+                          {isPrimary ? <span className="text-[10px] font-bold uppercase text-orange-700">Primary</span> : null}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <Select
+                    value={editing.subcategory || ''}
+                    onValueChange={v => setEditing(p => ({ ...p, subcategory: v }))}
+                    disabled={!selectedSubcategoryOptions.length}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={selectedSubcategoryOptions.length ? 'Select subcategory' : 'No subcategories'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {selectedSubcategoryOptions.map((subcategory) => (
+                        <SelectItem key={subcategory} value={subcategory}>
+                          {subcategory}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input placeholder="Custom subcategory" value={editing.subcategory || ''} onChange={e => setEditing(p => ({ ...p, subcategory: e.target.value }))} />
+                </div>
                 <Input
                   placeholder="Sizes (comma separated, e.g. waist or tee sizes)"
                   value={editing.sizes?.join(',') || ''}
@@ -1814,8 +1940,8 @@ export default function AdminProducts() {
                                 {variantsDisplayText(p)}
                               </span>
                             </td>
-                            <td className="p-3 capitalize">
-                              <div className="capitalize">{p.category}</div>
+                            <td className="p-3">
+                              <div className="max-w-[220px] text-xs font-medium leading-snug">{categoryDisplayText(p)}</div>
                               {p.subcategory ? <div className="text-[11px] text-muted-foreground">{p.subcategory}</div> : null}
                             </td>
                             <td className="p-3 tabular-nums">₹{p.price}</td>
@@ -1886,8 +2012,8 @@ export default function AdminProducts() {
                         {variantsDisplayText(p)}
                       </span>
                     </td>
-                    <td className="p-3 capitalize">
-                      <div className="capitalize">{p.category}</div>
+                    <td className="p-3">
+                      <div className="max-w-[220px] text-xs font-medium leading-snug">{categoryDisplayText(p)}</div>
                       {p.subcategory ? <div className="text-[11px] text-muted-foreground">{p.subcategory}</div> : null}
                     </td>
                     <td className="p-3 tabular-nums">₹{p.price}</td>

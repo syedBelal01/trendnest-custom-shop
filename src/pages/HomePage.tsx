@@ -69,6 +69,11 @@ function discountPercent(product: Product) {
   return Math.round(((mrp - product.price) / mrp) * 100);
 }
 
+function productShowsInCategory(product: Product, categoryId: string): boolean {
+  if (product.category === categoryId) return true;
+  return Array.isArray(product.categories) && product.categories.some((c) => String(c) === categoryId);
+}
+
 function ProductCard({ product, ratingSummary }: { product: Product; ratingSummary: Record<string, RatingSummary> }) {
   const { addItem } = useCart();
   const summary = ratingSummary?.[product.id];
@@ -179,7 +184,7 @@ export default function HomePage() {
   const { products, ratingSummary } = useProducts();
   const trendingNow = products.filter((p) => p.isTrending).slice(0, 4);
   const bestDeals = products.filter((p) => p.isBestDeal).slice(0, 4);
-  const homeEssentials = products.filter((p) => p.category === "home").slice(0, 4);
+  const homeEssentials = products.filter((p) => productShowsInCategory(p, "home")).slice(0, 4);
   const dealsFallback = products.slice(0, 4);
   const deals = bestDeals.length ? bestDeals : dealsFallback;
 
@@ -301,11 +306,11 @@ export default function HomePage() {
                   to={`/category/${id}`}
                   className="group flex flex-col items-center text-center"
                 >
-                  <div className="relative h-16 w-16 overflow-hidden rounded-full bg-[#cfe2f5] shadow-sm ring-1 ring-slate-200/80 sm:h-20 sm:w-20 md:h-32 md:w-32 lg:h-36 lg:w-36">
+                  <div className="relative aspect-square w-full max-w-[4.5rem] sm:max-w-[5.5rem] md:max-w-36 lg:max-w-40">
                     <img
                       src={image}
                       alt={name}
-                      className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                      className="h-full w-full object-contain transition-transform duration-300 group-hover:scale-105"
                       loading="lazy"
                     />
                   </div>

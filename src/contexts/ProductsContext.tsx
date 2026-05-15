@@ -30,8 +30,14 @@ function normalizeLegacyProductImageUrl(raw: unknown): string {
 }
 
 function normalizeProductTypos(product: Product): Product {
+  const category = String(product.category || 'fashion') as Product['category'];
+  const categories = Array.isArray(product.categories)
+    ? Array.from(new Set([category, ...product.categories].map((c) => String(c).trim()).filter(Boolean))) as Product['categories']
+    : [category];
   const next: Product = {
     ...product,
+    category,
+    categories,
     name: normalizeSoapDispenserTypos(product.name),
     subcategory: product.subcategory != null ? normalizeSoapDispenserTypos(product.subcategory) : product.subcategory,
     images: Array.isArray(product.images)
