@@ -4,12 +4,13 @@ import { useCart } from '@/contexts/CartContext';
 import { Button } from '@/components/ui/button';
 import RatingSummaryInline from '@/components/reviews/RatingSummaryInline';
 import { useEffect, useMemo, useState, type WheelEvent } from 'react';
-import { ShoppingCart, ArrowLeft, Minus, Plus, Check, ChevronDown, ChevronUp, Truck, ShieldCheck, BadgeCheck, Package } from 'lucide-react';
+import { ShoppingCart, ArrowLeft, Minus, Plus, Check, ChevronDown, ChevronUp, Truck, ShieldCheck, BadgeCheck, Package, Heart, CreditCard, RotateCcw, Clock3, Eye, Zap, Flame } from 'lucide-react';
 import type { CartItem, Product } from '@/types';
 import { productVariantNames } from '@/lib/productVariants';
 import { galleryImagesForSelection } from '@/lib/productImages';
 import { fetchProductReviewsApi, type Review as ApiReview } from '@/lib/reviewsApi';
 import { fetchProductByIdApi } from '@/lib/api';
+import { fetchProductUrgencyApi } from '@/lib/productUrgencyApi';
 import { parseProductSpecifications } from '@/lib/productSpecifications';
 import { usePaymentMethod } from '@/contexts/PaymentMethodContext';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -29,6 +30,7 @@ import {
   productSeoPath,
   resolveProductFromRouteParam,
 } from '@/lib/seo';
+import type { ProductUrgencySetting } from '@/types';
 
 const DEFAULT_OG_IMAGE = `${SEO_CANONICAL_BASE}/img3.jpeg`;
 
@@ -182,6 +184,14 @@ const pillBtn = (active: boolean) =>
       : 'bg-background text-foreground/70 border-border hover:border-foreground/30 hover:text-foreground'
   }`;
 
+function formatCountdown(ms: number): string {
+  const safe = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  const seconds = safe % 60;
+  return [hours, minutes, seconds].map((n) => String(n).padStart(2, '0')).join(':');
+}
+
 export default function ProductDetailPage() {
   const { id: routeProductParam } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -289,8 +299,15 @@ export default function ProductDetailPage() {
   const [shippingQuote, setShippingQuote] = useState<ShippingServiceabilityResult | null>(null);
   const [shippingBusy, setShippingBusy] = useState(false);
   const [selectedImage, setSelectedImage] = useState<string>('');
+  const [urgency, setUrgency] = useState<ProductUrgencySetting | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   const hasVariantModel = !!(product?.variantModel?.items?.length);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   // ... rest of component
 
@@ -612,6 +629,25 @@ export default function ProductDetailPage() {
       .slice(0, 5);
   }, [products, product]);
 
+  useEffect(() => {
+    if (!product?.id) {
+      setUrgency(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const data = await fetchProductUrgencyApi({
+        productId: product.id,
+        category: product.category,
+        categories: productCategoryIds(product),
+      });
+      if (!cancelled) setUrgency(data);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [product?.id, product?.category, product?.categories]);
+
   if (!product && showSkeleton) {
     return (
       <div className="max-w-6xl mx-auto px-3 sm:px-4 lg:px-6 pb-28 md:pb-8 pt-4 sm:pt-6">
@@ -657,6 +693,13 @@ export default function ProductDetailPage() {
   const stock = (hasVariantModel && selectedVariantItem) ? selectedVariantItem.stock : product.stock;
   const inStock = stock > 0;
   const stockMessage = !inStock ? 'Out of Stock' : stock <= 5 ? 'Few items left' : 'In Stock';
+  const urgencyEndMs = urgency?.endDate ? new Date(urgency.endDate).getTime() : 0;
+  const activeUrgency = urgency && Number.isFinite(urgencyEndMs) && urgencyEndMs > nowMs ? urgency : null;
+  const urgencyDiscountText = activeUrgency?.discountText || (discount > 0 ? `${discount}% OFF` : '');
+  const urgencyStockText = activeUrgency?.stockText || (inStock && stock <= 10 ? `Only ${stock} left` : '');
+  const soldCountText = activeUrgency?.soldCountText || '';
+  const viewerCountText = activeUrgency?.viewerCountText || '';
+  const badgeText = activeUrgency?.badgeText || (product.isTrending ? 'Trending' : '');
 
   const summary = ratingSummary[product.id];
   const avg = summary?.avgRating ?? 0;
@@ -730,7 +773,7 @@ export default function ProductDetailPage() {
           )}
         </script>
       </Helmet>
-      <div className="max-w-6xl mx-auto px-3 sm:px-4 lg:px-6 pb-28 md:pb-8 pt-4 sm:pt-6 animate-fade-in">
+      <div className="max-w-7xl mx-auto px-3 sm:px-4 lg:px-6 pb-36 md:pb-32 pt-4 sm:pt-6 animate-fade-in">
         {/* Back link */}
         <Link
           to={product.category === 'fashion' ? '/#fashion-picks' : `/category/${product.category}`}
@@ -739,9 +782,10 @@ export default function ProductDetailPage() {
           <ArrowLeft className="h-4 w-4" /> Back
         </Link>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-10 md:items-start">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1.02fr)_minmax(420px,0.98fr)] lg:gap-9 lg:items-start">
           {/* Image gallery */}
-          <div className="grid gap-3 md:gap-4 md:grid-cols-[78px_1fr]">
+          <div className="space-y-4">
+          <div className="grid gap-3 md:grid-cols-[82px_1fr] md:gap-4">
             <div
               onWheel={handleHorizontalWheel}
               className="order-2 flex gap-2 overflow-x-auto overflow-y-hidden pb-1 pr-1 scrollbar-none scroll-smooth [touch-action:pan-x] [-webkit-overflow-scrolling:touch] md:order-1 md:flex-col md:overflow-visible md:pb-0 md:pr-0"
@@ -765,7 +809,7 @@ export default function ProductDetailPage() {
               })}
             </div>
 
-            <div className="order-1 overflow-hidden rounded-3xl border border-slate-200 bg-slate-100 shadow-sm md:order-2">
+            <div className="order-1 overflow-hidden rounded-[1.75rem] border border-slate-200 bg-slate-100 shadow-lg shadow-slate-200/70 md:order-2">
               <div className="relative aspect-square">
                 {selectedImage ? (
                   <img src={selectedImage} alt={productImageAlt(product, 'main image')} className="h-full w-full object-cover" />
@@ -785,18 +829,57 @@ export default function ProductDetailPage() {
 
                 <button
                   type="button"
-                  className="absolute right-4 top-4 grid h-11 w-11 place-items-center rounded-full bg-white/95 text-orange-600 shadow-sm"
+                  className="absolute right-4 top-4 grid h-11 w-11 place-items-center rounded-full bg-white/95 text-slate-800 shadow-md"
+                  aria-label="Add to wishlist"
                 >
                   ♡
                 </button>
+
+                {soldCountText ? (
+                  <span className="absolute bottom-4 left-4 rounded-full bg-white/95 px-4 py-2 text-xs font-black text-slate-800 shadow-md">
+                    <Flame className="mr-1 inline h-3.5 w-3.5 text-orange-600" /> {soldCountText}
+                  </span>
+                ) : null}
+
+                <span className="absolute bottom-4 right-4 rounded-full bg-slate-950/70 px-3 py-2 text-xs font-black text-white shadow-sm">
+                  {Math.max(1, galleryImages.findIndex((img) => img === selectedImage) + 1)} / {Math.max(1, galleryImages.length)}
+                </span>
               </div>
             </div>
           </div>
 
+            <div className="grid grid-cols-2 gap-2 rounded-3xl border border-slate-100 bg-white p-3 shadow-lg shadow-slate-200/60 sm:grid-cols-4">
+              {[
+                { icon: Truck, title: 'Free Delivery', sub: 'On all orders' },
+                { icon: RotateCcw, title: '7 Days Easy Return', sub: 'No questions asked' },
+                { icon: CreditCard, title: 'Secure Payment', sub: 'Trusted checkout' },
+                { icon: Package, title: 'Dispatch in 24 Hrs', sub: 'Express handling' },
+              ].map((item) => (
+                <div key={item.title} className="flex min-w-0 items-center gap-2 rounded-2xl px-2 py-2 sm:flex-col sm:text-center">
+                  <item.icon className="h-5 w-5 shrink-0 text-slate-800" />
+                  <div className="min-w-0">
+                    <div className="truncate text-[11px] font-black text-slate-950 sm:text-xs">{item.title}</div>
+                    <div className="truncate text-[10px] text-slate-500">{item.sub}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
           {/* Product info */}
-          <div className="rounded-3xl border border-orange-100 bg-white p-5 shadow-xl shadow-orange-100/60 md:p-6 space-y-5">
+          <div className="overflow-hidden rounded-[1.75rem] border border-orange-100 bg-white shadow-xl shadow-orange-100/60">
+            {activeUrgency ? (
+              <div className="flex flex-wrap items-center gap-2 bg-orange-50 px-4 py-3 text-xs font-black text-orange-950 sm:px-5">
+                <span className="inline-flex items-center gap-1 text-orange-700"><Flame className="h-4 w-4" /> {activeUrgency.dealTitle || 'Limited Time Deal'}</span>
+                {urgencyDiscountText ? <span className="text-orange-600">{urgencyDiscountText}</span> : null}
+                <span className="inline-flex items-center gap-1"><Clock3 className="h-4 w-4" /> ends in {formatCountdown(urgencyEndMs - nowMs)}</span>
+                {urgencyStockText ? <span className="ml-auto text-slate-900">{urgencyStockText}</span> : null}
+              </div>
+            ) : null}
+
+          <div className="space-y-5 p-5 md:p-6">
             <div className="flex flex-wrap gap-2">
-              {product.isTrending && (
+              {badgeText && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-orange-50 px-3 py-1 text-xs font-black text-orange-600">
                   🔥 Trending
                 </span>
@@ -1058,7 +1141,15 @@ export default function ProductDetailPage() {
               </button>
             </div>
 
+            {(soldCountText || viewerCountText) ? (
+              <div className="grid gap-2 rounded-2xl bg-green-50 px-4 py-3 text-xs font-bold text-green-800 sm:grid-cols-2">
+                {soldCountText ? <span><Flame className="mr-1 inline h-3.5 w-3.5 text-orange-600" /> {soldCountText}</span> : null}
+                {viewerCountText ? <span><Eye className="mr-1 inline h-3.5 w-3.5" /> {viewerCountText}</span> : null}
+              </div>
+            ) : null}
+
           </div>
+        </div>
         </div>
 
         {/* Rich layout: tabs + highlights + related (responsive on all viewports) */}
@@ -1308,8 +1399,19 @@ export default function ProductDetailPage() {
       </div>
 
       {/* Sticky bottom bar – mobile only */}
-      <div className="fixed bottom-0 left-0 right-0 z-40 md:hidden bg-background/95 backdrop-blur-md border-t border-border shadow-[0_-4px_20px_-4px_rgba(0,0,0,0.1)] pb-[env(safe-area-inset-bottom)]">
-        <div className="flex items-center gap-2 px-3 py-2.5 max-w-6xl mx-auto">
+      <div className="fixed bottom-0 left-0 right-0 z-40 bg-background/95 backdrop-blur-md border-t border-border shadow-[0_-4px_20px_-4px_rgba(0,0,0,0.1)] pb-[env(safe-area-inset-bottom)]">
+        <div className="flex items-center gap-2 px-3 py-2.5 max-w-7xl mx-auto md:gap-4 md:py-3">
+          <div className="hidden min-w-0 flex-1 items-center gap-3 md:flex">
+            <img src={selectedImage || galleryImages[0] || product.images?.[0] || ''} alt={productImageAlt(product, 'sticky product image')} className="h-14 w-14 rounded-xl border object-cover" />
+            <div className="min-w-0">
+              <div className="truncate text-sm font-black text-slate-950">{product.name}</div>
+              <div className="flex items-center gap-2">
+                <span className="text-xl font-black tabular-nums">₹{selectedPrice}</span>
+                {mrp != null && mrp > selectedPrice ? <span className="text-xs font-bold text-slate-400 line-through">₹{mrp}</span> : null}
+                {discount > 0 ? <span className="rounded-full bg-orange-600 px-2 py-0.5 text-[11px] font-black text-white">{discount}% OFF</span> : null}
+              </div>
+            </div>
+          </div>
           {/* Qty + Price stacked compactly */}
           <div className="flex flex-col gap-1 shrink-0 min-w-0">
             <div className="inline-flex items-stretch overflow-hidden rounded-lg border border-border bg-background text-xs font-medium">
@@ -1324,22 +1426,23 @@ export default function ProductDetailPage() {
             <span className="text-sm font-bold text-foreground tabular-nums leading-none">₹{selectedPrice * qty}</span>
           </div>
 
-          <div className="flex flex-1 gap-1.5 min-w-0">
+          <div className="flex flex-1 gap-1.5 min-w-0 md:max-w-md md:gap-3">
             <Button
-              variant="secondary"
-              className="flex-1 min-w-0 rounded-lg h-11 px-2 text-xs font-semibold"
-              onClick={handleBuyNow}
-              disabled={!inStock}
-            >
-              Buy Now
-            </Button>
-            <Button
-              className="flex-1 min-w-0 gap-1 rounded-lg h-11 px-2 text-xs font-semibold"
+              variant="outline"
+              className="flex-1 min-w-0 gap-1 rounded-xl h-11 px-2 text-xs font-black border-orange-200 text-orange-700 md:h-12 md:text-sm"
               onClick={handleAddToCart}
               disabled={!inStock}
             >
               <ShoppingCart className="h-3.5 w-3.5 shrink-0" />
               <span className="truncate">{inStock ? 'Add to Cart' : 'Out of Stock'}</span>
+            </Button>
+            <Button
+              className="flex-1 min-w-0 gap-1 rounded-xl h-11 px-2 text-xs font-black bg-orange-600 hover:bg-orange-700 md:h-12 md:text-sm"
+              onClick={handleBuyNow}
+              disabled={!inStock}
+            >
+              <Zap className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">Buy Now</span>
             </Button>
           </div>
         </div>

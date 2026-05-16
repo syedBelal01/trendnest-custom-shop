@@ -31,6 +31,7 @@ import AdminCustomPrints from "@/pages/admin/AdminCustomPrints";
 import AdminCustomers from "@/pages/admin/AdminCustomers";
 import AdminAnalytics from "@/pages/admin/AdminAnalytics";
 import AdminHeroSaleBanners from "@/pages/admin/AdminHeroSaleBanners";
+import AdminUrgencySettings from "@/pages/admin/AdminUrgencySettings";
 import UserGuard from "@/components/UserGuard";
 import AccountPage from "@/pages/AccountPage";
 import AccountOrdersPage from "@/pages/AccountOrdersPage";
@@ -163,6 +164,7 @@ const App = () => (
                   <Route path="coupons" element={<AdminCoupons />} />
                   <Route path="custom-prints" element={<AdminCustomPrints />} />
                   <Route path="customers" element={<AdminCustomers />} />
+                  <Route path="urgency-settings" element={<AdminUrgencySettings />} />
                   <Route path="hero-banners" element={<AdminHeroSaleBanners />} />
                 </Route>
                 <Route path="*" element={<NotFound />} />

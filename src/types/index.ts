@@ -55,6 +55,27 @@ export interface SaleBanner {
   updatedAt?: string;
 }
 
+export type ProductUrgencyScope = 'all' | 'category' | 'product';
+
+export interface ProductUrgencySetting {
+  id: string;
+  enabled: boolean;
+  scope: ProductUrgencyScope;
+  categoryId?: string;
+  productId?: string;
+  dealTitle: string;
+  discountText?: string;
+  startDate: string;
+  endDate: string;
+  stockText?: string;
+  soldCountText?: string;
+  viewerCountText?: string;
+  badgeText?: string;
+  priority: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 /** Admin-managed key/value rows shown under Product details on the PDP. */
 export interface ProductSpecification {
   label: string;

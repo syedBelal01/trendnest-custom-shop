@@ -509,6 +509,30 @@ HeroSaleBannerSchema.index({ slug: 1, status: 1, startDate: 1, endDate: 1, prior
 
 const HeroSaleBanner = mongoose.model('HeroSaleBanner', HeroSaleBannerSchema);
 
+const PRODUCT_URGENCY_SCOPES = ['all', 'category', 'product'];
+
+const ProductUrgencySettingSchema = new mongoose.Schema(
+  {
+    _id: { type: String, required: true },
+    enabled: { type: Boolean, default: true, index: true },
+    scope: { type: String, required: true, enum: PRODUCT_URGENCY_SCOPES, default: 'all', index: true },
+    categoryId: { type: String, default: '', index: true },
+    productId: { type: String, default: '', index: true },
+    dealTitle: { type: String, default: 'Limited Time Deal', trim: true },
+    discountText: { type: String, default: '', trim: true },
+    startDate: { type: Date, required: true, index: true },
+    endDate: { type: Date, required: true, index: true },
+    stockText: { type: String, default: '', trim: true },
+    soldCountText: { type: String, default: '', trim: true },
+    viewerCountText: { type: String, default: '', trim: true },
+    badgeText: { type: String, default: '', trim: true },
+    priority: { type: Number, default: 100, index: true },
+  },
+  { versionKey: false, timestamps: true }
+);
+ProductUrgencySettingSchema.index({ enabled: 1, scope: 1, productId: 1, categoryId: 1, priority: 1 });
+const ProductUrgencySetting = mongoose.model('ProductUrgencySetting', ProductUrgencySettingSchema);
+
 const HeroBannerSettingSchema = new mongoose.Schema(
   {
     _id: { type: String, required: true },
@@ -1456,6 +1480,72 @@ function serializeProductDoc(doc) {
     o.stock = Math.max(0, Math.floor(Number(o.stock) || 0));
   }
   return o;
+}
+
+function serializeProductUrgencySetting(doc) {
+  const o = serialize(doc);
+  if (!o) return null;
+  return {
+    ...o,
+    enabled: !!o.enabled,
+    scope: PRODUCT_URGENCY_SCOPES.includes(String(o.scope)) ? String(o.scope) : 'all',
+    categoryId: String(o.categoryId || '').trim() || undefined,
+    productId: String(o.productId || '').trim() || undefined,
+    dealTitle: String(o.dealTitle || '').trim() || 'Limited Time Deal',
+    discountText: String(o.discountText || '').trim() || undefined,
+    startDate: isoDate(o.startDate) || new Date().toISOString(),
+    endDate: isoDate(o.endDate) || new Date().toISOString(),
+    stockText: String(o.stockText || '').trim() || undefined,
+    soldCountText: String(o.soldCountText || '').trim() || undefined,
+    viewerCountText: String(o.viewerCountText || '').trim() || undefined,
+    badgeText: String(o.badgeText || '').trim() || undefined,
+    priority: Number.isFinite(Number(o.priority)) ? Number(o.priority) : 100,
+    createdAt: isoDate(o.createdAt),
+    updatedAt: isoDate(o.updatedAt),
+  };
+}
+
+function requiredDateOrThrow(value, field) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) throw new Error(`${field} is required`);
+  return date;
+}
+
+function normalizeProductUrgencyPayload(body, existing = {}) {
+  const rawScope = body.scope != null ? String(body.scope).trim() : String(existing.scope || 'all');
+  const scope = PRODUCT_URGENCY_SCOPES.includes(rawScope) ? rawScope : 'all';
+  const startDate = body.startDate != null ? requiredDateOrThrow(body.startDate, 'startDate') : requiredDateOrThrow(existing.startDate, 'startDate');
+  const endDate = body.endDate != null ? requiredDateOrThrow(body.endDate, 'endDate') : requiredDateOrThrow(existing.endDate, 'endDate');
+  if (endDate.getTime() < startDate.getTime()) throw new Error('endDate must be greater than or equal to startDate');
+
+  const categoryId = scope === 'category' ? String(body.categoryId ?? existing.categoryId ?? '').trim() : '';
+  const productId = scope === 'product' ? String(body.productId ?? existing.productId ?? '').trim() : '';
+  if (scope === 'category' && !categoryId) throw new Error('categoryId is required for category scope');
+  if (scope === 'product' && !productId) throw new Error('productId is required for product scope');
+
+  return {
+    enabled: body.enabled != null ? !!body.enabled : existing.enabled !== false,
+    scope,
+    categoryId,
+    productId,
+    dealTitle: String(body.dealTitle ?? existing.dealTitle ?? 'Limited Time Deal').trim() || 'Limited Time Deal',
+    discountText: String(body.discountText ?? existing.discountText ?? '').trim(),
+    startDate,
+    endDate,
+    stockText: String(body.stockText ?? existing.stockText ?? '').trim(),
+    soldCountText: String(body.soldCountText ?? existing.soldCountText ?? '').trim(),
+    viewerCountText: String(body.viewerCountText ?? existing.viewerCountText ?? '').trim(),
+    badgeText: String(body.badgeText ?? existing.badgeText ?? '').trim(),
+    priority: Number.isFinite(Number(body.priority ?? existing.priority))
+      ? Math.floor(Number(body.priority ?? existing.priority))
+      : 100,
+  };
+}
+
+function urgencyScopeRank(scope) {
+  if (scope === 'product') return 3;
+  if (scope === 'category') return 2;
+  return 1;
 }
 
 function isoDate(d) {
@@ -6518,6 +6608,104 @@ function draftToProductPayload(draft) {
     },
   };
 }
+
+// Admin product page urgency endpoints
+app.get('/api/admin/product-urgency-settings', mongoReady, adminKeyRequired, async (_req, res) => {
+  try {
+    const docs = await ProductUrgencySetting.find().sort({ scope: -1, priority: 1, updatedAt: -1 }).lean();
+    res.json({ settings: docs.map((d) => serializeProductUrgencySetting(d)).filter(Boolean) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to list urgency settings' });
+  }
+});
+
+app.post('/api/admin/product-urgency-settings', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    const payload = normalizeProductUrgencyPayload(req.body || {});
+    const id = `urgency-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const doc = await ProductUrgencySetting.create({ _id: id, ...payload });
+    res.status(201).json({ setting: serializeProductUrgencySetting(doc) });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Failed to create urgency setting';
+    res.status(400).json({ error: msg });
+  }
+});
+
+app.patch('/api/admin/product-urgency-settings/:settingId', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    const settingId = String(req.params.settingId || '').trim();
+    const existing = await ProductUrgencySetting.findById(settingId).lean();
+    if (!existing) {
+      res.status(404).json({ error: 'Urgency setting not found' });
+      return;
+    }
+    const patch = normalizeProductUrgencyPayload(req.body || {}, existing);
+    await ProductUrgencySetting.updateOne({ _id: settingId }, { $set: patch });
+    const next = await ProductUrgencySetting.findById(settingId).lean();
+    res.json({ setting: serializeProductUrgencySetting(next) });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Failed to update urgency setting';
+    res.status(400).json({ error: msg });
+  }
+});
+
+app.delete('/api/admin/product-urgency-settings/:settingId', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    const settingId = String(req.params.settingId || '').trim();
+    await ProductUrgencySetting.deleteOne({ _id: settingId });
+    res.status(204).end();
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to delete urgency setting' });
+  }
+});
+
+// Public product urgency endpoint: product overrides category, category overrides all.
+app.get('/api/products/:id/urgency', mongoReady, async (req, res) => {
+  try {
+    const productId = String(req.params.id || '').trim();
+    if (!productId) {
+      res.status(400).json({ error: 'Missing product id' });
+      return;
+    }
+    const queryCategories = String(req.query?.categories || req.query?.category || '')
+      .split(',')
+      .map((x) => String(x || '').trim())
+      .filter(Boolean);
+    let categories = queryCategories;
+    if (!categories.length) {
+      const product = await Product.findById(productId).select({ category: 1, categories: 1 }).lean();
+      if (product) {
+        categories = [...new Set([product.category, ...(Array.isArray(product.categories) ? product.categories : [])].map((x) => String(x || '').trim()).filter(Boolean))];
+      }
+    }
+    const now = new Date();
+    const docs = await ProductUrgencySetting.find({
+      enabled: true,
+      startDate: { $lte: now },
+      endDate: { $gte: now },
+      $or: [
+        { scope: 'product', productId },
+        ...(categories.length ? [{ scope: 'category', categoryId: { $in: categories } }] : []),
+        { scope: 'all' },
+      ],
+    }).lean();
+    const best = docs.sort((a, b) => {
+      const rank = urgencyScopeRank(String(b.scope)) - urgencyScopeRank(String(a.scope));
+      if (rank !== 0) return rank;
+      const pa = Number.isFinite(Number(a.priority)) ? Number(a.priority) : 100;
+      const pb = Number.isFinite(Number(b.priority)) ? Number(b.priority) : 100;
+      if (pa !== pb) return pa - pb;
+      return new Date(b.updatedAt || b.createdAt || 0).getTime() - new Date(a.updatedAt || a.createdAt || 0).getTime();
+    })[0];
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.json({ urgency: best ? serializeProductUrgencySetting(best) : null });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to load product urgency' });
+  }
+});
 
 // Admin hero/sale banner endpoints
 app.get('/api/admin/hero-banners', mongoReady, adminKeyRequired, async (_req, res) => {
