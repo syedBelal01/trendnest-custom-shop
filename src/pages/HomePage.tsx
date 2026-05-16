@@ -284,15 +284,6 @@ export default function HomePage() {
             ))}
           </section>
 
-          <section className="mt-12">
-            <SectionHeader icon={icons.flame} title="Trending Now" linkTo="/category/trending" />
-            <div className="grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-4">
-              {trendingNow.map((product) => (
-                <ProductCard key={product.id} product={product} ratingSummary={ratingSummary} />
-              ))}
-            </div>
-          </section>
-
           <section className="mt-12 rounded-3xl bg-slate-50 px-3 py-6 sm:px-4 md:px-8 md:py-10">
             <div className="mb-4 text-center md:mb-7">
               <h2 className="text-2xl font-black tracking-tight text-orange-600 md:text-3xl">
@@ -318,6 +309,15 @@ export default function HomePage() {
                     {name}
                   </h3>
                 </Link>
+              ))}
+            </div>
+          </section>
+
+          <section className="mt-12">
+            <SectionHeader icon={icons.flame} title="Trending Now" linkTo="/category/trending" />
+            <div className="grid grid-cols-2 gap-2 sm:gap-4 lg:grid-cols-4">
+              {trendingNow.map((product) => (
+                <ProductCard key={product.id} product={product} ratingSummary={ratingSummary} />
               ))}
             </div>
           </section>
