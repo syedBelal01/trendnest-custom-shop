@@ -163,6 +163,11 @@ function variantOptionLabel(product: Product): string {
   return 'Color';
 }
 
+function isSizeLikeVariantType(typeName: string): boolean {
+  const n = normKey(typeName);
+  return n === 'size' || n.includes('size') || n.includes('sleeve') || n.includes('fit');
+}
+
 function isPrintedShirt(product: Product | null | undefined): boolean {
   if (!product) return false;
   const category = String(product.category || '').toLowerCase();
@@ -374,7 +379,7 @@ export default function ProductDetailPage() {
       : Array.from(new Set(items.map((it) => getAttrValueCaseInsensitive(it.attrs, typeName)).filter(Boolean)));
     const otherTypeNames = (product.variantModel.types ?? [])
       .map((t) => String(t?.name ?? '').trim())
-      .filter((n) => n && normKey(n) !== normKey(typeName));
+      .filter((n) => n && normKey(n) !== normKey(typeName) && !isSizeLikeVariantType(n));
     return allValues
       .map((value) => {
         const rawValue = String(value ?? '').trim();
@@ -392,7 +397,13 @@ export default function ProductDetailPage() {
             return !right || left === right;
           });
         });
-        const selected = bestForCurrentSelection ?? matches.find((it) => !!it?.isDefault) ?? matches[0];
+        const withImage = matches.find((it) => {
+          const preview = String(it?.previewImage ?? '').trim();
+          const single = String(it?.image ?? '').trim();
+          const gallery = Array.isArray(it?.images) ? it.images.map((u) => String(u).trim()).filter(Boolean) : [];
+          return !!preview || !!single || gallery.length > 0;
+        });
+        const selected = bestForCurrentSelection ?? matches.find((it) => !!it?.isDefault) ?? withImage ?? matches[0];
         return {
           typeName,
           value: rawValue,
