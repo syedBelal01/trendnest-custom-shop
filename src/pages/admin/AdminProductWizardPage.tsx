@@ -10,6 +10,7 @@ import { uploadProductImage } from '@/lib/api';
 import { processProductImageFile } from '@/lib/processProductImage';
 import { ADMIN_CATEGORY_TREE, ADMIN_MAIN_CATEGORIES } from '@/data/adminCategories';
 import { publishProductDraftApi } from '@/lib/adminDraftsApi';
+import { mergeSpecificationsWithImportedText, mergeSpecificationsWithTemplate, parseSpecificationText } from '@/lib/specificationTemplates';
 import { ProductDraftProvider, useProductDraft } from '@/contexts/ProductDraftContext';
 import { useProducts } from '@/contexts/ProductsContext';
 import { Trash2 } from 'lucide-react';
@@ -77,6 +78,10 @@ function buildVariantCombos(types: DraftVariantType[]): Array<{ key: string; att
   };
   walk(0, {});
   return combos;
+}
+
+function sameSpecificationRows(a: Array<{ label: string; value: string }>, b: Array<{ label: string; value: string }>) {
+  return a.length === b.length && a.every((row, idx) => row.label === b[idx]?.label && row.value === b[idx]?.value);
 }
 
 function removeImageAtWithPrimary(items: string[], primaryIndex: number, removeAt: number): { items: string[]; primaryIndex: number } {
@@ -204,6 +209,8 @@ function WizardInner({ step }: { step: number }) {
   const name = String(details.name ?? '');
   const description = String(details.description ?? '');
   const specs = Array.isArray(details.specifications) ? (details.specifications as Array<{ label: string; value: string }>) : [];
+  const draftCategory = String(draft?.categoryMain ?? '');
+  const draftSubcategory = String(draft?.subcategory ?? '');
   const sku = String(details.sku ?? '');
   const price = details.price != null ? String(details.price) : '';
   const originalPrice = details.originalPrice != null ? String(details.originalPrice) : '';
@@ -224,6 +231,14 @@ function WizardInner({ step }: { step: number }) {
     }
   };
 
+  useEffect(() => {
+    if (!draft || !draftCategory) return;
+    const merged = mergeSpecificationsWithTemplate(specs, draftCategory, draftSubcategory);
+    if (!sameSpecificationRows(specs, merged)) {
+      updateDraftLocal({ details: { ...details, specifications: merged } });
+    }
+  }, [draft?.draftId, draftCategory, draftSubcategory]);
+
   if (loading) return <div className="text-sm text-muted-foreground">Loading draft…</div>;
   if (error || !draft) return <div className="text-sm text-destructive">{error || 'Draft not found'}</div>;
   if (step === 4) {
@@ -243,7 +258,14 @@ function WizardInner({ step }: { step: number }) {
                 <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Main Category</div>
                 <Select
                   value={(draft.categoryMain as any) || ''}
-                  onValueChange={v => updateDraftLocal({ categoryMain: v, subcategory: '' })}
+                  onValueChange={v => updateDraftLocal({
+                    categoryMain: v,
+                    subcategory: '',
+                    details: {
+                      ...details,
+                      specifications: mergeSpecificationsWithTemplate(specs, v, ''),
+                    },
+                  })}
                 >
                   <SelectTrigger><SelectValue placeholder="Select main category (e.g., Home)" /></SelectTrigger>
                   <SelectContent>
@@ -257,7 +279,13 @@ function WizardInner({ step }: { step: number }) {
                 <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Subcategory</div>
                 <Select
                   value={draft.subcategory || ''}
-                  onValueChange={v => updateDraftLocal({ subcategory: v })}
+                  onValueChange={v => updateDraftLocal({
+                    subcategory: v,
+                    details: {
+                      ...details,
+                      specifications: mergeSpecificationsWithTemplate(specs, draft.categoryMain, v),
+                    },
+                  })}
                   disabled={!draft.categoryMain}
                 >
                   <SelectTrigger><SelectValue placeholder={draft.categoryMain ? 'Select subcategory (e.g., Furniture)' : 'Select category first'} /></SelectTrigger>
@@ -462,12 +490,19 @@ function WizardInner({ step }: { step: number }) {
 
             <ProductSpecificationsCard
               specs={specs}
+              categoryLabel={ADMIN_MAIN_CATEGORIES.find((c) => c.id === draft.categoryMain)?.label || String(draft.categoryMain || 'Default')}
+              subcategory={draft.subcategory}
               canSaveToDb={true}
               apiAvailable={true}
               specSaveBusy={false}
               onAddSuggested={() => {
                 const cur = Array.isArray(details.specifications) ? (details.specifications as any[]) : [];
-                updateDraftLocal({ details: { ...details, specifications: [...cur, { label: '', value: '' }] } });
+                const merged = mergeSpecificationsWithTemplate(cur, draft.categoryMain, draft.subcategory);
+                if (merged.length === cur.length) {
+                  toast.message('All suggested labels for this category are already in the list.');
+                  return;
+                }
+                updateDraftLocal({ details: { ...details, specifications: merged } });
               }}
               onUpdateRow={(idx, field, value) => {
                 const cur = Array.isArray(details.specifications) ? (details.specifications as any[]) : [];
@@ -479,6 +514,13 @@ function WizardInner({ step }: { step: number }) {
               onAddRow={() => {
                 const cur = Array.isArray(details.specifications) ? (details.specifications as any[]) : [];
                 updateDraftLocal({ details: { ...details, specifications: [...cur, { label: '', value: '' }] } });
+              }}
+              onImportText={(text) => {
+                const parsedCount = parseSpecificationText(text).length;
+                if (parsedCount <= 0) return 0;
+                const cur = Array.isArray(details.specifications) ? (details.specifications as any[]) : [];
+                updateDraftLocal({ details: { ...details, specifications: mergeSpecificationsWithImportedText(cur, text) } });
+                return parsedCount;
               }}
               onRemoveRow={(idx) => {
                 const cur = Array.isArray(details.specifications) ? (details.specifications as any[]) : [];

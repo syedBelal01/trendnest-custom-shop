@@ -34,7 +34,7 @@ import {
   reorderProductsAdminApi,
 } from '@/lib/api';
 import { productPrimaryImage } from '@/lib/productImages';
-import { suggestedSpecLabelsForCategory } from '@/data/productSpecPresets';
+import { mergeSpecificationsWithImportedText, mergeSpecificationsWithTemplate, parseSpecificationText } from '@/lib/specificationTemplates';
 import { ADMIN_CATEGORY_TREE, ADMIN_MAIN_CATEGORIES } from '@/data/adminCategories';
 import {
   DndContext,
@@ -180,7 +180,7 @@ const emptyProduct = (): Partial<Product> => ({
   sizes: [],
   sleeveTypes: [],
   tags: [],
-  specifications: [],
+  specifications: mergeSpecificationsWithTemplate([], 'fashion', ''),
   isCustomPrint: false,
   isTrending: false,
   isBestDeal: false,
@@ -269,10 +269,14 @@ const PRESETS: Record<string, Partial<Product>> = {
 };
 
 function normalizeProductForEditing(p: Product): Partial<Product> {
-  const specifications = [...(p.specifications ?? [])].map(s => ({
-    label: s.label ?? '',
-    value: s.value ?? '',
-  }));
+  const specifications = mergeSpecificationsWithTemplate(
+    [...(p.specifications ?? [])].map(s => ({
+      label: s.label ?? '',
+      value: s.value ?? '',
+    })),
+    p.category,
+    p.subcategory
+  );
   if (p.variantModel?.items?.length) {
     const vm = p.variantModel as VariantModel;
     return {
@@ -951,7 +955,13 @@ export default function AdminProducts() {
   };
 
   const applyPreset = (key: keyof typeof PRESETS) => {
-    setEditing(prev => ({ ...emptyProduct(), ...prev, ...PRESETS[key] }));
+    setEditing(prev => {
+      const next = { ...emptyProduct(), ...prev, ...PRESETS[key] };
+      return {
+        ...next,
+        specifications: mergeSpecificationsWithTemplate(next.specifications, next.category, next.subcategory),
+      };
+    });
   };
 
   const updateSpecRow = (idx: number, field: 'label' | 'value', value: string) => {
@@ -981,23 +991,30 @@ export default function AdminProducts() {
   const addSuggestedSpecFields = () => {
     setEditing(p => {
       if (!p) return p;
-      const cat = p.category ?? 'fashion';
-      const labels = suggestedSpecLabelsForCategory(cat);
-      const existing = new Set(
-        (p.specifications ?? []).map(s => s.label.trim().toLowerCase()).filter(Boolean)
-      );
-      const toAdd = labels
-        .filter(l => !existing.has(l.toLowerCase()))
-        .map(label => ({ label, value: '' }));
-      if (!toAdd.length) {
+      const specifications = mergeSpecificationsWithTemplate(p.specifications, p.category ?? 'fashion', p.subcategory);
+      if (specifications.length === (p.specifications ?? []).length) {
         toast.message('All suggested labels for this category are already in the list.');
         return p;
       }
       return {
         ...p,
-        specifications: [...(p.specifications ?? []), ...toAdd],
+        specifications,
       };
     });
+  };
+
+  const importSpecText = (text: string) => {
+    const parsedCount = parseSpecificationText(text).length;
+    if (parsedCount <= 0) return 0;
+    setEditing(p =>
+      p
+        ? {
+            ...p,
+            specifications: mergeSpecificationsWithImportedText(p.specifications, text),
+          }
+        : p
+    );
+    return parsedCount;
   };
 
   const saveSpecificationsOnly = async () => {
@@ -1013,10 +1030,14 @@ export default function AdminProducts() {
     try {
       const specifications = normalizeSpecsForPersist(editing.specifications);
       const saved = await updateProductApi(editing.id, { specifications });
-      const nextSpecs = [...(saved.specifications ?? [])].map(s => ({
-        label: s.label ?? '',
-        value: s.value ?? '',
-      }));
+      const nextSpecs = mergeSpecificationsWithTemplate(
+        [...(saved.specifications ?? [])].map(s => ({
+          label: s.label ?? '',
+          value: s.value ?? '',
+        })),
+        saved.category,
+        saved.subcategory
+      );
       setEditing(p =>
         p && p.id === saved.id
           ? {
@@ -1278,11 +1299,13 @@ export default function AdminProducts() {
       next = Array.from(new Set(next)) as Product['categories'];
       if (!next.length) next = [categoryId];
       const primary = (next.includes(prev.category as Product['category']) ? prev.category : next[0]) as Product['category'];
+      const subcategory = primary !== prev.category ? '' : prev.subcategory;
       return {
         ...prev,
         category: primary,
         categories: normalizeCategoryList(primary, next),
-        subcategory: primary !== prev.category ? '' : prev.subcategory,
+        subcategory,
+        specifications: mergeSpecificationsWithTemplate(prev.specifications, primary, subcategory),
       };
     });
   };
@@ -1451,12 +1474,15 @@ export default function AdminProducts() {
 
                 <ProductSpecificationsCard
                   specs={editing.specifications}
+                  categoryLabel={categoryLabel(editing.category || 'fashion')}
+                  subcategory={editing.subcategory}
                   canSaveToDb={!!editing.id}
                   apiAvailable={apiAvailable}
                   specSaveBusy={specSaveBusy}
                   onAddSuggested={addSuggestedSpecFields}
                   onUpdateRow={updateSpecRow}
                   onAddRow={addSpecRow}
+                  onImportText={importSpecText}
                   onRemoveRow={removeSpecRow}
                   onSaveToDb={() => void saveSpecificationsOnly()}
                 />
@@ -1773,11 +1799,15 @@ export default function AdminProducts() {
                       onValueChange={v =>
                         setEditing(p => {
                           const category = v as Product['category'];
-                          return {
+                          const next = {
                             ...p,
                             category,
                             categories: normalizeCategoryList(category, p?.categories as Product['categories'] | undefined),
                             subcategory: category !== p?.category ? '' : p?.subcategory,
+                          };
+                          return {
+                            ...next,
+                            specifications: mergeSpecificationsWithTemplate(next.specifications, category, next.subcategory),
                           };
                         })
                       }
@@ -1831,7 +1861,13 @@ export default function AdminProducts() {
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <Select
                     value={editing.subcategory || ''}
-                    onValueChange={v => setEditing(p => ({ ...p, subcategory: v }))}
+                    onValueChange={v => setEditing(p => {
+                      const next = { ...p, subcategory: v };
+                      return {
+                        ...next,
+                        specifications: mergeSpecificationsWithTemplate(next.specifications, next.category, v),
+                      };
+                    })}
                     disabled={!selectedSubcategoryOptions.length}
                   >
                     <SelectTrigger>
@@ -1845,7 +1881,18 @@ export default function AdminProducts() {
                       ))}
                     </SelectContent>
                   </Select>
-                  <Input placeholder="Custom subcategory" value={editing.subcategory || ''} onChange={e => setEditing(p => ({ ...p, subcategory: e.target.value }))} />
+                  <Input
+                    placeholder="Custom subcategory"
+                    value={editing.subcategory || ''}
+                    onChange={e => setEditing(p => {
+                      const subcategory = e.target.value;
+                      const next = { ...p, subcategory };
+                      return {
+                        ...next,
+                        specifications: mergeSpecificationsWithTemplate(next.specifications, next.category, subcategory),
+                      };
+                    })}
+                  />
                 </div>
                 <Input
                   placeholder="Sizes (comma separated, e.g. waist or tee sizes)"

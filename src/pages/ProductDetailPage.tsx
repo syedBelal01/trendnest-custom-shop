@@ -1173,7 +1173,9 @@ export default function ProductDetailPage() {
               className="w-full justify-start overflow-x-auto overflow-y-hidden flex-nowrap scrollbar-none scroll-smooth [touch-action:pan-x] [-webkit-overflow-scrolling:touch]"
             >
                 <TabsTrigger value="description" className="text-xs sm:text-sm whitespace-nowrap">Description</TabsTrigger>
-                <TabsTrigger value="specs" className="text-xs sm:text-sm whitespace-nowrap">Specifications</TabsTrigger>
+                {specRows.length > 0 ? (
+                  <TabsTrigger value="specs" className="text-xs sm:text-sm whitespace-nowrap">Specifications</TabsTrigger>
+                ) : null}
                 <TabsTrigger value="shipping" className="text-xs sm:text-sm whitespace-nowrap">Shipping &amp; Returns</TabsTrigger>
               </TabsList>
               <TabsContent value="description" className="mt-4">
@@ -1186,8 +1188,8 @@ export default function ProductDetailPage() {
                   <p className="text-sm text-muted-foreground leading-relaxed">{seoLongDescription}</p>
                 )}
               </TabsContent>
-              <TabsContent value="specs" className="mt-4">
-                {specRows.length > 0 ? (
+              {specRows.length > 0 ? (
+                <TabsContent value="specs" className="mt-4">
                   <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3 text-sm">
                     {specRows.map((row, i) => (
                       <div key={`${row.label}-${i}`} className="flex items-start justify-between gap-4 border-b border-border/40 pb-2">
@@ -1196,10 +1198,8 @@ export default function ProductDetailPage() {
                       </div>
                     ))}
                   </dl>
-                ) : (
-                  <p className="text-sm text-muted-foreground">No specifications.</p>
-                )}
-              </TabsContent>
+                </TabsContent>
+              ) : null}
               <TabsContent value="shipping" className="mt-4">
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
                   <div className="rounded-xl border border-border bg-background p-4">
