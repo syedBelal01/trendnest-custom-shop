@@ -182,6 +182,8 @@ function logJson(level, event, fields) {
 
 /** In-memory serviceability cache (best-effort). */
 const shiprocketServiceabilityCache = new Map(); // key -> { value, expiresAtMs }
+const pincodeLookupCache = new Map(); // pincode -> { value, expiresAtMs }
+const PINCODE_LOOKUP_CACHE_TTL_MS = 24 * 60 * 60_000;
 
 function shiprocketConfigured() {
   return !!(SHIPROCKET_EMAIL && SHIPROCKET_PASSWORD && SHIPROCKET_PICKUP_LOCATION_NAME && SHIPROCKET_PICKUP_PINCODE);
@@ -189,6 +191,44 @@ function shiprocketConfigured() {
 
 function normalizePincode(p) {
   return String(p || '').replace(/[^\d]/g, '').slice(0, 6);
+}
+
+function extractPincodeLookupResult(data) {
+  const first = Array.isArray(data) ? data[0] : null;
+  const offices = first?.PostOffice;
+  const po = Array.isArray(offices) ? offices[0] : null;
+  const city = String(po?.District || po?.Block || '').trim();
+  const state = String(po?.State || '').trim();
+  if (!city) return null;
+  return { city, state: state || undefined };
+}
+
+async function lookupIndianPincodeServer(pincode) {
+  const pin = normalizePincode(pincode);
+  if (pin.length !== 6) return null;
+  const cached = pincodeLookupCache.get(pin);
+  if (cached && cached.expiresAtMs > Date.now()) return cached.value;
+
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), 5000);
+  try {
+    const res = await fetch(`https://api.postalpincode.in/pincode/${encodeURIComponent(pin)}`, {
+      method: 'GET',
+      headers: { accept: 'application/json' },
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const data = await res.json().catch(() => null);
+    const value = extractPincodeLookupResult(data);
+    if (value) {
+      pincodeLookupCache.set(pin, { value, expiresAtMs: Date.now() + PINCODE_LOOKUP_CACHE_TTL_MS });
+    }
+    return value;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 function normalizePhoneDigits(p) {
@@ -3349,6 +3389,25 @@ app.get('/api/health', (_req, res) => {
     /** Checkout OTP gate for guest checkout UX. */
     checkoutOtpRequired: CHECKOUT_OTP_REQUIRED,
   });
+});
+
+app.get('/api/pincode/:pincode', async (req, res) => {
+  try {
+    const pincode = normalizePincode(req.params?.pincode);
+    if (pincode.length !== 6) {
+      res.status(400).json({ ok: false, error: 'Invalid pincode' });
+      return;
+    }
+    const result = await lookupIndianPincodeServer(pincode);
+    if (!result?.city) {
+      res.status(404).json({ ok: false, error: 'Pincode not found' });
+      return;
+    }
+    res.set('Cache-Control', 'public, max-age=86400');
+    res.json({ ok: true, pincode, ...result });
+  } catch {
+    res.status(500).json({ ok: false, error: 'Pincode lookup failed' });
+  }
 });
 
 app.post('/api/analytics/events', analyticsEventRateLimit, mongoReady, async (req, res) => {
