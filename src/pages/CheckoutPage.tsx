@@ -59,6 +59,7 @@ import { IndianPhoneInput } from '@/components/forms/IndianPhoneInput';
 import { clampIndianPhoneInput, isCompleteValidIndianMobile, isIndianPhoneValid, validateIndianPhone } from '@/lib/indianPhone';
 import { validateCouponApi } from '@/lib/couponsApi';
 import { trackCheckoutViewEvent } from '@/lib/engagementAnalyticsApi';
+import { trackMetaPurchase } from '@/lib/metaPixel';
 
 const LAST_ORDER_ID_KEY = 'tn:last_order_id_v1';
 const LAST_GUEST_CHECKOUT_KEY = 'tn:last_guest_checkout_v1';
@@ -787,6 +788,7 @@ export default function CheckoutPage() {
 
       if (paymentMethod === 'cod') {
         const created = await createOrderApi(payload);
+        trackMetaPurchase(created, items);
         clearCart();
         await refreshProducts();
         window.dispatchEvent(new CustomEvent('trendnest:products-updated'));
@@ -830,6 +832,7 @@ export default function CheckoutPage() {
               razorpayPaymentId: resp.razorpay_payment_id,
               razorpaySignature: resp.razorpay_signature,
             });
+            trackMetaPurchase(verified.order, items);
             clearCart();
             await refreshProducts();
             window.dispatchEvent(new CustomEvent('trendnest:products-updated'));
@@ -1500,6 +1503,9 @@ export default function CheckoutPage() {
               type="button"
               onClick={() => void handlePlaceOrder()}
               disabled={placeOrderDisabled}
+              data-meta-event="Purchase"
+              data-event-name="Purchase"
+              aria-label={placeOrderLabel}
               className="hidden w-full items-center justify-center gap-2 rounded-2xl bg-orange-600 px-6 py-4 text-base font-black text-white shadow-lg shadow-orange-600/25 transition hover:bg-orange-700 active:scale-[0.98] lg:flex disabled:opacity-60 disabled:active:scale-100"
             >
               {placeOrderLabel}
@@ -1651,6 +1657,9 @@ export default function CheckoutPage() {
           type="button"
           onClick={() => void handlePlaceOrder()}
           disabled={placeOrderDisabled}
+          data-meta-event="Purchase"
+          data-event-name="Purchase"
+          aria-label={placeOrderLabel}
           className="flex w-full items-center justify-center gap-2 rounded-2xl bg-orange-600 px-6 py-4 text-base font-black text-white shadow-lg shadow-orange-600/25 active:scale-[0.98] disabled:opacity-60 disabled:active:scale-100"
         >
           {placeOrderLabel} <span aria-hidden>→</span>
