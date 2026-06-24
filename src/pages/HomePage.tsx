@@ -11,6 +11,8 @@ import { productVariantNames } from "@/lib/productVariants";
 import { type RatingSummary } from "@/lib/reviewsSummaryApi";
 import type { Product } from "@/types";
 import { ensureSeoMetaDescription, productImageAlt, productSeoPath } from "@/lib/seo";
+import { productDisplayPrice, productDiscountPercent } from "@/lib/productPayment";
+import { usePaymentMethod } from "@/contexts/PaymentMethodContext";
 
 const Icon = ({ children, className = "", size = 20 }) => (
   <span
@@ -62,11 +64,8 @@ const HOME_KEYWORDS = [
   "trendnest99",
 ].join(", ");
 
-function discountPercent(product: Product) {
-  const mrp = product.originalPrice;
-  if (!mrp || mrp <= 0) return 0;
-  if (mrp <= product.price) return 0;
-  return Math.round(((mrp - product.price) / mrp) * 100);
+function discountPercent(product: Product, displayPrice: number) {
+  return productDiscountPercent(product, displayPrice);
 }
 
 function productShowsInCategory(product: Product, categoryId: string): boolean {
@@ -76,10 +75,12 @@ function productShowsInCategory(product: Product, categoryId: string): boolean {
 
 function ProductCard({ product, ratingSummary }: { product: Product; ratingSummary: Record<string, RatingSummary> }) {
   const { addItem } = useCart();
+  const { method } = usePaymentMethod();
+  const displayPrice = productDisplayPrice(product, method);
   const summary = ratingSummary?.[product.id];
   const avg = summary?.avgRating ?? product.rating ?? 0;
   const reviewCount = summary?.reviewCount ?? product.reviews?.length ?? 0;
-  const dp = discountPercent(product);
+  const dp = discountPercent(product, displayPrice);
   const filledStars = Math.max(0, Math.min(5, Math.round(Number(avg) || 0)));
 
   return (
@@ -114,7 +115,7 @@ function ProductCard({ product, ratingSummary }: { product: Product; ratingSumma
           </h3>
         </Link>
         <div className="mt-1.5 flex items-end gap-1.5 sm:mt-2 sm:gap-2">
-          <span className="text-base font-extrabold text-slate-900 sm:text-lg">₹{product.price}</span>
+          <span className="text-base font-extrabold text-slate-900 sm:text-lg">₹{displayPrice}</span>
           {product.originalPrice ? (
             <span className="text-[11px] text-slate-400 line-through sm:text-xs">₹{product.originalPrice}</span>
           ) : null}

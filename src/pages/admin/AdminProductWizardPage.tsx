@@ -14,6 +14,7 @@ import { mergeSpecificationsWithImportedText, mergeSpecificationsWithTemplate, p
 import { ProductDraftProvider, useProductDraft } from '@/contexts/ProductDraftContext';
 import { useProducts } from '@/contexts/ProductsContext';
 import { Trash2 } from 'lucide-react';
+import { normalizeProductPaymentMode } from '@/lib/productPayment';
 
 type DraftVariantType = { name: string; values: string[] };
 type DraftVariantItem = {
@@ -216,6 +217,7 @@ function WizardInner({ step }: { step: number }) {
   const originalPrice = details.originalPrice != null ? String(details.originalPrice) : '';
   const onlinePrice = details.onlinePrice != null ? String(details.onlinePrice) : '';
   const codPrice = price; // Regular price == COD price (admin invariant)
+  const paymentMode = normalizeProductPaymentMode(details.paymentMode);
   const stock = details.stock != null ? String(details.stock) : '';
   const [initialAttrPreset, setInitialAttrPreset] = useState<'Color' | 'Size' | 'Custom'>('Color');
   const [initialAttrCustom, setInitialAttrCustom] = useState('');
@@ -386,7 +388,19 @@ function WizardInner({ step }: { step: number }) {
                     updateDraftLocal({ variants: { ...(draft.variants as any), hasVariants: true, items } });
                   }}
                 />
-                {/* COD price removed: regular price is used for COD */}
+                <Select
+                  value={paymentMode}
+                  onValueChange={v => updateDraftLocal({ details: { ...details, paymentMode: normalizeProductPaymentMode(v) } })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Payment option" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="both">COD and online payment</SelectItem>
+                    <SelectItem value="online">Online payment only</SelectItem>
+                    <SelectItem value="cod">COD only</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="space-y-1">
@@ -1434,6 +1448,7 @@ function ReviewPublishStep() {
       toast.success(publishAs === 'published' ? 'Published' : 'Saved as draft');
       // Let any open PDP refresh if it is currently viewing this product.
       const id = (product as { id?: string } | null)?.id;
+      window.dispatchEvent(new CustomEvent('trendnest:products-updated'));
       if (id) window.dispatchEvent(new CustomEvent('trendnest:product-updated', { detail: { id } }));
       nav('/admin/products');
     } catch (e) {

@@ -12,6 +12,8 @@ import { Link } from 'react-router-dom';
 import { type RatingSummary } from '@/lib/reviewsSummaryApi';
 import { toast } from 'sonner';
 import { ensureSeoMetaDescription, productImageAlt, productSeoPath } from '@/lib/seo';
+import { productDisplayPrice, productDiscountPercent } from '@/lib/productPayment';
+import { usePaymentMethod } from '@/contexts/PaymentMethodContext';
 
 const CANONICAL_BASE = 'https://trendnest99.in';
 
@@ -47,11 +49,8 @@ const icons = {
   shield: '🛡️',
 } as const;
 
-function discountPercent(p: Product): number {
-  const mrp = p.originalPrice;
-  if (!mrp || mrp <= 0) return 0;
-  if (mrp <= p.price) return 0;
-  return Math.round(((mrp - p.price) / mrp) * 100);
+function discountPercent(p: Product, displayPrice: number): number {
+  return productDiscountPercent(p, displayPrice);
 }
 
 function avgFromRatingSummary(summary?: RatingSummary, fallback?: number): number {
@@ -83,7 +82,9 @@ function BestDealCard({
   onAddToCart: (p: Product) => void;
   onBuyNow: (p: Product) => void;
 }) {
-  const dp = discountPercent(product);
+  const { method } = usePaymentMethod();
+  const displayPrice = productDisplayPrice(product, method);
+  const dp = discountPercent(product, displayPrice);
   const summary = ratingSummary[product.id];
   const avg = avgFromRatingSummary(summary, product.rating);
   const reviewCount = countFromRatingSummary(summary, Array.isArray(product.reviews) ? product.reviews.length : 0);
@@ -118,7 +119,7 @@ function BestDealCard({
         </Link>
 
         <div className="mt-2 flex items-end gap-2">
-          <span className="text-lg font-black text-slate-950">₹{product.price}</span>
+          <span className="text-lg font-black text-slate-950">₹{displayPrice}</span>
           {product.originalPrice ? (
             <span className="pb-0.5 text-xs text-slate-400 line-through">₹{product.originalPrice}</span>
           ) : null}
@@ -165,14 +166,19 @@ function BestDealCard({
 
 export default function BestDealsPage() {
   const { products, ratingSummary, loading } = useProducts();
+  const { method } = usePaymentMethod();
   const showSkeleton = useDelayedFlag(loading, 250);
   const [sort, setSort] = useState<'default' | 'low-high' | 'high-low' | 'rating' | 'discount'>('default');
 
   const sortedProducts = useMemo(() => {
     const list = [...(products ?? [])];
 
-    if (sort === 'low-high') return list.sort((a, b) => a.price - b.price);
-    if (sort === 'high-low') return list.sort((a, b) => b.price - a.price);
+    if (sort === 'low-high') {
+      return list.sort((a, b) => productDisplayPrice(a, method) - productDisplayPrice(b, method));
+    }
+    if (sort === 'high-low') {
+      return list.sort((a, b) => productDisplayPrice(b, method) - productDisplayPrice(a, method));
+    }
     if (sort === 'rating') {
       return list.sort((a, b) => {
         const ra = avgFromRatingSummary(ratingSummary[a.id], a.rating);
@@ -181,11 +187,14 @@ export default function BestDealsPage() {
       });
     }
     if (sort === 'discount') {
-      return list.sort((a, b) => discountPercent(b) - discountPercent(a));
+      return list.sort(
+        (a, b) =>
+          discountPercent(b, productDisplayPrice(b, method)) - discountPercent(a, productDisplayPrice(a, method))
+      );
     }
 
     return list;
-  }, [products, ratingSummary, sort]);
+  }, [products, ratingSummary, sort, method]);
 
   const { addItem } = useCart();
   const navigate = useNavigate();

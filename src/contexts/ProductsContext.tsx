@@ -9,6 +9,7 @@ import {
   ProductsApiError,
 } from '@/lib/api';
 import { fetchReviewsSummaryApi, type RatingSummary } from '@/lib/reviewsSummaryApi';
+import { normalizeProductPaymentMode } from '@/lib/productPayment';
 
 export type ProductApiIssue = {
   code: ProductsApiError['code'];
@@ -43,6 +44,7 @@ function normalizeProductTypos(product: Product): Product {
     images: Array.isArray(product.images)
       ? product.images.map((u) => normalizeLegacyProductImageUrl(u)).filter(Boolean)
       : product.images,
+    paymentMode: normalizeProductPaymentMode(product.paymentMode),
   };
   if (Array.isArray(next.variantOptions)) {
     next.variantOptions = next.variantOptions.map((opt) => ({
@@ -219,6 +221,8 @@ export function ProductsProvider({ children }: { children: ReactNode }) {
       void _drop;
       const saved = await updateProductApi(id, body);
       setProducts(prev => prev.map(x => (x.id === id ? saved : x)));
+      window.dispatchEvent(new CustomEvent('trendnest:products-updated'));
+      window.dispatchEvent(new CustomEvent('trendnest:product-updated', { detail: { id } }));
     },
     [apiAvailable]
   );

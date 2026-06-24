@@ -454,6 +454,7 @@ const ProductSchema = new mongoose.Schema(
     sku: { type: String, default: '' },
     onlinePrice: { type: Number, default: undefined },
     codPrice: { type: Number, default: undefined },
+    paymentMode: { type: String, enum: ['both', 'online', 'cod'], default: 'both' },
     originalPrice: Number,
     images: { type: [String], default: [] },
     category: { type: String, required: true },
@@ -946,6 +947,28 @@ function couponScopeAllowsPaymentMethod(scope, paymentMethod) {
   if (normalizedScope === 'both') return true;
   if (normalizedScope === 'online') return normalizedMethod === 'razorpay';
   return normalizedMethod === 'cod';
+}
+
+function normalizeProductPaymentMode(raw) {
+  const mode = String(raw || '').trim().toLowerCase();
+  if (mode === 'online' || mode === 'cod' || mode === 'both') return mode;
+  return 'both';
+}
+
+function productAllowsPaymentMethod(product, paymentMethod) {
+  const mode = normalizeProductPaymentMode(product?.paymentMode);
+  const method = normalizeCheckoutPaymentMethod(paymentMethod);
+  if (mode === 'both') return true;
+  if (mode === 'online') return method === 'razorpay';
+  return method === 'cod';
+}
+
+function paymentModeErrorMessage(product, paymentMethod) {
+  const mode = normalizeProductPaymentMode(product?.paymentMode);
+  const name = String(product?.name || product?._id || 'This product').trim();
+  if (mode === 'online') return `${name} is available for online payment only.`;
+  if (mode === 'cod') return `${name} is available for COD only.`;
+  return `${name} is not available for this payment method.`;
 }
 
 // --- Visitor analytics (admin-only visibility) ---
@@ -1470,6 +1493,7 @@ function serializeProductDoc(doc) {
   o.categories = [...new Set([primaryCategory, ...categoryList].map((c) => String(c || '').trim()).filter(Boolean))];
   o.name = normalizeSoapDispenserTypos(o.name).trim();
   if (typeof o.subcategory === 'string') o.subcategory = normalizeSoapDispenserTypos(o.subcategory).trim();
+  o.paymentMode = normalizeProductPaymentMode(o.paymentMode);
   if (Array.isArray(o.images)) {
     o.images = o.images.map((u) => normalizeLegacyProductImageUrl(u)).filter(Boolean);
   }
@@ -6576,6 +6600,7 @@ function draftToProductPayload(draft) {
       sku: simple.sku != null ? String(simple.sku).trim() : undefined,
       onlinePrice: simple.onlinePrice != null ? Number(simple.onlinePrice) : undefined,
       codPrice: Number.isFinite(forcedCodPrice) ? forcedCodPrice : undefined,
+      paymentMode: normalizeProductPaymentMode(d.details?.paymentMode),
       variantModel: undefined,
     };
   }
@@ -6637,6 +6662,7 @@ function draftToProductPayload(draft) {
     stock: stockSum || Number(first.stock ?? d.stock ?? 0) || 0,
     onlinePrice: first.onlinePrice != null ? Number(first.onlinePrice) : undefined,
     codPrice: Number.isFinite(Number(first.price)) ? Number(first.price) : undefined,
+    paymentMode: normalizeProductPaymentMode(d.details?.paymentMode),
     variantOptions: legacyVariantOptions.length ? legacyVariantOptions : undefined,
     variantModel: {
       types: types.map((t) => ({
@@ -7133,6 +7159,7 @@ app.post('/api/products', mongoReady, async (req, res) => {
       price: Number(body.price),
       onlinePrice: body.onlinePrice != null ? Number(body.onlinePrice) : undefined,
       codPrice: Number.isFinite(forcedCodPrice) ? forcedCodPrice : undefined,
+      paymentMode: normalizeProductPaymentMode(body.paymentMode),
       originalPrice: body.originalPrice != null ? Number(body.originalPrice) : undefined,
       images:
         Array.isArray(body.images) && body.images.length
@@ -7252,6 +7279,39 @@ app.patch('/api/admin/products/reorder', mongoReady, adminKeyRequired, async (re
  * Build a BSON-safe $set object. Uses the native collection for updates so nested
  * `variantOptions` and `images` persist reliably (Mongoose doc.save() often skips or fails them).
  */
+/**
+ * When admin updates root price fields, mirror them onto the default variant row.
+ */
+function syncRootPricesToDefaultVariant(variantModel, root) {
+  if (!variantModel?.items?.length) return variantModel;
+  const items = variantModel.items;
+  const cod = root.price != null && Number.isFinite(Number(root.price)) ? Number(root.price) : undefined;
+  const online =
+    root.onlinePrice != null && Number.isFinite(Number(root.onlinePrice))
+      ? Number(root.onlinePrice)
+      : cod;
+  const mrp =
+    root.originalPrice != null && Number.isFinite(Number(root.originalPrice))
+      ? Number(root.originalPrice)
+      : undefined;
+
+  return {
+    ...variantModel,
+    items: items.map((it, idx) => {
+      const isTarget = items.length === 1 || it?.isDefault || idx === 0;
+      if (!isTarget) return it;
+      const next = { ...it };
+      if (cod !== undefined) {
+        next.price = cod;
+        next.codPrice = cod;
+      }
+      if (online !== undefined) next.onlinePrice = online;
+      if (mrp !== undefined) next.originalPrice = mrp;
+      return next;
+    }),
+  };
+}
+
 function buildProductUpdateSet(src) {
   const out = {};
   if (src.name !== undefined) out.name = normalizeSoapDispenserTypos(String(src.name));
@@ -7272,6 +7332,9 @@ function buildProductUpdateSet(src) {
     }
   }
   // codPrice is derived from price; ignore external codPrice patches.
+  if (src.paymentMode !== undefined) {
+    out.paymentMode = normalizeProductPaymentMode(src.paymentMode);
+  }
   if (src.originalPrice !== undefined) {
     if (src.originalPrice === null || src.originalPrice === '') {
       out.originalPrice = undefined;
@@ -7384,6 +7447,18 @@ function buildProductUpdateSet(src) {
     const n = Number(src.shipHeightCm);
     out.shipHeightCm = Number.isFinite(n) && n > 0 ? clampNum(n, { min: 1, max: 200 }) : undefined;
   }
+
+  if (
+    out.variantModel?.items?.length &&
+    (out.price !== undefined || out.onlinePrice !== undefined || out.originalPrice !== undefined)
+  ) {
+    out.variantModel = syncRootPricesToDefaultVariant(out.variantModel, {
+      price: out.price,
+      onlinePrice: out.onlinePrice,
+      originalPrice: out.originalPrice,
+    });
+  }
+
   return Object.fromEntries(Object.entries(out).filter(([, v]) => v !== undefined));
 }
 
@@ -7958,6 +8033,11 @@ async function computeServerCheckoutPricing({ req, body, rawItems, paymentMethod
       err.statusCode = 400;
       throw err;
     }
+    if (!productAllowsPaymentMethod(p, paymentMethod)) {
+      const err = new Error(paymentModeErrorMessage(p, paymentMethod));
+      err.statusCode = 400;
+      throw err;
+    }
     let unit = Number(p.price) || 0;
     let sku = String(p?.sku || '').trim();
     const selectedVariantKey = line.selectedVariant ? String(line.selectedVariant) : '';
@@ -8347,6 +8427,10 @@ app.post('/api/payments/razorpay/session', paymentCreateRateLimit, requireTruste
       const p = byId.get(String(line.productId));
       if (!p) {
         res.status(404).json({ error: `Product not found: ${String(line.productId)}` });
+        return;
+      }
+      if (!productAllowsPaymentMethod(p, 'razorpay')) {
+        res.status(400).json({ error: paymentModeErrorMessage(p, 'razorpay') });
         return;
       }
       const want = Math.max(1, Math.floor(Number(line.quantity) || 1));

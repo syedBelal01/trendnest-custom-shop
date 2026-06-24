@@ -2,13 +2,15 @@ import { Link, useParams } from 'react-router-dom';
 import { categories } from '@/data/mockData';
 import { useProducts } from '@/contexts/ProductsContext';
 import ProductCard from '@/components/ProductCard';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Helmet } from 'react-helmet-async';
 import ProductCardSkeleton from '@/components/ProductCardSkeleton';
 import { useDelayedFlag } from '@/hooks/useDelayedFlag';
 import { ensureSeoMetaDescription, productCanonicalUrl } from '@/lib/seo';
 import type { Product } from '@/types';
+import { productDisplayPrice } from '@/lib/productPayment';
+import { usePaymentMethod } from '@/contexts/PaymentMethodContext';
 
 const CANONICAL_BASE = 'https://trendnest99.in';
 const DEFAULT_OG_IMAGE = `${CANONICAL_BASE}/img3.jpeg`;
@@ -96,24 +98,29 @@ function productShowsInCategory(product: Product, categoryId: string | undefined
 export default function CategoryPage() {
   const { id } = useParams<{ id: string }>();
   const { products, loading } = useProducts();
+  const { method } = usePaymentMethod();
   const showSkeleton = useDelayedFlag(loading, 250);
   const [sort, setSort] = useState('default');
 
   const category = categories.find((c) => c.id === id);
-  let filtered =
-    id === 'trending' ? products.filter((p) => p.isTrending) : products.filter((p) => productShowsInCategory(p, id));
-  if (id === 'trending') {
-    const ts = (pid: string) => {
-      const m = String(pid || '').match(/\d{10,}/);
-      const n = m ? Number(m[0]) : Number.NaN;
-      return Number.isFinite(n) ? n : 0;
-    };
-    filtered = [...filtered].sort((a, b) => ts(b.id) - ts(a.id));
-  }
+  const filtered = useMemo(() => {
+    let list =
+      id === 'trending' ? products.filter((p) => p.isTrending) : products.filter((p) => productShowsInCategory(p, id));
+    if (id === 'trending') {
+      const ts = (pid: string) => {
+        const m = String(pid || '').match(/\d{10,}/);
+        const n = m ? Number(m[0]) : Number.NaN;
+        return Number.isFinite(n) ? n : 0;
+      };
+      list = [...list].sort((a, b) => ts(b.id) - ts(a.id));
+    }
 
-  if (sort === 'low') filtered = [...filtered].sort((a, b) => a.price - b.price);
-  if (sort === 'high') filtered = [...filtered].sort((a, b) => b.price - a.price);
-  if (sort === 'rating') filtered = [...filtered].sort((a, b) => b.rating - a.rating);
+    if (sort === 'low') list = [...list].sort((a, b) => productDisplayPrice(a, method) - productDisplayPrice(b, method));
+    if (sort === 'high') list = [...list].sort((a, b) => productDisplayPrice(b, method) - productDisplayPrice(a, method));
+    if (sort === 'rating') list = [...list].sort((a, b) => b.rating - a.rating);
+
+    return list;
+  }, [id, products, sort, method]);
 
   const categoryName = category?.name || 'Products';
   const seoPreset = (id && CATEGORY_SEO[id]) || null;

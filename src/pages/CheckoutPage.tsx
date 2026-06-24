@@ -131,6 +131,7 @@ export default function CheckoutPage() {
     clearCoupon,
     totalsForPaymentMethod,
     unitPriceForItem,
+    paymentMethodAllowedForCart,
     reconcileWithStock,
     applyCoupon,
   } = useCart();
@@ -138,6 +139,19 @@ export default function CheckoutPage() {
   const { refreshProducts } = useProducts();
   const { user, loading: authLoading, refreshAuth } = useAuth();
   const { method: paymentMethod, setMethod: setPaymentMethod } = usePaymentMethod();
+  const codAllowed = paymentMethodAllowedForCart('cod');
+  const onlineAllowed = paymentMethodAllowedForCart('razorpay');
+
+  useEffect(() => {
+    if (!paymentMethodAllowedForCart(paymentMethod)) {
+      setPaymentMethod(onlineAllowed ? 'razorpay' : 'cod');
+    }
+  }, [onlineAllowed, paymentMethod, paymentMethodAllowedForCart, setPaymentMethod]);
+
+  useEffect(() => {
+    void refreshProducts();
+  }, [refreshProducts]);
+
   const [couponDraft, setCouponDraft] = useState('');
   const [couponBusy, setCouponBusy] = useState(false);
   const [couponLoginPrompt, setCouponLoginPrompt] = useState(false);
@@ -737,6 +751,7 @@ export default function CheckoutPage() {
   };
 
   const handlePlaceOrder = async () => {
+    await refreshProducts();
     const reconciled = reconcileWithStock();
     if (reconciled.removed > 0) {
       toast.message('Some items were removed because they are out of stock.');
@@ -946,6 +961,7 @@ export default function CheckoutPage() {
     (otpRequired && !otpVerified) ||
     !shippingGateReady ||
     !healthShippingLoaded ||
+    !paymentMethodAllowedForCart(paymentMethod) ||
     hasMissingCustomDesign;
 
   const placeOrderLabel =
@@ -953,6 +969,8 @@ export default function CheckoutPage() {
       ? 'Placing order…'
       : !healthShippingLoaded
         ? 'Loading checkout…'
+        : !paymentMethodAllowedForCart(paymentMethod)
+          ? 'Payment method unavailable'
         : hasMissingCustomDesign
           ? 'Upload design first'
         : !deliveryPinValid
@@ -1467,33 +1485,39 @@ export default function CheckoutPage() {
                   <button
                     type="button"
                     onClick={() => setPaymentMethod('cod')}
+                    disabled={!codAllowed}
                     className={`rounded-2xl border p-4 text-left transition ${
                       paymentMethod === 'cod'
                         ? 'border-orange-500 bg-orange-50 text-orange-700 shadow-sm'
-                        : 'border-slate-200 bg-white text-slate-700 hover:border-orange-200'
+                        : codAllowed
+                          ? 'border-slate-200 bg-white text-slate-700 hover:border-orange-200'
+                          : 'cursor-not-allowed border-slate-100 bg-slate-50 text-slate-300'
                     }`}
                   >
                     <div className="flex items-center justify-between gap-3">
                       <span className="flex items-center gap-3 text-sm font-black">💵 Cash on Delivery</span>
                       {paymentMethod === 'cod' ? <span className="text-sm font-black">✓</span> : null}
                     </div>
-                    <p className="mt-2 text-xs text-slate-500">Pay when your order arrives.</p>
+                    <p className="mt-2 text-xs text-slate-500">{codAllowed ? 'Pay when your order arrives.' : 'Not available for one or more products.'}</p>
                   </button>
 
                   <button
                     type="button"
                     onClick={() => setPaymentMethod('razorpay')}
+                    disabled={!onlineAllowed}
                     className={`rounded-2xl border p-4 text-left transition ${
                       paymentMethod === 'razorpay'
                         ? 'border-orange-500 bg-orange-50 text-orange-700 shadow-sm'
-                        : 'border-slate-200 bg-white text-slate-700 hover:border-orange-200'
+                        : onlineAllowed
+                          ? 'border-slate-200 bg-white text-slate-700 hover:border-orange-200'
+                          : 'cursor-not-allowed border-slate-100 bg-slate-50 text-slate-300'
                     }`}
                   >
                     <div className="flex items-center justify-between gap-3">
                       <span className="flex items-center gap-3 text-sm font-black">💳 Online payment</span>
                       {paymentMethod === 'razorpay' ? <span className="text-sm font-black">✓</span> : null}
                     </div>
-                    <p className="mt-2 text-xs text-slate-500">Pay securely with Razorpay.</p>
+                    <p className="mt-2 text-xs text-slate-500">{onlineAllowed ? 'Pay securely with Razorpay.' : 'Not available for one or more products.'}</p>
                   </button>
                 </div>
               </div>

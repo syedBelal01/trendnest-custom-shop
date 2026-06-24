@@ -1,4 +1,5 @@
 import type { CartItem, Order } from '@/types';
+import { productUnitPriceForPaymentMethod } from '@/lib/productPayment';
 
 type MetaPixelEventName = 'Purchase';
 
@@ -25,6 +26,7 @@ export function trackMetaPurchase(order: Order, cartItems: CartItem[]): void {
 
   const orderId = String(order.id || '').trim();
   const cartItemsByProductId = new Map(cartItems.map((item) => [item.product.id, item]));
+  const paymentMethod = order.paymentMethod === 'razorpay' ? 'razorpay' : 'cod';
   const sourceItems = order.items.length
     ? order.items.map((item) => ({
         id: item.productId,
@@ -34,7 +36,9 @@ export function trackMetaPurchase(order: Order, cartItems: CartItem[]): void {
     : cartItems.map((item) => ({
         id: item.product.id,
         quantity: item.quantity,
-        item_price: asMoney(item.product.price),
+        item_price: asMoney(
+          productUnitPriceForPaymentMethod(item.product, paymentMethod, item.selectedVariant)
+        ),
       }));
   const contents = sourceItems.map((item) => ({
     ...item,

@@ -8,13 +8,15 @@ import { ShoppingCart } from 'lucide-react';
 import { useProducts } from '@/contexts/ProductsContext';
 import RatingSummaryInline from '@/components/reviews/RatingSummaryInline';
 import { productImageAlt, productSeoPath } from '@/lib/seo';
+import { productDisplayPrice, productDiscountPercent } from '@/lib/productPayment';
+import { usePaymentMethod } from '@/contexts/PaymentMethodContext';
 
 export default function ProductCard({ product, saleBadgeText }: { product: Product; saleBadgeText?: string }) {
   const { addItem } = useCart();
   const { ratingSummary } = useProducts();
-  const discount = product.originalPrice
-    ? Math.round(((product.originalPrice - product.price) / product.originalPrice) * 100)
-    : 0;
+  const { method } = usePaymentMethod();
+  const displayPrice = productDisplayPrice(product, method);
+  const discount = productDiscountPercent(product, displayPrice);
 
   const summary = ratingSummary[product.id];
   const avg = summary?.avgRating ?? 0;
@@ -54,7 +56,7 @@ export default function ProductCard({ product, saleBadgeText }: { product: Produ
           <h3 className="font-medium text-xs sm:text-sm truncate hover:text-primary transition-colors">{product.name}</h3>
         </Link>
         <div className="flex items-center gap-1.5 sm:gap-2 mt-1">
-          <span className="font-bold text-sm sm:text-base">{'\u20B9'}{product.price}</span>
+          <span className="font-bold text-sm sm:text-base">{'\u20B9'}{displayPrice}</span>
           {product.originalPrice && (
             <span className="text-[10px] sm:text-xs text-muted-foreground line-through">{'\u20B9'}{product.originalPrice}</span>
           )}

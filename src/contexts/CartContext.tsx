@@ -3,6 +3,7 @@ import { CartItem, type CouponPaymentMethodScope, type Product } from '@/types';
 import { toast } from 'sonner';
 import { useProducts } from '@/contexts/ProductsContext';
 import { trackAddToCartEvent } from '@/lib/engagementAnalyticsApi';
+import { productAllowsPaymentMethod, productUnitPriceForPaymentMethod } from '@/lib/productPayment';
 
 interface CartState {
   items: CartItem[];
@@ -166,6 +167,7 @@ interface CartContextType {
   unitPriceForItem: (item: CartItem, method?: 'cod' | 'razorpay') => number;
   /** Compute totals for a payment method without changing cart state. */
   totalsForPaymentMethod: (method: 'cod' | 'razorpay') => { subtotal: number; discount: number; total: number };
+  paymentMethodAllowedForCart: (method: 'cod' | 'razorpay') => boolean;
   addItem: (item: CartItemInput) => void;
   removeItem: (cartLineId: string) => void;
   updateQuantity: (cartLineId: string, quantity: number) => void;
@@ -200,11 +202,6 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem('trendnest-cart', JSON.stringify(state));
   }, [state]);
 
-  const subtotal = state.items.reduce((sum, i) => sum + i.product.price * i.quantity, 0);
-  const defaultMethodDiscount = state.couponCode && couponScopeAllowsMethod(state.couponPaymentMethodScope, 'cod') ? state.discount : 0;
-  const total = Math.max(0, subtotal - defaultMethodDiscount);
-  const itemCount = state.items.reduce((sum, i) => sum + i.quantity, 0);
-
   const productById = useMemo(() => {
     const m = new Map<string, Product>();
     for (const p of products ?? []) m.set(p.id, p);
@@ -228,25 +225,23 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const unitPriceForItem = useCallback(
     (item: CartItem, method: 'cod' | 'razorpay' = 'cod'): number => {
-      const p = item.product as any;
-      if (p?.variantModel?.items?.length && item.selectedVariant) {
-        const hit = p.variantModel.items.find((x: any) => String(x?.key) === String(item.selectedVariant));
-        if (hit) {
-          const n =
-            method === 'razorpay'
-              ? (hit.onlinePrice != null ? Number(hit.onlinePrice) : Number(hit.price))
-              : (hit.codPrice != null ? Number(hit.codPrice) : Number(hit.price));
-          return Number.isFinite(n) && n >= 0 ? n : 0;
-        }
-      }
-      const n =
-        method === 'razorpay'
-          ? (p.onlinePrice != null ? Number(p.onlinePrice) : Number(p.price))
-          : (p.codPrice != null ? Number(p.codPrice) : Number(p.price));
-      return Number.isFinite(n) && n >= 0 ? n : 0;
+      const fresh = productById.get(item.product.id);
+      return productUnitPriceForPaymentMethod(fresh ?? item.product, method, item.selectedVariant);
     },
-    []
+    [productById]
   );
+
+  const subtotal = useMemo(
+    () => state.items.reduce((sum, i) => sum + unitPriceForItem(i, 'cod') * i.quantity, 0),
+    [state.items, unitPriceForItem]
+  );
+  const defaultMethodDiscount = useMemo(
+    () =>
+      state.couponCode && couponScopeAllowsMethod(state.couponPaymentMethodScope, 'cod') ? state.discount : 0,
+    [state.couponCode, state.couponPaymentMethodScope, state.discount]
+  );
+  const total = useMemo(() => Math.max(0, subtotal - defaultMethodDiscount), [subtotal, defaultMethodDiscount]);
+  const itemCount = useMemo(() => state.items.reduce((sum, i) => sum + i.quantity, 0), [state.items]);
 
   const totalsForPaymentMethod = useCallback(
     (method: 'cod' | 'razorpay') => {
@@ -256,6 +251,15 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       return { subtotal: sub, discount: effectiveDiscount, total: Math.max(0, sub - effectiveDiscount) };
     },
     [state.items, state.discount, state.couponCode, state.couponPaymentMethodScope, unitPriceForItem]
+  );
+
+  const paymentMethodAllowedForCart = useCallback(
+    (method: 'cod' | 'razorpay') =>
+      state.items.every((item) => {
+        const fresh = productById.get(item.product.id);
+        return productAllowsPaymentMethod(fresh ?? item.product, method);
+      }),
+    [productById, state.items]
   );
 
   const reconcileItems = useCallback(
@@ -282,14 +286,19 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   );
 
   const reconcileWithStock = useCallback(() => {
-    const { next, removed, adjusted } = reconcileItems(state.items);
-    if (removed.length || adjusted.length) {
+    const withFreshProducts = state.items.map((it) => {
+      const fresh = productById.get(it.product.id);
+      return fresh ? { ...it, product: fresh } : it;
+    });
+    const { next, removed, adjusted } = reconcileItems(withFreshProducts);
+    const catalogChanged = withFreshProducts.some((it, i) => it.product !== state.items[i].product);
+    if (removed.length || adjusted.length || catalogChanged) {
       dispatch({ type: 'REPLACE_ITEMS', payload: next });
       if (removed.length) toast.message(`${removed.length} item(s) removed — out of stock.`);
       if (adjusted.length) toast.message(`${adjusted.length} item(s) quantity adjusted to available stock.`);
     }
     return { removed: removed.length, adjusted: adjusted.length };
-  }, [reconcileItems, state.items]);
+  }, [productById, reconcileItems, state.items]);
 
   // Validate cart anytime product stock changes (real-time sync).
   useEffect(() => {
@@ -325,6 +334,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         couponValidatedFor: state.couponValidatedFor,
         unitPriceForItem,
         totalsForPaymentMethod,
+        paymentMethodAllowedForCart,
         addItem,
         removeItem: id => dispatch({ type: 'REMOVE_ITEM', payload: id }),
         updateQuantity: (cartLineId, qty) => {

@@ -118,6 +118,8 @@ export interface Product {
   onlinePrice?: number;
   /** Optional price used for Cash on Delivery offers. */
   codPrice?: number;
+  /** Which checkout payment methods are allowed for this product. Defaults to both. */
+  paymentMode?: 'both' | 'online' | 'cod';
   /** Variant combinations model (new). Storefront prefers this when present. */
   variantModel?: {
     types: Array<{ name: string; values: string[] }>;

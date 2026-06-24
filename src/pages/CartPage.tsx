@@ -1,13 +1,14 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useCart } from "@/contexts/CartContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePaymentMethod } from "@/contexts/PaymentMethodContext";
+import { useProducts } from "@/contexts/ProductsContext";
 import { productImageForVariant } from "@/lib/productImages";
 import { validateCouponApi } from "@/lib/couponsApi";
 import { productImageAlt } from "@/lib/seo";
 import { toast } from "sonner";
-import type { CartItem } from "@/types";
+import type { CartItem, Product } from "@/types";
 
 const Icon = ({ children, className = "", size = 18 }: { children: React.ReactNode; className?: string; size?: number }) => (
   <span
@@ -165,9 +166,13 @@ function CartItemCard({
 function PriceModeBox({
   method,
   onChange,
+  codAllowed = true,
+  onlineAllowed = true,
 }: {
   method: "cod" | "razorpay";
   onChange: (m: "cod" | "razorpay") => void;
+  codAllowed?: boolean;
+  onlineAllowed?: boolean;
 }) {
   return (
     <div className="rounded-3xl border border-orange-100 bg-gradient-to-br from-orange-50 via-white to-white p-5 shadow-sm">
@@ -186,8 +191,13 @@ function PriceModeBox({
           <button
             type="button"
             onClick={() => onChange("cod")}
+            disabled={!codAllowed}
             className={`rounded-xl px-6 py-3 text-sm font-black transition ${
-              method === "cod" ? "bg-orange-600 text-white shadow-md shadow-orange-600/20" : "text-slate-600 hover:bg-orange-50 hover:text-orange-600"
+              method === "cod"
+                ? "bg-orange-600 text-white shadow-md shadow-orange-600/20"
+                : codAllowed
+                  ? "text-slate-600 hover:bg-orange-50 hover:text-orange-600"
+                  : "cursor-not-allowed text-slate-300"
             }`}
           >
             COD
@@ -195,8 +205,13 @@ function PriceModeBox({
           <button
             type="button"
             onClick={() => onChange("razorpay")}
+            disabled={!onlineAllowed}
             className={`rounded-xl px-6 py-3 text-sm font-black transition ${
-              method === "razorpay" ? "bg-orange-600 text-white shadow-md shadow-orange-600/20" : "text-slate-600 hover:bg-orange-50 hover:text-orange-600"
+              method === "razorpay"
+                ? "bg-orange-600 text-white shadow-md shadow-orange-600/20"
+                : onlineAllowed
+                  ? "text-slate-600 hover:bg-orange-50 hover:text-orange-600"
+                  : "cursor-not-allowed text-slate-300"
             }`}
           >
             Online
@@ -240,16 +255,36 @@ export default function CartPage() {
     clearCoupon,
     unitPriceForItem,
     totalsForPaymentMethod,
+    paymentMethodAllowedForCart,
   } = useCart();
+  const { products, refreshProducts } = useProducts();
   const { user, loading: authLoading } = useAuth();
   const { method: paymentMethod, setMethod: setPaymentMethod } = usePaymentMethod();
+
+  useEffect(() => {
+    void refreshProducts();
+  }, [refreshProducts]);
+
+  const productById = useMemo(() => {
+    const m = new Map<string, Product>();
+    for (const p of products ?? []) m.set(p.id, p);
+    return m;
+  }, [products]);
 
   const [code, setCode] = useState("");
   const [couponLoginPrompt, setCouponLoginPrompt] = useState(false);
   const couponRecheckBusyRef = useRef(false);
+  const codAllowed = paymentMethodAllowedForCart('cod');
+  const onlineAllowed = paymentMethodAllowedForCart('razorpay');
+
+  useEffect(() => {
+    if (!paymentMethodAllowedForCart(paymentMethod)) {
+      setPaymentMethod(onlineAllowed ? 'razorpay' : 'cod');
+    }
+  }, [onlineAllowed, paymentMethod, paymentMethodAllowedForCart, setPaymentMethod]);
 
   const originalUnitPriceForItem = (item: CartItem): number | null => {
-    const productAny = item.product as any;
+    const productAny = (productById.get(item.product.id) ?? item.product) as any;
     if (productAny?.variantModel?.items?.length && item.selectedVariant) {
       const key = String(item.selectedVariant);
       const variantHit = productAny.variantModel.items.find((x: any) => String(x?.key) === key);
@@ -372,7 +407,7 @@ export default function CartPage() {
 
       <section className="grid gap-6 lg:grid-cols-[1fr_390px]">
         <div className="space-y-5">
-          <PriceModeBox method={paymentMethod} onChange={setPaymentMethod} />
+          <PriceModeBox method={paymentMethod} onChange={setPaymentMethod} codAllowed={codAllowed} onlineAllowed={onlineAllowed} />
 
           <div className="space-y-4">
             {items.map((item) => {

@@ -34,6 +34,7 @@ import {
   reorderProductsAdminApi,
 } from '@/lib/api';
 import { productPrimaryImage } from '@/lib/productImages';
+import { normalizeProductPaymentMode, syncRootPricesToDefaultVariant } from '@/lib/productPayment';
 import { mergeSpecificationsWithImportedText, mergeSpecificationsWithTemplate, parseSpecificationText } from '@/lib/specificationTemplates';
 import { ADMIN_CATEGORY_TREE, ADMIN_MAIN_CATEGORIES } from '@/data/adminCategories';
 import {
@@ -426,6 +427,22 @@ export default function AdminProducts() {
 
   const vmFileRef = useRef<HTMLInputElement>(null);
   const vmUploadIdxRef = useRef<number | null>(null);
+
+  const updateRootPricing = (fields: Partial<Pick<Product, 'price' | 'onlinePrice' | 'originalPrice' | 'paymentMode'>>) => {
+    setEditing((p) => {
+      if (!p) return p;
+      const next = { ...p, ...fields };
+      if (!next.variantModel?.items?.length) return next;
+      return {
+        ...next,
+        variantModel: syncRootPricesToDefaultVariant(next.variantModel, {
+          price: Number(next.price),
+          onlinePrice: next.onlinePrice != null ? Number(next.onlinePrice) : undefined,
+          originalPrice: next.originalPrice,
+        }),
+      };
+    });
+  };
   const vmPreviewFileRef = useRef<HTMLInputElement>(null);
   const vmPreviewUploadIdxRef = useRef<number | null>(null);
   const [vmUrlDraft, setVmUrlDraft] = useState<Record<number, string>>({});
@@ -1163,15 +1180,32 @@ export default function AdminProducts() {
       const persistVariantOptions = variantOptionsIn.length > 0;
 
       const specifications = normalizeSpecsForPersist(snap.specifications);
+      const paymentMode = normalizeProductPaymentMode(snap.paymentMode);
+      const rootPrice = Number(snap.price);
+      const rootOnlinePrice =
+        snap.onlinePrice != null
+          ? Number(snap.onlinePrice)
+          : paymentMode === 'online'
+            ? rootPrice
+            : undefined;
+      const syncedVariantModel =
+        hasVariantMatrix && snap.variantModel
+          ? syncRootPricesToDefaultVariant(snap.variantModel, {
+              price: rootPrice,
+              onlinePrice: rootOnlinePrice,
+              originalPrice: snap.originalPrice,
+            })
+          : undefined;
 
       if (editing.id) {
-        const forcedCod = Number(snap.price);
+        const forcedCod = rootPrice;
         const patch: Partial<Product> = {
           name: snap.name,
           description: snap.description ?? '',
-          price: Number(snap.price),
-          onlinePrice: snap.onlinePrice != null ? Number(snap.onlinePrice) : undefined,
+          price: rootPrice,
+          onlinePrice: rootOnlinePrice,
           codPrice: forcedCod,
+          paymentMode,
           originalPrice: snap.originalPrice,
           images,
           category: snap.category || 'fashion',
@@ -1188,7 +1222,7 @@ export default function AdminProducts() {
           specifications,
         };
         if (hasVariantMatrix) {
-          patch.variantModel = snap.variantModel;
+          patch.variantModel = syncedVariantModel ?? snap.variantModel;
           patch.sku = snap.sku != null ? String(snap.sku).trim() : '';
         } else {
           patch.stock = Number(snap.stock) || 0;
@@ -1199,14 +1233,15 @@ export default function AdminProducts() {
         await updateProduct(editing.id, patch);
         toast.success('Product saved to MongoDB');
       } else {
-        const forcedCod = Number(snap.price);
+        const forcedCod = rootPrice;
         const newP: Product = {
           id: `p${Date.now()}`,
           name: snap.name!,
           description: snap.description || '',
-          price: Number(snap.price),
-          onlinePrice: snap.onlinePrice != null ? Number(snap.onlinePrice) : undefined,
+          price: rootPrice,
+          onlinePrice: rootOnlinePrice,
           codPrice: forcedCod,
+          paymentMode,
           originalPrice: snap.originalPrice,
           images,
           category: snap.category || 'fashion',
@@ -1225,8 +1260,8 @@ export default function AdminProducts() {
           tags: snap.tags?.length ? snap.tags : undefined,
           specifications: specifications.length ? specifications : undefined,
         };
-        if (hasVariantMatrix && snap.variantModel) {
-          newP.variantModel = snap.variantModel as Product['variantModel'];
+        if (hasVariantMatrix && syncedVariantModel) {
+          newP.variantModel = syncedVariantModel as Product['variantModel'];
           newP.variantOptions = [];
           newP.variants = [];
           newP.stock = 0;
@@ -1236,6 +1271,11 @@ export default function AdminProducts() {
       }
       if (apiAvailable) {
         await refreshProducts();
+      }
+      const savedId = editing.id;
+      window.dispatchEvent(new CustomEvent('trendnest:products-updated'));
+      if (savedId) {
+        window.dispatchEvent(new CustomEvent('trendnest:product-updated', { detail: { id: savedId } }));
       }
       setOpen(false);
       setEditing(null);
@@ -1459,17 +1499,29 @@ export default function AdminProducts() {
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <Input type="number" placeholder="Price (₹)" value={editing.price || ''} onChange={e => setEditing(p => ({ ...p, price: +e.target.value }))} />
-                  <Input type="number" placeholder="Original Price" value={editing.originalPrice || ''} onChange={e => setEditing(p => ({ ...p, originalPrice: +e.target.value || undefined }))} />
+                  <Input type="number" placeholder="Price (₹)" value={editing.price || ''} onChange={e => updateRootPricing({ price: +e.target.value })} />
+                  <Input type="number" placeholder="Original Price" value={editing.originalPrice || ''} onChange={e => updateRootPricing({ originalPrice: +e.target.value || undefined })} />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <Input
                     type="number"
                     placeholder="Online payment price (optional)"
                     value={editing.onlinePrice ?? ''}
-                    onChange={e => setEditing(p => ({ ...p, onlinePrice: e.target.value ? Number(e.target.value) : undefined }))}
+                    onChange={e => updateRootPricing({ onlinePrice: e.target.value ? Number(e.target.value) : undefined })}
                   />
-                  {/* COD price removed: regular price is used for COD */}
+                  <Select
+                    value={normalizeProductPaymentMode(editing.paymentMode)}
+                    onValueChange={v => updateRootPricing({ paymentMode: normalizeProductPaymentMode(v) })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Payment option" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="both">COD and online payment</SelectItem>
+                      <SelectItem value="online">Online payment only</SelectItem>
+                      <SelectItem value="cod">COD only</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <ProductSpecificationsCard

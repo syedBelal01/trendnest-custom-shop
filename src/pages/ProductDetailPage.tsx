@@ -13,6 +13,7 @@ import { fetchProductByIdApi } from '@/lib/api';
 import { fetchProductUrgencyApi } from '@/lib/productUrgencyApi';
 import { parseProductSpecifications } from '@/lib/productSpecifications';
 import { usePaymentMethod } from '@/contexts/PaymentMethodContext';
+import { normalizeProductPaymentMode, productAllowsPaymentMethod, productDisplayPrice } from '@/lib/productPayment';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { fetchShippingServiceabilityApi, isShippingServiceabilityError, type ShippingServiceabilityResult } from '@/lib/shippingApi';
 import { Input } from '@/components/ui/input';
@@ -197,6 +198,24 @@ function formatCountdown(ms: number): string {
   return [hours, minutes, seconds].map((n) => String(n).padStart(2, '0')).join(':');
 }
 
+function mergeProductForPdp(list: Product | undefined, fetched: Product | null): Product | undefined {
+  const base = fetched ?? list;
+  if (!base) return undefined;
+  if (!list || !fetched) return base;
+
+  const merged: Product = { ...fetched, stock: list.stock };
+  if (fetched.variantModel?.items?.length && list.variantModel?.items?.length) {
+    merged.variantModel = {
+      ...fetched.variantModel,
+      items: fetched.variantModel.items.map((vi) => {
+        const listItem = list.variantModel!.items.find((x) => String(x.key) === String(vi.key));
+        return listItem ? { ...vi, stock: listItem.stock } : vi;
+      }),
+    };
+  }
+  return merged;
+}
+
 export default function ProductDetailPage() {
   const { id: routeProductParam } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -239,10 +258,10 @@ export default function ProductDetailPage() {
       window.removeEventListener('trendnest:products-updated', onProductsUpdated);
       window.removeEventListener('trendnest:product-updated', onProductUpdated);
     };
-  }, [idCandidateForFetch]);
+  }, [idCandidateForFetch, fromList?.price, fromList?.onlinePrice, fromList?.originalPrice, fromList?.paymentMode]);
 
-  // Prefer the latest list copy for stock; fall back to fetched detail.
-  const product = fromList ?? fetchedProduct;
+  // Fetched detail is authoritative for catalog/pricing; list copy supplies live stock.
+  const product = useMemo(() => mergeProductForPdp(fromList, fetchedProduct), [fromList, fetchedProduct]);
   useEffect(() => {
     if (!product || !routeProductParam) return;
     const active = decodeURIComponent(String(routeProductParam || '')).trim().toLowerCase();
@@ -695,7 +714,18 @@ export default function ProductDetailPage() {
   const onlinePrice = hasVariantModel && selectedVariantItem && selectedVariantItem.onlinePrice != null
     ? Number(selectedVariantItem.onlinePrice)
     : product.onlinePrice != null ? Number(product.onlinePrice) : codPrice;
-  const selectedPrice = paymentMethod === 'razorpay' ? onlinePrice : codPrice;
+  const canUseCod = productAllowsPaymentMethod(product, 'cod');
+  const canUseOnline = productAllowsPaymentMethod(product, 'razorpay');
+  const effectivePaymentMethod = productAllowsPaymentMethod(product, paymentMethod)
+    ? paymentMethod
+    : canUseOnline
+      ? 'razorpay'
+      : 'cod';
+  useEffect(() => {
+    if (paymentMethod !== effectivePaymentMethod) setPaymentMethod(effectivePaymentMethod);
+  }, [effectivePaymentMethod, paymentMethod, setPaymentMethod]);
+  const selectedPrice = effectivePaymentMethod === 'razorpay' ? onlinePrice : codPrice;
+  const paymentMode = normalizeProductPaymentMode(product.paymentMode);
   const mrp = hasVariantModel && selectedVariantItem && selectedVariantItem.originalPrice != null
     ? Number(selectedVariantItem.originalPrice)
     : product.originalPrice != null ? Number(product.originalPrice) : null;
@@ -724,7 +754,7 @@ export default function ProductDetailPage() {
   });
 
   const handleBuyNow = () => {
-    if (!inStock) return;
+    if (!inStock || !productAllowsPaymentMethod(product, effectivePaymentMethod)) return;
     handleAddToCart();
     navigate('/checkout');
   };
@@ -937,28 +967,37 @@ export default function ProductDetailPage() {
                 <button
                   type="button"
                   onClick={() => setPaymentMethod('cod')}
-                  disabled={!inStock}
+                  disabled={!inStock || !canUseCod}
                   className={`rounded-xl px-4 py-3 text-sm font-black transition ${
-                    paymentMethod === 'cod'
+                    effectivePaymentMethod === 'cod'
                       ? 'bg-orange-600 text-white shadow-md shadow-orange-600/20'
-                      : 'text-slate-600 hover:bg-orange-50 hover:text-orange-600'
+                      : canUseCod
+                        ? 'text-slate-600 hover:bg-orange-50 hover:text-orange-600'
+                        : 'cursor-not-allowed text-slate-300'
                   }`}
                 >
-                  COD · ₹{codPrice}
+                  {canUseCod ? <>COD &middot; &#8377;{codPrice}</> : 'COD unavailable'}
                 </button>
                 <button
                   type="button"
                   onClick={() => setPaymentMethod('razorpay')}
-                  disabled={!inStock}
+                  disabled={!inStock || !canUseOnline}
                   className={`rounded-xl px-4 py-3 text-sm font-black transition ${
-                    paymentMethod === 'razorpay'
+                    effectivePaymentMethod === 'razorpay'
                       ? 'bg-orange-600 text-white shadow-md shadow-orange-600/20'
-                      : 'text-slate-600 hover:bg-orange-50 hover:text-orange-600'
+                      : canUseOnline
+                        ? 'text-slate-600 hover:bg-orange-50 hover:text-orange-600'
+                        : 'cursor-not-allowed text-slate-300'
                   }`}
                 >
-                  Online · ₹{onlinePrice}
+                  {canUseOnline ? <>Online &middot; &#8377;{onlinePrice}</> : 'Online unavailable'}
                 </button>
               </div>
+              {paymentMode !== 'both' ? (
+                <p className="mt-2 text-xs font-bold text-slate-500">
+                  This product is available for {paymentMode === 'online' ? 'online payment only.' : 'COD only.'}
+                </p>
+              ) : null}
             </div>
 
             <div className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -1400,7 +1439,7 @@ export default function ProductDetailPage() {
                   </div>
                   <div className="p-3">
                     <div className="text-sm font-semibold line-clamp-2">{p.name}</div>
-                    <div className="mt-1 text-sm font-bold tabular-nums">₹{p.price}</div>
+                    <div className="mt-1 text-sm font-bold tabular-nums">₹{productDisplayPrice(p, paymentMethod)}</div>
                   </div>
                 </Link>
               ))}
