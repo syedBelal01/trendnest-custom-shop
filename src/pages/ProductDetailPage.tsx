@@ -678,6 +678,17 @@ export default function ProductDetailPage() {
     };
   }, [product?.id, product?.category, product?.categories]);
 
+  const effectivePaymentMethod = useMemo((): 'cod' | 'razorpay' => {
+    if (!product) return paymentMethod;
+    if (productAllowsPaymentMethod(product, paymentMethod)) return paymentMethod;
+    return productAllowsPaymentMethod(product, 'razorpay') ? 'razorpay' : 'cod';
+  }, [product, paymentMethod]);
+
+  useEffect(() => {
+    if (!product) return;
+    if (paymentMethod !== effectivePaymentMethod) setPaymentMethod(effectivePaymentMethod);
+  }, [effectivePaymentMethod, paymentMethod, product, setPaymentMethod]);
+
   if (!product && showSkeleton) {
     return (
       <div className="max-w-6xl mx-auto px-3 sm:px-4 lg:px-6 pb-28 md:pb-8 pt-4 sm:pt-6">
@@ -716,14 +727,6 @@ export default function ProductDetailPage() {
     : product.onlinePrice != null ? Number(product.onlinePrice) : codPrice;
   const canUseCod = productAllowsPaymentMethod(product, 'cod');
   const canUseOnline = productAllowsPaymentMethod(product, 'razorpay');
-  const effectivePaymentMethod = productAllowsPaymentMethod(product, paymentMethod)
-    ? paymentMethod
-    : canUseOnline
-      ? 'razorpay'
-      : 'cod';
-  useEffect(() => {
-    if (paymentMethod !== effectivePaymentMethod) setPaymentMethod(effectivePaymentMethod);
-  }, [effectivePaymentMethod, paymentMethod, setPaymentMethod]);
   const selectedPrice = effectivePaymentMethod === 'razorpay' ? onlinePrice : codPrice;
   const paymentMode = normalizeProductPaymentMode(product.paymentMode);
   const mrp = hasVariantModel && selectedVariantItem && selectedVariantItem.originalPrice != null
