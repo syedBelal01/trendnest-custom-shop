@@ -2,6 +2,27 @@ import type { Product } from '@/types';
 
 export const SEO_BRAND_NAME = 'TrendNest99';
 export const SEO_CANONICAL_BASE = 'https://trendnest99.in';
+/** Default social/share image — 1200×630 (1.91:1) with headline + CTA baked in. */
+export const SEO_DEFAULT_OG_IMAGE = `${SEO_CANONICAL_BASE}/og-share.jpg`;
+export const SEO_DEFAULT_OG_IMAGE_WIDTH = 1200;
+export const SEO_DEFAULT_OG_IMAGE_HEIGHT = 630;
+/** Keep under ~60 chars so Google / X / LinkedIn don't truncate. */
+export const SEO_HOME_TITLE = 'Printed Tees & Custom Prints | TrendNest99';
+/** Target 120–160 chars for SERP + OG description. */
+export const SEO_HOME_DESCRIPTION =
+  'Shop printed t-shirts, graphic tees, and custom prints online in India. TrendNest99 offers fashion, home essentials, and daily deals with fast delivery.';
+
+export function clampSeoTitle(title: string, max = 60): string {
+  const cleaned = String(title || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return SEO_BRAND_NAME;
+  if (cleaned.length <= max) return cleaned;
+  const truncated = cleaned.slice(0, max - 1).trimEnd();
+  const lastSpace = truncated.lastIndexOf(' ');
+  const base = lastSpace > 40 ? truncated.slice(0, lastSpace) : truncated;
+  return `${base}…`;
+}
 
 function cleanText(input: unknown): string {
   return String(input ?? '')

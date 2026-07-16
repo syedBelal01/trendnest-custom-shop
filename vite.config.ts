@@ -71,9 +71,15 @@ export default defineConfig(async ({ mode }) => {
     return slug || "product";
   }
 
-  function ensureMetaDescription(v: string, max = 160) {
-    const cleaned = String(v || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-    if (!cleaned) return "";
+  function ensureMetaDescription(v: string, max = 160, min = 120) {
+    let cleaned = String(v || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+    if (!cleaned) {
+      cleaned =
+        "Shop printed t-shirts, graphic tees, and custom prints online in India. TrendNest99 offers fashion, home essentials, and daily deals with fast delivery.";
+    }
+    if (cleaned.length < min) {
+      cleaned = `${cleaned} Shop online in India with TrendNest99.`.trim();
+    }
     if (cleaned.length <= max) return cleaned;
     return `${cleaned.slice(0, max - 1).trimEnd()}...`;
   }
@@ -196,13 +202,22 @@ export default defineConfig(async ({ mode }) => {
     const stripHtml = (v: string) => String(v || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 
     // Defaults
-    let title = "Printed T-Shirts, Graphic Tees & Custom Prints Online | TrendNest99";
+    let title = "Printed Tees & Custom Prints | TrendNest99";
     let desc =
-      "Shop printed t-shirts, men's oversized graphic tees, custom prints, trending fashion, and home essentials online in India.";
+      "Shop printed t-shirts, graphic tees, and custom prints online in India. TrendNest99 offers fashion, home essentials, and daily deals with fast delivery.";
     let ogType = "website";
-    let ogImage: string | undefined = `${CANONICAL_BASE}/img3.jpeg`;
+    let ogImage: string | undefined = `${CANONICAL_BASE}/og-share.jpg`;
     let keywords = "printed t shirt, printed shirt, graphic t shirt, custom print t shirt, trendnest99";
     const extraJsonLd: Record<string, unknown>[] = [];
+
+    const clampTitle = (t: string, max = 60) => {
+      const cleaned = String(t || "").replace(/\s+/g, " ").trim();
+      if (!cleaned || cleaned.length <= max) return cleaned || "TrendNest99";
+      const truncated = cleaned.slice(0, max - 1).trimEnd();
+      const lastSpace = truncated.lastIndexOf(" ");
+      const base = lastSpace > 40 ? truncated.slice(0, lastSpace) : truncated;
+      return `${base}…`;
+    };
 
     const orgJsonLd = {
       "@context": "https://schema.org",
@@ -251,8 +266,8 @@ export default defineConfig(async ({ mode }) => {
     if (mCat) {
       const cid = decodeURIComponent(mCat[1]);
       const cm = categoryMeta[cid];
-      title = cm ? `${cm.name} Online India | TrendNest99` : "Products | TrendNest99";
-      desc = ensureMetaDescription(cm ? `${cm.description}` : "Browse products on TrendNest99.");
+      title = clampTitle(cm ? `${cm.name} | TrendNest99` : "Products | TrendNest99");
+      desc = ensureMetaDescription(cm ? `${cm.description}` : "Browse products online in India at TrendNest99 with secure checkout and fast delivery.");
       keywords = cm?.keywords || `${cid}, products online, trendnest99`;
       ogType = "website";
       extraJsonLd.push({
@@ -285,7 +300,7 @@ export default defineConfig(async ({ mode }) => {
         canonicalUrl = `${CANONICAL_BASE}/product/${encodeURIComponent(String(p.slug))}`;
       }
       const longTailKeyword = p ? productLongTailKeyword(p) : "online shopping india";
-      title = p?.name ? `${p.name} | ${longTailKeyword} | TrendNest99` : "Product | TrendNest99";
+      title = clampTitle(p?.name ? `${p.name} | TrendNest99` : "Product | TrendNest99");
       const plain = p?.description ? stripHtml(String(p.description)) : "";
       desc = ensureMetaDescription(
         plain
@@ -353,10 +368,16 @@ export default defineConfig(async ({ mode }) => {
       `<meta name="keywords" content="${escapeAttr(keywords)}">`,
       `<meta name="robots" content="index,follow,max-image-preview:large">`,
       `<meta property="og:type" content="${escapeAttr(ogType)}">`,
+      `<meta property="og:site_name" content="TrendNest99">`,
       `<meta property="og:title" content="${escapeAttr(title)}">`,
       `<meta property="og:description" content="${escapeAttr(desc)}">`,
       `<meta property="og:url" content="${escapeAttr(canonicalUrl)}">`,
       ogImage ? `<meta property="og:image" content="${escapeAttr(String(ogImage))}">` : "",
+      ogImage === `${CANONICAL_BASE}/og-share.jpg`
+        ? `<meta property="og:image:type" content="image/jpeg"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="TrendNest99 — printed tees and custom prints. Shop now.">`
+        : ogImage
+          ? `<meta property="og:image:alt" content="${escapeAttr(title)}">`
+          : "",
       `<meta name="twitter:card" content="summary_large_image">`,
       `<meta name="twitter:title" content="${escapeAttr(title)}">`,
       `<meta name="twitter:description" content="${escapeAttr(desc)}">`,
@@ -376,14 +397,15 @@ export default defineConfig(async ({ mode }) => {
     out = out.replace(/<meta name="keywords"[^>]*>/gi, "");
     out = out.replace(/<meta name="robots"[^>]*>/gi, "");
     out = out.replace(/<meta property="og:type"[^>]*>/gi, "");
+    out = out.replace(/<meta property="og:site_name"[^>]*>/gi, "");
     out = out.replace(/<meta property="og:title"[^>]*>/gi, "");
     out = out.replace(/<meta property="og:description"[^>]*>/gi, "");
     out = out.replace(/<meta property="og:url"[^>]*>/gi, "");
-    out = out.replace(/<meta property="og:image"[^>]*>/gi, "");
+    out = out.replace(/<meta property="og:image(?::[a-z_]+)?"[^>]*>/gi, "");
     out = out.replace(/<meta name="twitter:card"[^>]*>/gi, "");
     out = out.replace(/<meta name="twitter:title"[^>]*>/gi, "");
     out = out.replace(/<meta name="twitter:description"[^>]*>/gi, "");
-    out = out.replace(/<meta name="twitter:image"[^>]*>/gi, "");
+    out = out.replace(/<meta name="twitter:image(?::alt)?"[^>]*>/gi, "");
     // Insert the rest right before </head>
     out = out.replace(/<\/head>/i, `${tags}</head>`);
     return out;

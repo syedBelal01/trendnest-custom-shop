@@ -23,7 +23,12 @@ import { useDelayedFlag } from '@/hooks/useDelayedFlag';
 import { RichTextRenderer } from '@/components/RichTextRenderer';
 import {
   SEO_CANONICAL_BASE,
+  SEO_BRAND_NAME,
+  SEO_DEFAULT_OG_IMAGE,
+  SEO_DEFAULT_OG_IMAGE_HEIGHT,
+  SEO_DEFAULT_OG_IMAGE_WIDTH,
   buildProductSeoParagraph,
+  clampSeoTitle,
   ensureSeoMetaDescription,
   productCanonicalUrl,
   productImageAlt,
@@ -33,7 +38,7 @@ import {
 } from '@/lib/seo';
 import type { ProductUrgencySetting } from '@/types';
 
-const DEFAULT_OG_IMAGE = `${SEO_CANONICAL_BASE}/img3.jpeg`;
+const DEFAULT_OG_IMAGE = SEO_DEFAULT_OG_IMAGE;
 
 function stripHtml(input: string): string {
   return String(input || '')
@@ -274,14 +279,14 @@ export default function ProductDetailPage() {
   const plainDescription = product?.description ? stripHtml(String(product.description)) : '';
   const printedShirt = isPrintedShirt(product);
   const seoKeyword = product ? productLongTailKeyword(product) : 'online shopping india';
-  const seoTitle = product?.name
-    ? `${product.name} | ${seoKeyword} | TrendNest99`
-    : 'Product | TrendNest99';
+  const seoTitle = clampSeoTitle(
+    product?.name ? `${product.name} | TrendNest99` : 'Product | TrendNest99'
+  );
   const seoDesc = ensureSeoMetaDescription(
     plainDescription
       ? `${plainDescription} Buy ${product?.name || 'this product'} online in India from TrendNest99.`
       : `Buy ${seoKeyword} products online in India from TrendNest99.`,
-    150,
+    120,
     160
   );
   const canonicalUrl = product ? productCanonicalUrl(product) : `${SEO_CANONICAL_BASE}/`;
@@ -783,14 +788,24 @@ export default function ProductDetailPage() {
         <meta name="robots" content="index,follow,max-image-preview:large" />
         <link rel="canonical" href={canonicalUrl} />
         <meta property="og:type" content="product" />
+        <meta property="og:site_name" content={SEO_BRAND_NAME} />
         <meta property="og:title" content={seoTitle} />
         <meta property="og:description" content={seoDesc} />
         <meta property="og:url" content={canonicalUrl} />
         <meta property="og:image" content={ogImage} />
+        <meta property="og:image:alt" content={productImageAlt(product, 'share preview')} />
+        {ogImage === DEFAULT_OG_IMAGE ? (
+          <>
+            <meta property="og:image:type" content="image/jpeg" />
+            <meta property="og:image:width" content={String(SEO_DEFAULT_OG_IMAGE_WIDTH)} />
+            <meta property="og:image:height" content={String(SEO_DEFAULT_OG_IMAGE_HEIGHT)} />
+          </>
+        ) : null}
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:title" content={seoTitle} />
         <meta name="twitter:description" content={seoDesc} />
         <meta name="twitter:image" content={ogImage} />
+        <meta name="twitter:image:alt" content={productImageAlt(product, 'share preview')} />
         <script type="application/ld+json">
           {JSON.stringify(
             productJsonLd({

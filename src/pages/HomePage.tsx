@@ -10,7 +10,17 @@ import { productPrimaryImage } from "@/lib/productImages";
 import { productVariantNames } from "@/lib/productVariants";
 import { type RatingSummary } from "@/lib/reviewsSummaryApi";
 import type { Product } from "@/types";
-import { ensureSeoMetaDescription, productImageAlt, productSeoPath } from "@/lib/seo";
+import {
+  SEO_BRAND_NAME,
+  SEO_DEFAULT_OG_IMAGE,
+  SEO_DEFAULT_OG_IMAGE_HEIGHT,
+  SEO_DEFAULT_OG_IMAGE_WIDTH,
+  SEO_HOME_DESCRIPTION,
+  SEO_HOME_TITLE,
+  ensureSeoMetaDescription,
+  productImageAlt,
+  productSeoPath,
+} from "@/lib/seo";
 import { productDisplayPrice, productDiscountPercent } from "@/lib/productPayment";
 import { usePaymentMethod } from "@/contexts/PaymentMethodContext";
 
@@ -49,12 +59,9 @@ const icons = {
 };
 
 const CANONICAL_BASE = "https://trendnest99.in";
-const HOME_OG_IMAGE = `${CANONICAL_BASE}/img3.jpeg`;
-const HOME_TITLE = "Printed T-Shirts, Graphic Tees & Custom Print Store | TrendNest99";
-const HOME_DESC =
-  ensureSeoMetaDescription(
-    "Shop printed t-shirts, men's oversized graphic tees, custom print products, trending fashion, and home & kitchen products online in India at TrendNest99."
-  );
+const HOME_OG_IMAGE = SEO_DEFAULT_OG_IMAGE;
+const HOME_TITLE = SEO_HOME_TITLE;
+const HOME_DESC = ensureSeoMetaDescription(SEO_HOME_DESCRIPTION, 120, 160);
 const HOME_KEYWORDS = [
   "printed t shirt",
   "printed shirt",
@@ -198,19 +205,26 @@ export default function HomePage() {
         <meta name="robots" content="index,follow,max-image-preview:large" />
         <link rel="canonical" href={`${CANONICAL_BASE}/`} />
         <meta property="og:type" content="website" />
+        <meta property="og:site_name" content={SEO_BRAND_NAME} />
         <meta property="og:title" content={HOME_TITLE} />
         <meta property="og:description" content={HOME_DESC} />
         <meta property="og:url" content={`${CANONICAL_BASE}/`} />
         <meta property="og:image" content={HOME_OG_IMAGE} />
+        <meta property="og:image:secure_url" content={HOME_OG_IMAGE} />
+        <meta property="og:image:type" content="image/jpeg" />
+        <meta property="og:image:width" content={String(SEO_DEFAULT_OG_IMAGE_WIDTH)} />
+        <meta property="og:image:height" content={String(SEO_DEFAULT_OG_IMAGE_HEIGHT)} />
+        <meta property="og:image:alt" content={`${SEO_BRAND_NAME} — printed tees and custom prints. Shop now.`} />
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:title" content={HOME_TITLE} />
         <meta name="twitter:description" content={HOME_DESC} />
         <meta name="twitter:image" content={HOME_OG_IMAGE} />
+        <meta name="twitter:image:alt" content={`${SEO_BRAND_NAME} — printed tees and custom prints. Shop now.`} />
         <script type="application/ld+json">
           {JSON.stringify({
             "@context": "https://schema.org",
             "@type": "WebSite",
-            name: "TrendNest99",
+            name: SEO_BRAND_NAME,
             url: `${CANONICAL_BASE}/`,
             potentialAction: {
               "@type": "SearchAction",

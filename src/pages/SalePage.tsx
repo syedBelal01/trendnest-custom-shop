@@ -4,7 +4,7 @@ import { Helmet } from 'react-helmet-async';
 import ProductCard from '@/components/ProductCard';
 import type { Product, SaleBanner } from '@/types';
 import { fetchPublicSaleBySlugApi } from '@/lib/heroBannersApi';
-import { SEO_CANONICAL_BASE, ensureSeoMetaDescription } from '@/lib/seo';
+import { SEO_BRAND_NAME, SEO_CANONICAL_BASE, SEO_DEFAULT_OG_IMAGE, SEO_DEFAULT_OG_IMAGE_HEIGHT, SEO_DEFAULT_OG_IMAGE_WIDTH, clampSeoTitle, ensureSeoMetaDescription } from '@/lib/seo';
 
 type PublicSaleState = 'live' | 'scheduled' | 'ended' | 'draft' | 'disabled';
 
@@ -58,11 +58,14 @@ export default function SalePage() {
   }, [slug]);
 
   const saleTitle = sale?.title || 'Sale';
-  const pageTitle = `${saleTitle} | TrendNest99`;
+  const pageTitle = clampSeoTitle(`${saleTitle} | TrendNest99`);
   const pageDescription = ensureSeoMetaDescription(
-    sale?.subtitle || sale?.bannerText || `Shop selected sale products from ${saleTitle} on TrendNest99.`
+    sale?.subtitle || sale?.bannerText || `Shop selected sale products from ${saleTitle} on TrendNest99. Discover deals with secure checkout and fast delivery in India.`,
+    120,
+    160
   );
   const canonicalUrl = `${SEO_CANONICAL_BASE}/sale/${encodeURIComponent(slug)}`;
+  const ogImage = sale?.desktopImage || sale?.mobileImage || SEO_DEFAULT_OG_IMAGE;
   const saleBadgeText = useMemo(() => {
     const text = String(sale?.discountText || '').trim();
     if (text) return text;
@@ -106,9 +109,22 @@ export default function SalePage() {
         <meta name="description" content={pageDescription} />
         <link rel="canonical" href={canonicalUrl} />
         <meta property="og:type" content="website" />
+        <meta property="og:site_name" content={SEO_BRAND_NAME} />
         <meta property="og:title" content={pageTitle} />
         <meta property="og:description" content={pageDescription} />
         <meta property="og:url" content={canonicalUrl} />
+        <meta property="og:image" content={ogImage} />
+        {ogImage === SEO_DEFAULT_OG_IMAGE ? (
+          <>
+            <meta property="og:image:width" content={String(SEO_DEFAULT_OG_IMAGE_WIDTH)} />
+            <meta property="og:image:height" content={String(SEO_DEFAULT_OG_IMAGE_HEIGHT)} />
+          </>
+        ) : null}
+        <meta property="og:image:alt" content={`${SEO_BRAND_NAME} — ${saleTitle}. Shop now.`} />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content={pageTitle} />
+        <meta name="twitter:description" content={pageDescription} />
+        <meta name="twitter:image" content={ogImage} />
       </Helmet>
 
       <section
