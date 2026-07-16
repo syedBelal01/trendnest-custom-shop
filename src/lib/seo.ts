@@ -8,9 +8,9 @@ export const SEO_DEFAULT_OG_IMAGE_WIDTH = 1200;
 export const SEO_DEFAULT_OG_IMAGE_HEIGHT = 630;
 /** Keep under ~60 chars so Google / X / LinkedIn don't truncate. */
 export const SEO_HOME_TITLE = 'Printed Tees & Custom Prints | TrendNest99';
-/** Target 120–160 chars for SERP + OG description. */
+/** Target ~120 chars for SERP + social previews (OG/Twitter). */
 export const SEO_HOME_DESCRIPTION =
-  'Shop printed t-shirts, graphic tees, and custom prints online in India. TrendNest99 offers fashion, home essentials, and daily deals with fast delivery.';
+  'Shop printed t-shirts, graphic tees, and custom prints online in India. Fashion, home essentials, and deals at TrendNest99.';
 
 export function clampSeoTitle(title: string, max = 60): string {
   const cleaned = String(title || '')
@@ -127,6 +127,23 @@ export function ensureSeoMetaDescription(text: string, min = 150, max = 160): st
   if (cleaned.length > max) return `${cleaned.slice(0, max - 1).trimEnd()}...`;
   if (cleaned.length >= min) return cleaned;
   return `${cleaned} Shop online in India with ${SEO_BRAND_NAME}.`.slice(0, max).trimEnd();
+}
+
+/**
+ * Social cards (Open Graph / Twitter) often truncate around ~125 chars on mobile.
+ * Keep this separate from the meta description (SERP) which can be longer.
+ */
+export function clampSocialDescription(text: string, max = 125): string {
+  const cleaned = String(text || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return '';
+  if (cleaned.length <= max) return cleaned;
+  const truncated = cleaned.slice(0, max - 1).trimEnd();
+  const lastSpace = truncated.lastIndexOf(' ');
+  const base = lastSpace > Math.floor(max * 0.65) ? truncated.slice(0, lastSpace) : truncated;
+  return `${base}…`;
 }
 
 export function buildProductSeoParagraph(product: Pick<Product, 'name' | 'description' | 'category' | 'subcategory'>): string {

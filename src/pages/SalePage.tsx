@@ -4,7 +4,7 @@ import { Helmet } from 'react-helmet-async';
 import ProductCard from '@/components/ProductCard';
 import type { Product, SaleBanner } from '@/types';
 import { fetchPublicSaleBySlugApi } from '@/lib/heroBannersApi';
-import { SEO_BRAND_NAME, SEO_CANONICAL_BASE, SEO_DEFAULT_OG_IMAGE, SEO_DEFAULT_OG_IMAGE_HEIGHT, SEO_DEFAULT_OG_IMAGE_WIDTH, clampSeoTitle, ensureSeoMetaDescription } from '@/lib/seo';
+import { SEO_BRAND_NAME, SEO_CANONICAL_BASE, SEO_DEFAULT_OG_IMAGE, SEO_DEFAULT_OG_IMAGE_HEIGHT, SEO_DEFAULT_OG_IMAGE_WIDTH, clampSeoTitle, clampSocialDescription, ensureSeoMetaDescription } from '@/lib/seo';
 
 type PublicSaleState = 'live' | 'scheduled' | 'ended' | 'draft' | 'disabled';
 
@@ -64,6 +64,7 @@ export default function SalePage() {
     120,
     160
   );
+  const socialDescription = clampSocialDescription(pageDescription);
   const canonicalUrl = `${SEO_CANONICAL_BASE}/sale/${encodeURIComponent(slug)}`;
   const ogImage = sale?.desktopImage || sale?.mobileImage || SEO_DEFAULT_OG_IMAGE;
   const saleBadgeText = useMemo(() => {
@@ -111,7 +112,7 @@ export default function SalePage() {
         <meta property="og:type" content="website" />
         <meta property="og:site_name" content={SEO_BRAND_NAME} />
         <meta property="og:title" content={pageTitle} />
-        <meta property="og:description" content={pageDescription} />
+        <meta property="og:description" content={socialDescription} />
         <meta property="og:url" content={canonicalUrl} />
         <meta property="og:image" content={ogImage} />
         {ogImage === SEO_DEFAULT_OG_IMAGE ? (
@@ -123,7 +124,7 @@ export default function SalePage() {
         <meta property="og:image:alt" content={`${SEO_BRAND_NAME} — ${saleTitle}. Shop now.`} />
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:title" content={pageTitle} />
-        <meta name="twitter:description" content={pageDescription} />
+        <meta name="twitter:description" content={socialDescription} />
         <meta name="twitter:image" content={ogImage} />
       </Helmet>
 

@@ -29,6 +29,7 @@ import {
   SEO_DEFAULT_OG_IMAGE_WIDTH,
   buildProductSeoParagraph,
   clampSeoTitle,
+  clampSocialDescription,
   ensureSeoMetaDescription,
   productCanonicalUrl,
   productImageAlt,
@@ -289,6 +290,7 @@ export default function ProductDetailPage() {
     120,
     160
   );
+  const socialDesc = clampSocialDescription(seoDesc);
   const canonicalUrl = product ? productCanonicalUrl(product) : `${SEO_CANONICAL_BASE}/`;
   const seoLongDescription = product ? buildProductSeoParagraph(product) : '';
   const ogImage = product?.images?.[0] ? String(product.images[0]) : DEFAULT_OG_IMAGE;
@@ -790,7 +792,7 @@ export default function ProductDetailPage() {
         <meta property="og:type" content="product" />
         <meta property="og:site_name" content={SEO_BRAND_NAME} />
         <meta property="og:title" content={seoTitle} />
-        <meta property="og:description" content={seoDesc} />
+        <meta property="og:description" content={socialDesc} />
         <meta property="og:url" content={canonicalUrl} />
         <meta property="og:image" content={ogImage} />
         <meta property="og:image:alt" content={productImageAlt(product, 'share preview')} />
@@ -803,7 +805,7 @@ export default function ProductDetailPage() {
         ) : null}
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:title" content={seoTitle} />
-        <meta name="twitter:description" content={seoDesc} />
+        <meta name="twitter:description" content={socialDesc} />
         <meta name="twitter:image" content={ogImage} />
         <meta name="twitter:image:alt" content={productImageAlt(product, 'share preview')} />
         <script type="application/ld+json">

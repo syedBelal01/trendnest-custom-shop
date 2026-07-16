@@ -75,13 +75,23 @@ export default defineConfig(async ({ mode }) => {
     let cleaned = String(v || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
     if (!cleaned) {
       cleaned =
-        "Shop printed t-shirts, graphic tees, and custom prints online in India. TrendNest99 offers fashion, home essentials, and daily deals with fast delivery.";
+        "Shop printed t-shirts, graphic tees, and custom prints online in India. Fashion, home essentials, and deals at TrendNest99.";
     }
     if (cleaned.length < min) {
       cleaned = `${cleaned} Shop online in India with TrendNest99.`.trim();
     }
     if (cleaned.length <= max) return cleaned;
     return `${cleaned.slice(0, max - 1).trimEnd()}...`;
+  }
+
+  function clampSocialDescription(v: string, max = 125) {
+    const cleaned = String(v || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+    if (!cleaned) return "";
+    if (cleaned.length <= max) return cleaned;
+    const truncated = cleaned.slice(0, max - 1).trimEnd();
+    const lastSpace = truncated.lastIndexOf(" ");
+    const base = lastSpace > Math.floor(max * 0.65) ? truncated.slice(0, lastSpace) : truncated;
+    return `${base}…`;
   }
 
   type PrerenderProduct = {
@@ -204,7 +214,7 @@ export default defineConfig(async ({ mode }) => {
     // Defaults
     let title = "Printed Tees & Custom Prints | TrendNest99";
     let desc =
-      "Shop printed t-shirts, graphic tees, and custom prints online in India. TrendNest99 offers fashion, home essentials, and daily deals with fast delivery.";
+      "Shop printed t-shirts, graphic tees, and custom prints online in India. Fashion, home essentials, and deals at TrendNest99.";
     let ogType = "website";
     let ogImage: string | undefined = `${CANONICAL_BASE}/og-share.jpg`;
     let keywords = "printed t shirt, printed shirt, graphic t shirt, custom print t shirt, trendnest99";
@@ -361,6 +371,8 @@ export default defineConfig(async ({ mode }) => {
       }
     }
 
+    const socialDesc = clampSocialDescription(desc);
+
     const tags = [
       `<title>${xmlEscape(title)}</title>`,
       `<meta name="description" content="${escapeAttr(desc)}">`,
@@ -370,7 +382,7 @@ export default defineConfig(async ({ mode }) => {
       `<meta property="og:type" content="${escapeAttr(ogType)}">`,
       `<meta property="og:site_name" content="TrendNest99">`,
       `<meta property="og:title" content="${escapeAttr(title)}">`,
-      `<meta property="og:description" content="${escapeAttr(desc)}">`,
+      `<meta property="og:description" content="${escapeAttr(socialDesc)}">`,
       `<meta property="og:url" content="${escapeAttr(canonicalUrl)}">`,
       ogImage ? `<meta property="og:image" content="${escapeAttr(String(ogImage))}">` : "",
       ogImage === `${CANONICAL_BASE}/og-share.jpg`
@@ -380,7 +392,7 @@ export default defineConfig(async ({ mode }) => {
           : "",
       `<meta name="twitter:card" content="summary_large_image">`,
       `<meta name="twitter:title" content="${escapeAttr(title)}">`,
-      `<meta name="twitter:description" content="${escapeAttr(desc)}">`,
+      `<meta name="twitter:description" content="${escapeAttr(socialDesc)}">`,
       ogImage ? `<meta name="twitter:image" content="${escapeAttr(String(ogImage))}">` : "",
       `<script type="application/ld+json">${JSON.stringify(orgJsonLd)}</script>`,
       `<script type="application/ld+json">${JSON.stringify(websiteJsonLd)}</script>`,

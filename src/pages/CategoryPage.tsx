@@ -13,6 +13,7 @@ import {
   SEO_DEFAULT_OG_IMAGE_HEIGHT,
   SEO_DEFAULT_OG_IMAGE_WIDTH,
   clampSeoTitle,
+  clampSocialDescription,
   ensureSeoMetaDescription,
   productCanonicalUrl,
 } from '@/lib/seo';
@@ -138,6 +139,7 @@ export default function CategoryPage() {
     ? `${category.description} Browse ${filtered.length} products online in India at TrendNest99 with secure checkout and fast delivery.`
     : `Browse ${filtered.length} products online in India at TrendNest99. Discover fashion, home essentials, and daily deals with secure checkout.`;
   const desc = ensureSeoMetaDescription(truncate(stripHtml(seoPreset?.description || fallbackDesc), 160), 120, 160);
+  const socialDesc = clampSocialDescription(desc);
   const canonicalUrl = id ? `${CANONICAL_BASE}/category/${encodeURIComponent(id)}` : `${CANONICAL_BASE}/category`;
   const keywords = Array.from(
     new Set([
@@ -200,7 +202,7 @@ export default function CategoryPage() {
         <meta property="og:type" content="website" />
         <meta property="og:site_name" content={SEO_BRAND_NAME} />
         <meta property="og:title" content={title} />
-        <meta property="og:description" content={desc} />
+        <meta property="og:description" content={socialDesc} />
         <meta property="og:url" content={canonicalUrl} />
         <meta property="og:image" content={DEFAULT_OG_IMAGE} />
         <meta property="og:image:secure_url" content={DEFAULT_OG_IMAGE} />
@@ -210,7 +212,7 @@ export default function CategoryPage() {
         <meta property="og:image:alt" content={`${SEO_BRAND_NAME} — ${categoryName}. Shop now.`} />
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:title" content={title} />
-        <meta name="twitter:description" content={desc} />
+        <meta name="twitter:description" content={socialDesc} />
         <meta name="twitter:image" content={DEFAULT_OG_IMAGE} />
         <meta name="twitter:image:alt" content={`${SEO_BRAND_NAME} — ${categoryName}. Shop now.`} />
         <script type="application/ld+json">{JSON.stringify(breadcrumbJsonLd)}</script>

@@ -11,7 +11,7 @@ import type { Product } from '@/types';
 import { Link } from 'react-router-dom';
 import { type RatingSummary } from '@/lib/reviewsSummaryApi';
 import { toast } from 'sonner';
-import { ensureSeoMetaDescription, productImageAlt, productSeoPath, SEO_BRAND_NAME, SEO_DEFAULT_OG_IMAGE, SEO_DEFAULT_OG_IMAGE_HEIGHT, SEO_DEFAULT_OG_IMAGE_WIDTH } from '@/lib/seo';
+import { clampSocialDescription, ensureSeoMetaDescription, productImageAlt, productSeoPath, SEO_BRAND_NAME, SEO_DEFAULT_OG_IMAGE, SEO_DEFAULT_OG_IMAGE_HEIGHT, SEO_DEFAULT_OG_IMAGE_WIDTH } from '@/lib/seo';
 import { productDisplayPrice, productDiscountPercent } from '@/lib/productPayment';
 import { usePaymentMethod } from '@/contexts/PaymentMethodContext';
 
@@ -227,6 +227,7 @@ export default function BestDealsPage() {
     120,
     160
   );
+  const socialDesc = clampSocialDescription(desc);
 
   if (showSkeleton) {
     return (
@@ -256,7 +257,7 @@ export default function BestDealsPage() {
         <meta property="og:type" content="website" />
         <meta property="og:site_name" content={SEO_BRAND_NAME} />
         <meta property="og:title" content={title} />
-        <meta property="og:description" content={desc} />
+        <meta property="og:description" content={socialDesc} />
         <meta property="og:url" content={`${CANONICAL_BASE}/best-deals`} />
         <meta property="og:image" content={SEO_DEFAULT_OG_IMAGE} />
         <meta property="og:image:width" content={String(SEO_DEFAULT_OG_IMAGE_WIDTH)} />
@@ -264,7 +265,7 @@ export default function BestDealsPage() {
         <meta property="og:image:alt" content={`${SEO_BRAND_NAME} best deals. Shop now.`} />
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:title" content={title} />
-        <meta name="twitter:description" content={desc} />
+        <meta name="twitter:description" content={socialDesc} />
         <meta name="twitter:image" content={SEO_DEFAULT_OG_IMAGE} />
       </Helmet>
 
