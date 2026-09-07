@@ -83,3 +83,22 @@ export async function patchVendorOrderStatusApi(
   if (!data?.order?.id) throw new Error('Invalid order response');
   return data.order as VendorOrder;
 }
+
+export type AdminVendorOrder = import('@/types').Order & {
+  sellerIds?: string[];
+  sellerNames?: string[];
+};
+
+export async function fetchAdminVendorOrdersApi(): Promise<AdminVendorOrder[]> {
+  const key = typeof window !== 'undefined' ? sessionStorage.getItem('trendnest-admin-api-key') : null;
+  const headers: Record<string, string> = {};
+  if (key) headers['X-Admin-Key'] = key;
+  const res = await fetch(apiUrl('/api/admin/vendor-orders'), {
+    method: 'GET',
+    headers,
+    cache: 'no-store',
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  const data = await res.json();
+  return Array.isArray(data?.orders) ? (data.orders as AdminVendorOrder[]) : [];
+}

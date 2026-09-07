@@ -987,6 +987,10 @@ const CouponSchema = new mongoose.Schema(
     // Restrictions (optional)
     newUsersOnly: { type: Boolean, default: false },
     allowedUserGroups: { type: [String], default: [] }, // placeholder for future group model
+
+    /** Marketplace: platform coupons vs vendor-created coupons (additive; defaults keep admin flow). */
+    ownerType: { type: String, enum: ['platform', 'vendor'], default: 'platform', index: true },
+    vendorId: { type: String, default: null, index: true },
   },
   { versionKey: false, timestamps: true }
 );
@@ -1204,14 +1208,63 @@ async function validateCouponForCart({ code, subtotal, items, userId, paymentMet
 
   const sub = Number(subtotal);
   if (!Number.isFinite(sub) || sub < 0) return { ok: false, error: 'Invalid cart subtotal' };
-  if (sub < Number(coupon.minOrder || 0)) {
-    return { ok: false, error: `Minimum order ₹${coupon.minOrder || 0} required` };
-  }
 
   const productIds = (items || []).map(i => String(i.productId)).filter(Boolean);
   const uniqIds = [...new Set(productIds)];
   const products = uniqIds.length ? await Product.find({ _id: { $in: uniqIds } }).lean() : [];
   const productById = new Map(products.map(p => [String(p._id), p]));
+
+  const isVendorCoupon = String(coupon.ownerType || 'platform') === 'vendor' && !!coupon.vendorId;
+  const vendorCouponId = isVendorCoupon ? String(coupon.vendorId) : '';
+
+  /** For vendor coupons, discount / min-order apply only to that seller's eligible lines. */
+  let discountBase = sub;
+  if (isVendorCoupon) {
+    const restrictedIds =
+      coupon.scope === 'products' && Array.isArray(coupon.productIds) && coupon.productIds.length
+        ? new Set(coupon.productIds.map((id) => String(id)))
+        : null;
+
+    let eligibleSub = 0;
+    let hasEligible = false;
+    for (const line of items || []) {
+      const p = productById.get(String(line?.productId));
+      if (!p) continue;
+      if (String(p.ownerType || '') !== 'vendor' || String(p.vendorId || '') !== vendorCouponId) continue;
+      if (restrictedIds && !restrictedIds.has(String(p._id))) continue;
+      hasEligible = true;
+      let unit = Number(p.price) || 0;
+      const selectedVariantKey = line?.selectedVariant ? String(line.selectedVariant) : '';
+      const vm = p.variantModel && typeof p.variantModel === 'object' ? p.variantModel : null;
+      if (vm && Array.isArray(vm.items) && selectedVariantKey) {
+        const hit = vm.items.find((it) => String(it?.key) === selectedVariantKey);
+        if (hit) {
+          if (checkoutMethod === 'razorpay' && hit.onlinePrice != null) unit = Number(hit.onlinePrice);
+          else if (checkoutMethod === 'cod' && hit.codPrice != null) unit = Number(hit.codPrice);
+          else unit = Number(hit.price);
+        }
+      } else {
+        if (checkoutMethod === 'razorpay' && p.onlinePrice != null) unit = Number(p.onlinePrice);
+        else if (checkoutMethod === 'cod' && p.codPrice != null) unit = Number(p.codPrice);
+        else unit = Number(p.price);
+      }
+      if (!Number.isFinite(unit) || unit < 0) unit = 0;
+      eligibleSub += unit * Math.max(0, Number(line?.quantity) || 0);
+    }
+    if (!hasEligible) {
+      return { ok: false, error: 'This seller coupon does not apply to items in your cart' };
+    }
+    discountBase = eligibleSub;
+  }
+
+  if (discountBase < Number(coupon.minOrder || 0)) {
+    return {
+      ok: false,
+      error: isVendorCoupon
+        ? `Minimum ₹${coupon.minOrder || 0} on this seller’s items required`
+        : `Minimum order ₹${coupon.minOrder || 0} required`,
+    };
+  }
 
   const cartProductIds = new Set(productIds);
   const cartCategories = new Set(
@@ -1245,7 +1298,7 @@ async function validateCouponForCart({ code, subtotal, items, userId, paymentMet
     if (!ok) return { ok: false, error: 'Coupon does not apply to selected products' };
   }
 
-  if (coupon.scope === 'products') {
+  if (!isVendorCoupon && coupon.scope === 'products') {
     if (!Array.isArray(coupon.productIds) || coupon.productIds.length === 0) {
       return { ok: false, error: 'Coupon is not configured for products' };
     }
@@ -1253,7 +1306,7 @@ async function validateCouponForCart({ code, subtotal, items, userId, paymentMet
     if (!ok) return { ok: false, error: 'Coupon does not apply to selected products' };
   }
 
-  if (coupon.scope === 'categories') {
+  if (!isVendorCoupon && coupon.scope === 'categories') {
     if (!Array.isArray(coupon.categoryIds) || coupon.categoryIds.length === 0) {
       return { ok: false, error: 'Coupon is not configured for categories' };
     }
@@ -1289,7 +1342,7 @@ async function validateCouponForCart({ code, subtotal, items, userId, paymentMet
   const val = Number(coupon.value);
   let discount = 0;
   if (coupon.type === 'percentage') {
-    discount = Math.round((sub * val) / 100);
+    discount = Math.round((discountBase * val) / 100);
   } else if (coupon.type === 'flat') {
     discount = val;
   }
@@ -1298,7 +1351,7 @@ async function validateCouponForCart({ code, subtotal, items, userId, paymentMet
     discount = Math.min(discount, Number(coupon.maxDiscount));
   }
 
-  discount = Math.max(0, Math.min(discount, sub));
+  discount = Math.max(0, Math.min(discount, discountBase));
 
   return {
     ok: true,
@@ -4770,6 +4823,8 @@ app.post('/api/coupons', mongoReady, adminKeyRequired, async (req, res) => {
 
       newUsersOnly: !!body.newUsersOnly,
       allowedUserGroups: parseIdList(body.allowedUserGroups),
+      ownerType: 'platform',
+      vendorId: null,
     });
 
     res.status(201).json(serializeCoupon(coupon));
@@ -5886,6 +5941,178 @@ app.patch('/api/vendor/orders/:orderId', mongoReady, requireAuth, requireApprove
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Failed to update order status' });
+  }
+});
+
+function toDateOrUndefinedSafe(v) {
+  if (v == null || v === '') return undefined;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? undefined : d;
+}
+
+/** Vendor: list / create / update / delete own coupons (scoped to their products). */
+app.get('/api/vendor/coupons', mongoReady, requireAuth, requireApprovedVendor, async (req, res) => {
+  try {
+    const docs = await Coupon.find({ ownerType: 'vendor', vendorId: String(req.vendor._id) })
+      .sort({ createdAt: -1 })
+      .lean();
+    res.json({ coupons: docs.map((d) => serializeCoupon(d)) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to list coupons' });
+  }
+});
+
+app.post('/api/vendor/coupons', mongoReady, requireAuth, requireApprovedVendor, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const code = normalizeCouponCode(body.code);
+    const type = String(body.type || '').trim();
+    if (!code) {
+      res.status(400).json({ error: 'Coupon code is required' });
+      return;
+    }
+    if (!['percentage', 'flat'].includes(type)) {
+      res.status(400).json({ error: 'Coupon type must be percentage or flat' });
+      return;
+    }
+    const value = Number(body.value ?? 0);
+    if (!Number.isFinite(value) || value <= 0) {
+      res.status(400).json({ error: 'Coupon value must be greater than 0' });
+      return;
+    }
+
+    const vendorId = String(req.vendor._id);
+    const myProducts = await Product.find({ ownerType: 'vendor', vendorId }).select({ _id: 1 }).lean();
+    const myIds = new Set(myProducts.map((p) => String(p._id)));
+    let productIds = parseIdList(body.productIds).filter((id) => myIds.has(String(id)));
+    // Empty productIds → applies to all of this vendor's products (handled in validate).
+    const scope = productIds.length ? 'products' : 'cart';
+
+    const paymentMethodScopeRaw = body.paymentMethodScope == null ? '' : String(body.paymentMethodScope).trim().toLowerCase();
+    if (paymentMethodScopeRaw && !isValidCouponPaymentMethodScope(paymentMethodScopeRaw)) {
+      res.status(400).json({ error: 'Invalid coupon payment scope' });
+      return;
+    }
+
+    const coupon = await Coupon.create({
+      code,
+      type,
+      value,
+      maxDiscount: body.maxDiscount != null && body.maxDiscount !== '' ? Number(body.maxDiscount) : undefined,
+      minOrder: Number(body.minOrder ?? 0) || 0,
+      paymentMethodScope: normalizeCouponPaymentMethodScope(paymentMethodScopeRaw || 'both'),
+      scope,
+      productIds,
+      categoryIds: [],
+      applicableSkus: [],
+      startAt: toDateOrUndefinedSafe(body.startAt),
+      endAt: toDateOrUndefinedSafe(body.endAt),
+      isActive: body.isActive !== false,
+      usageTotalLimit: body.usageTotalLimit != null && body.usageTotalLimit !== '' ? Number(body.usageTotalLimit) : undefined,
+      usagePerUserLimit: body.usagePerUserLimit != null && body.usagePerUserLimit !== '' ? Number(body.usagePerUserLimit) : undefined,
+      newUsersOnly: false,
+      allowedUserGroups: [],
+      ownerType: 'vendor',
+      vendorId,
+    });
+
+    res.status(201).json({ coupon: serializeCoupon(coupon) });
+  } catch (e) {
+    console.error(e);
+    if (e && e.code === 11000) {
+      res.status(409).json({ error: 'Coupon code already exists' });
+      return;
+    }
+    res.status(400).json({ error: e instanceof Error ? e.message : 'Failed to create coupon' });
+  }
+});
+
+app.patch('/api/vendor/coupons/:id', mongoReady, requireAuth, requireApprovedVendor, async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim();
+    const vendorId = String(req.vendor._id);
+    const existing = await Coupon.findById(id).lean();
+    if (!existing || existing.ownerType !== 'vendor' || String(existing.vendorId) !== vendorId) {
+      res.status(404).json({ error: 'Coupon not found' });
+      return;
+    }
+
+    const body = req.body || {};
+    const $set = {};
+    if (body.code != null) $set.code = normalizeCouponCode(body.code);
+    if (body.type != null) {
+      const type = String(body.type).trim();
+      if (!['percentage', 'flat'].includes(type)) {
+        res.status(400).json({ error: 'Invalid type' });
+        return;
+      }
+      $set.type = type;
+    }
+    if (body.value != null) $set.value = Number(body.value);
+    if (body.maxDiscount !== undefined) {
+      $set.maxDiscount = body.maxDiscount === '' || body.maxDiscount == null ? undefined : Number(body.maxDiscount);
+    }
+    if (body.minOrder != null) $set.minOrder = Number(body.minOrder) || 0;
+    if (body.paymentMethodScope != null) {
+      const paymentScope = String(body.paymentMethodScope).trim().toLowerCase();
+      if (!isValidCouponPaymentMethodScope(paymentScope)) {
+        res.status(400).json({ error: 'Invalid coupon payment scope' });
+        return;
+      }
+      $set.paymentMethodScope = paymentScope;
+    }
+    if (body.productIds != null) {
+      const myProducts = await Product.find({ ownerType: 'vendor', vendorId }).select({ _id: 1 }).lean();
+      const myIds = new Set(myProducts.map((p) => String(p._id)));
+      const productIds = parseIdList(body.productIds).filter((pid) => myIds.has(String(pid)));
+      $set.productIds = productIds;
+      $set.scope = productIds.length ? 'products' : 'cart';
+    }
+    if (body.startAt !== undefined) $set.startAt = toDateOrUndefinedSafe(body.startAt);
+    if (body.endAt !== undefined) $set.endAt = toDateOrUndefinedSafe(body.endAt);
+    if (body.isActive != null) $set.isActive = !!body.isActive;
+    if (body.usageTotalLimit !== undefined) {
+      $set.usageTotalLimit =
+        body.usageTotalLimit === '' || body.usageTotalLimit == null ? undefined : Number(body.usageTotalLimit);
+    }
+    if (body.usagePerUserLimit !== undefined) {
+      $set.usagePerUserLimit =
+        body.usagePerUserLimit === '' || body.usagePerUserLimit == null ? undefined : Number(body.usagePerUserLimit);
+    }
+
+    if (!Object.keys($set).length) {
+      res.status(400).json({ error: 'No updates provided' });
+      return;
+    }
+
+    await Coupon.updateOne({ _id: id }, { $set });
+    const next = await Coupon.findById(id).lean();
+    res.json({ coupon: serializeCoupon(next) });
+  } catch (e) {
+    console.error(e);
+    if (e && e.code === 11000) {
+      res.status(409).json({ error: 'Coupon code already exists' });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to update coupon' });
+  }
+});
+
+app.delete('/api/vendor/coupons/:id', mongoReady, requireAuth, requireApprovedVendor, async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim();
+    const vendorId = String(req.vendor._id);
+    const existing = await Coupon.findById(id).lean();
+    if (!existing || existing.ownerType !== 'vendor' || String(existing.vendorId) !== vendorId) {
+      res.status(404).json({ error: 'Coupon not found' });
+      return;
+    }
+    await Coupon.deleteOne({ _id: id });
+    res.status(204).end();
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to delete coupon' });
   }
 });
 
@@ -9488,6 +9715,60 @@ app.get('/api/admin/orders', mongoReady, adminKeyRequired, async (_req, res) => 
   } catch (e) {
     console.error(e);
     if (!res.writableEnded) res.end(JSON.stringify({ error: 'Failed to list orders' }));
+  }
+});
+
+/** Admin: orders that include at least one vendor-owned line (separate from main Orders page). */
+app.get('/api/admin/vendor-orders', mongoReady, adminKeyRequired, async (_req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    const vendorProducts = await Product.find({ ownerType: 'vendor' }).select({ _id: 1, vendorId: 1 }).lean();
+    const vendorProductIds = vendorProducts.map((p) => String(p._id));
+    const productToVendor = new Map(
+      vendorProducts.map((p) => [String(p._id), p.vendorId ? String(p.vendorId) : ''])
+    );
+
+    const or = [{ 'items.vendorId': { $exists: true, $nin: [null, ''] } }];
+    if (vendorProductIds.length) or.push({ 'items.productId': { $in: vendorProductIds } });
+
+    const docs = await Order.find({ $or: or }).sort({ createdAt: -1 }).limit(300).lean();
+
+    const vendorIds = new Set();
+    for (const d of docs) {
+      for (const it of d.items || []) {
+        if (it?.vendorId) vendorIds.add(String(it.vendorId));
+        const mapped = productToVendor.get(String(it?.productId || ''));
+        if (mapped) vendorIds.add(mapped);
+      }
+    }
+    const vendors = vendorIds.size
+      ? await Vendor.find({ _id: { $in: [...vendorIds] } }).select({ _id: 1, storeName: 1 }).lean()
+      : [];
+    const nameById = new Map(vendors.map((v) => [String(v._id), String(v.storeName || '')]));
+
+    const orders = (docs || []).map((d) => {
+      const base = serializeOrder(d);
+      const sellerNames = new Set();
+      const sellerIds = new Set();
+      for (const it of d.items || []) {
+        let vid = it?.vendorId ? String(it.vendorId) : '';
+        if (!vid) vid = productToVendor.get(String(it?.productId || '')) || '';
+        if (!vid) continue;
+        sellerIds.add(vid);
+        const name = nameById.get(vid);
+        if (name) sellerNames.add(name);
+      }
+      return {
+        ...base,
+        sellerIds: [...sellerIds],
+        sellerNames: [...sellerNames],
+      };
+    });
+
+    res.json({ orders });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to list vendor orders' });
   }
 });
 

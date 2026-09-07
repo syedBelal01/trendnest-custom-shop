@@ -1,6 +1,6 @@
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { LayoutDashboard, Package, PlusCircle, ShoppingBag, Store } from 'lucide-react';
+import { LayoutDashboard, Package, PlusCircle, ShoppingBag, Store, Tag } from 'lucide-react';
 import { toast } from 'sonner';
 import UserGuard from '@/components/UserGuard';
 import { useAuth } from '@/contexts/AuthContext';
@@ -11,6 +11,7 @@ const links = [
   { to: '/vendor/products', label: 'Products', icon: Package, end: true },
   { to: '/vendor/products/new', label: 'Add Product', icon: PlusCircle, end: true },
   { to: '/vendor/orders', label: 'Orders', icon: ShoppingBag, end: true },
+  { to: '/vendor/coupons', label: 'Coupons', icon: Tag, end: true },
 ];
 
 function VendorShell() {

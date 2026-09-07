@@ -1,12 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useOrders } from '@/contexts/OrdersContext';
-import { Order, OrderLineSnapshot, OrderStatus } from '@/types';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { downloadOrderInvoicePdf, syncOrderShippingStatusAdmin } from '@/lib/ordersApi';
-import { fetchAdminVendorOrdersApi } from '@/lib/vendorOrdersApi';
-import { Button } from '@/components/ui/button';
 import { FileDown } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  downloadOrderInvoicePdf,
+  getAdminApiKey,
+  patchOrderStatusApi,
+  syncOrderShippingStatusAdmin,
+} from '@/lib/ordersApi';
+import { fetchAdminVendorOrdersApi, type AdminVendorOrder } from '@/lib/vendorOrdersApi';
+import type { OrderLineSnapshot, OrderStatus } from '@/types';
 
 const statusColors: Record<OrderStatus, string> = {
   pending: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200',
@@ -28,46 +32,37 @@ function itemDetail(i: OrderLineSnapshot): string {
   return parts.join(' · ');
 }
 
-/** Vendor marketplace orders belong on Admin → Vendor Orders, not this list. */
-function isVendorMarketplaceOrder(o: Order, vendorOrderIds: Set<string>): boolean {
-  if (vendorOrderIds.has(String(o.id))) return true;
-  return (o.items || []).some((it) => {
-    if (it.vendorId) return true;
-    const pid = String(it.productId || '');
-    // Vendor product IDs are created as `vp{timestamp}-…`
-    if (pid.startsWith('vp')) return true;
-    return false;
-  });
-}
-
-export default function AdminOrders() {
-  const { orders, adminKeySet, updateOrderStatus, ordersLoading, refreshOrders } = useOrders();
+export default function AdminVendorOrders() {
+  const adminKeySet = !!getAdminApiKey();
+  const [orders, setOrders] = useState<AdminVendorOrder[]>([]);
+  const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState<string>('all');
   const [pdfBusy, setPdfBusy] = useState<string | null>(null);
   const [syncBusy, setSyncBusy] = useState<string | null>(null);
-  const [vendorOrderIds, setVendorOrderIds] = useState<Set<string>>(new Set());
+
+  const load = useCallback(async () => {
+    if (!getAdminApiKey()) return;
+    setLoading(true);
+    try {
+      const list = await fetchAdminVendorOrdersApi();
+      setOrders(list);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to load vendor orders');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    if (!adminKeySet) {
-      setVendorOrderIds(new Set());
-      return;
-    }
-    let cancelled = false;
-    void fetchAdminVendorOrdersApi()
-      .then((list) => {
-        if (!cancelled) setVendorOrderIds(new Set(list.map((o) => String(o.id))));
-      })
-      .catch(() => {
-        /* local heuristics below still apply */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [adminKeySet, orders]);
+    void load();
+  }, [load]);
 
   const updateStatus = async (id: string, status: OrderStatus) => {
     try {
-      await updateOrderStatus(id, status);
+      const updated = await patchOrderStatusApi(id, status);
+      setOrders((prev) =>
+        prev.map((o) => (o.id === id ? { ...o, ...updated, sellerNames: o.sellerNames, sellerIds: o.sellerIds } : o))
+      );
       toast.success(`Order ${id} → ${status}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Update failed');
@@ -90,8 +85,10 @@ export default function AdminOrders() {
     setSyncBusy(id);
     try {
       const updated = await syncOrderShippingStatusAdmin(id);
+      setOrders((prev) =>
+        prev.map((o) => (o.id === id ? { ...o, ...updated, sellerNames: o.sellerNames, sellerIds: o.sellerIds } : o))
+      );
       toast.success(`Synced: ${updated.status}`);
-      await refreshOrders();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Sync failed');
     } finally {
@@ -99,17 +96,13 @@ export default function AdminOrders() {
     }
   };
 
-  const platformOrders = useMemo(
-    () => orders.filter((o) => !isVendorMarketplaceOrder(o, vendorOrderIds)),
-    [orders, vendorOrderIds]
-  );
-  const filtered = filter === 'all' ? platformOrders : platformOrders.filter((o) => o.status === filter);
+  const filtered = filter === 'all' ? orders : orders.filter((o) => o.status === filter);
 
   if (!adminKeySet) {
     return (
       <div>
-        <h1 className="text-2xl font-bold mb-6">Orders</h1>
-        <p className="text-muted-foreground">Set the admin API key above to load orders from the server.</p>
+        <h1 className="text-2xl font-bold mb-6">Vendor Orders</h1>
+        <p className="text-muted-foreground">Set the admin API key above to load vendor orders.</p>
       </div>
     );
   }
@@ -118,26 +111,34 @@ export default function AdminOrders() {
     <div>
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold">Orders</h1>
+          <h1 className="text-2xl font-bold">Vendor Orders</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Platform orders only. Vendor orders are under Vendor Orders.
+            Orders that include marketplace vendor products. Main Orders page is unchanged.
           </p>
         </div>
-        <Select value={filter} onValueChange={setFilter}>
-          <SelectTrigger className="w-40">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="packed">Packed</SelectItem>
-            <SelectItem value="shipped">Shipped</SelectItem>
-            <SelectItem value="delivered">Delivered</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
+            {loading ? 'Loading…' : 'Refresh'}
+          </Button>
+          <Select value={filter} onValueChange={setFilter}>
+            <SelectTrigger className="w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All</SelectItem>
+              <SelectItem value="pending">Pending</SelectItem>
+              <SelectItem value="confirmed">Confirmed</SelectItem>
+              <SelectItem value="packed">Packed</SelectItem>
+              <SelectItem value="shipped">Shipped</SelectItem>
+              <SelectItem value="delivered">Delivered</SelectItem>
+              <SelectItem value="cancelled">Cancelled</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
-      {ordersLoading && orders.length === 0 ? (
-        <p className="text-muted-foreground py-10">Loading orders…</p>
+
+      {loading && orders.length === 0 ? (
+        <p className="text-muted-foreground py-10">Loading vendor orders…</p>
       ) : (
         <div className="space-y-4">
           {filtered.map((o) => (
@@ -148,17 +149,9 @@ export default function AdminOrders() {
                   <span className={`inline-block px-2 py-0.5 text-xs rounded-full font-medium ${statusColors[o.status]}`}>
                     {o.status}
                   </span>
-                  {o.hasCustomPrint && (
-                    <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full">Custom</span>
-                  )}
-                  {o.emailError && (
-                    <span className="text-xs text-destructive" title={o.emailError}>
-                      Email issue
-                    </span>
-                  )}
-                  {o.needsShippingReview && (
-                    <span className="text-xs bg-orange-100 text-orange-900 dark:bg-orange-950/50 dark:text-orange-200 px-2 py-0.5 rounded-full font-medium">
-                      Shipping review
+                  {(o.sellerNames?.length || 0) > 0 && (
+                    <span className="text-xs bg-violet-100 text-violet-900 dark:bg-violet-950/50 dark:text-violet-200 px-2 py-0.5 rounded-full font-medium">
+                      Sold by: {o.sellerNames.join(', ')}
                     </span>
                   )}
                   {o.paymentPending && (
@@ -194,9 +187,11 @@ export default function AdminOrders() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="pending">Pending</SelectItem>
+                      <SelectItem value="confirmed">Confirmed</SelectItem>
                       <SelectItem value="packed">Packed</SelectItem>
                       <SelectItem value="shipped">Shipped</SelectItem>
                       <SelectItem value="delivered">Delivered</SelectItem>
+                      <SelectItem value="cancelled">Cancelled</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -223,23 +218,11 @@ export default function AdminOrders() {
                     );
                   })}
                 </ul>
-                <p className="text-muted-foreground pt-1">
-                  Subtotal ₹{o.subtotal}
-                  {o.discount > 0 && ` · Discount -₹${o.discount}${o.couponCode ? ` (${o.couponCode})` : ''}`}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Shipping (internal): ₹{Number(o.actualShippingCharge ?? 0).toFixed(0)}
-                  {o.goodsTotal != null
-                    ? ` · Profit: ₹${Math.max(0, Math.round((Number(o.goodsTotal) || 0) - (Number(o.actualShippingCharge) || 0)))}`
-                    : ''}
-                </p>
-                <p className="font-semibold">Total: ₹{o.total}</p>
+                <p className="font-semibold pt-1">Total: ₹{o.total}</p>
                 {(o.paymentMethod || o.paymentStatus) && (
                   <p className="text-xs text-muted-foreground">
                     Payment: {o.paymentMethod === 'razorpay' ? 'Online' : o.paymentMethod === 'cod' ? 'COD' : '—'}
                     {o.paymentStatus ? ` · ${o.paymentStatus}` : ''}
-                    {o.amountDue != null && o.amountDue > 0.005 ? ` · Due ₹${o.amountDue}` : ''}
-                    {o.amountPaid != null && o.amountPaid > 0 ? ` · Paid ₹${o.amountPaid}` : ''}
                   </p>
                 )}
                 {o.createdAt && (
@@ -248,8 +231,8 @@ export default function AdminOrders() {
               </div>
             </div>
           ))}
-          {filtered.length === 0 && !ordersLoading && (
-            <p className="text-center text-muted-foreground py-10">No orders found.</p>
+          {filtered.length === 0 && !loading && (
+            <p className="text-center text-muted-foreground py-10">No vendor orders found.</p>
           )}
         </div>
       )}

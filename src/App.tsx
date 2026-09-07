@@ -25,6 +25,7 @@ import AdminProducts from "@/pages/admin/AdminProducts";
 import AdminProductDraftsPage from "@/pages/admin/AdminProductDraftsPage";
 import AdminProductWizardPage from "@/pages/admin/AdminProductWizardPage";
 import AdminOrders from "@/pages/admin/AdminOrders";
+import AdminVendorOrders from "@/pages/admin/AdminVendorOrders";
 import AdminReturns from "@/pages/admin/AdminReturns";
 import AdminCoupons from "@/pages/admin/AdminCoupons";
 import AdminCustomPrints from "@/pages/admin/AdminCustomPrints";
@@ -51,6 +52,7 @@ import VendorDashboardPage from "@/pages/vendor/VendorDashboardPage";
 import VendorProductsPage from "@/pages/vendor/VendorProductsPage";
 import VendorProductEditPage from "@/pages/vendor/VendorProductEditPage";
 import VendorOrdersPage from "@/pages/vendor/VendorOrdersPage";
+import VendorCouponsPage from "@/pages/vendor/VendorCouponsPage";
 import NotFound from "@/pages/NotFound";
 import ScrollToTop from "@/components/ScrollToTop";
 import { AuthProvider } from "@/contexts/AuthContext";
@@ -166,6 +168,7 @@ const App = () => (
                   <Route path="products" element={<VendorProductsPage />} />
                   <Route path="products/:productId" element={<VendorProductEditPage />} />
                   <Route path="orders" element={<VendorOrdersPage />} />
+                  <Route path="coupons" element={<VendorCouponsPage />} />
                 </Route>
                 <Route path="/admin" element={<AdminLayout />}>
                   <Route index element={<AdminDashboard />} />
@@ -175,6 +178,7 @@ const App = () => (
                   <Route path="products/drafts" element={<AdminProductDraftsPage />} />
                   <Route path="products/draft/:draftId/step/:step" element={<AdminProductWizardPage />} />
                   <Route path="orders" element={<AdminOrders />} />
+                  <Route path="vendor-orders" element={<AdminVendorOrders />} />
                   <Route path="returns" element={<AdminReturns />} />
                   <Route path="coupons" element={<AdminCoupons />} />
                   <Route path="custom-prints" element={<AdminCustomPrints />} />

@@ -279,6 +279,8 @@ export interface OrderLineSnapshot {
   customDesignUrl?: string;
   customDesignName?: string;
   customProductType?: string;
+  /** Present when the line belongs to a marketplace vendor listing. */
+  vendorId?: string;
 }
 
 export interface Order {
@@ -397,6 +399,8 @@ export interface Coupon {
   allowedUserGroups?: string[];
   /** Coupon applicability by checkout payment method; defaults to both for legacy coupons. */
   paymentMethodScope?: CouponPaymentMethodScope;
+  ownerType?: 'platform' | 'vendor';
+  vendorId?: string | null;
 }
 
 export type CouponPaymentMethodScope = 'online' | 'cod' | 'both';
