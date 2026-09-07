@@ -120,6 +120,15 @@ export interface Product {
   codPrice?: number;
   /** Which checkout payment methods are allowed for this product. Defaults to both. */
   paymentMode?: 'both' | 'online' | 'cod';
+  /** Marketplace ownership (platform = your catalog). */
+  ownerType?: 'platform' | 'vendor';
+  vendorId?: string | null;
+  approvalStatus?: 'draft' | 'submitted' | 'under_review' | 'approved' | 'rejected' | 'published';
+  rejectionReason?: string;
+  /** Public seller display name for vendor-owned products. */
+  sellerName?: string;
+  /** Alias of sellerName for storefront labels ("Sold by …"). */
+  soldBy?: string;
   /** Variant combinations model (new). Storefront prefers this when present. */
   variantModel?: {
     types: Array<{ name: string; values: string[] }>;

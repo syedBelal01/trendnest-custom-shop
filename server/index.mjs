@@ -475,6 +475,16 @@ const ProductSchema = new mongoose.Schema(
     specifications: { type: [ProductSpecificationSchema], default: [] },
     /** New variants model (combinations with per-variant pricing/stock/SKU). */
     variantModel: { type: Object, default: undefined },
+    /** Marketplace ownership (additive; existing products default to platform). */
+    ownerType: { type: String, enum: ['platform', 'vendor'], default: 'platform', index: true },
+    vendorId: { type: String, default: null, index: true },
+    approvalStatus: {
+      type: String,
+      enum: ['draft', 'submitted', 'under_review', 'approved', 'rejected', 'published'],
+      default: undefined,
+      index: true,
+    },
+    rejectionReason: { type: String, default: '' },
     stock: { type: Number, default: 0 },
     rating: { type: Number, default: 4 },
     reviews: { type: [ProductEmbeddedReviewSchema], default: [] },
@@ -644,6 +654,83 @@ const ClientAuthTokenSchema = new mongoose.Schema(
 const User = mongoose.model('User', UserSchema);
 const OtpChallenge = mongoose.model('OtpChallenge', OtpChallengeSchema);
 const ClientAuthToken = mongoose.model('ClientAuthToken', ClientAuthTokenSchema);
+
+// --- Vendors (marketplace Phase 0: apply / approve; selling comes later) ---
+const VendorSchema = new mongoose.Schema(
+  {
+    _id: { type: String, required: true },
+    userId: { type: String, required: true, unique: true, index: true },
+    storeName: { type: String, required: true, trim: true },
+    contactName: { type: String, default: '' },
+    contactEmail: { type: String, default: '' },
+    contactPhone: { type: String, default: '' },
+    address: { type: String, default: '' },
+    city: { type: String, default: '' },
+    state: { type: String, default: '' },
+    pincode: { type: String, default: '' },
+    gstin: { type: String, default: '' },
+    pan: { type: String, default: '' },
+    bankAccountHolder: { type: String, default: '' },
+    bankAccountNumber: { type: String, default: '' },
+    bankIfsc: { type: String, default: '' },
+    bankName: { type: String, default: '' },
+    status: {
+      type: String,
+      required: true,
+      enum: ['pending', 'approved', 'rejected', 'suspended'],
+      default: 'pending',
+      index: true,
+    },
+    commissionPercent: { type: Number, default: 10, min: 0, max: 100 },
+    adminNotes: { type: String, default: '' },
+    rejectionReason: { type: String, default: '' },
+    reviewedAt: { type: Date, default: null },
+    reviewedBy: { type: String, default: '' },
+  },
+  { versionKey: false, timestamps: true, collection: 'vendors' }
+);
+
+const Vendor = mongoose.model('Vendor', VendorSchema);
+
+function maskBankAccount(num) {
+  const s = String(num || '').replace(/\s+/g, '');
+  if (s.length < 4) return s ? '****' : '';
+  return `${'*'.repeat(Math.max(0, s.length - 4))}${s.slice(-4)}`;
+}
+
+function serializeVendor(doc, { includeSensitive = false } = {}) {
+  if (!doc) return null;
+  const base = {
+    id: doc._id,
+    userId: doc.userId,
+    storeName: doc.storeName,
+    contactName: doc.contactName || '',
+    contactEmail: doc.contactEmail || '',
+    contactPhone: doc.contactPhone || '',
+    address: doc.address || '',
+    city: doc.city || '',
+    state: doc.state || '',
+    pincode: doc.pincode || '',
+    gstin: doc.gstin || '',
+    pan: includeSensitive ? (doc.pan || '') : (doc.pan ? `${String(doc.pan).slice(0, 2)}****${String(doc.pan).slice(-2)}` : ''),
+    bankAccountHolder: doc.bankAccountHolder || '',
+    bankAccountNumberMasked: maskBankAccount(doc.bankAccountNumber),
+    bankIfsc: doc.bankIfsc || '',
+    bankName: doc.bankName || '',
+    status: doc.status,
+    commissionPercent: Number(doc.commissionPercent) || 10,
+    rejectionReason: doc.rejectionReason || '',
+    reviewedAt: doc.reviewedAt || null,
+    createdAt: doc.createdAt || null,
+    updatedAt: doc.updatedAt || null,
+  };
+  if (includeSensitive) {
+    base.bankAccountNumber = doc.bankAccountNumber || '';
+    base.pan = doc.pan || '';
+    base.adminNotes = doc.adminNotes || '';
+  }
+  return base;
+}
 
 // --- Disposable email domain blocklist ---
 const DisposableDomainSchema = new mongoose.Schema(
@@ -1323,6 +1410,8 @@ const OrderLineSchema = new mongoose.Schema(
     customDesignUrl: String,
     customDesignName: String,
     customProductType: String,
+    /** Marketplace: set when line belongs to a vendor listing (additive; platform lines omit). */
+    vendorId: { type: String, default: undefined, index: true },
   },
   { _id: false }
 );
@@ -1544,6 +1633,42 @@ function serializeProductDoc(doc) {
     o.stock = Math.max(0, Math.floor(Number(o.stock) || 0));
   }
   return o;
+}
+
+/** Attach public seller display fields for vendor-owned products (batch). */
+async function attachSellerNamesToProducts(docs) {
+  const list = Array.isArray(docs) ? docs : [];
+  const vendorIds = [
+    ...new Set(
+      list
+        .filter((d) => d && String(d.ownerType || '') === 'vendor' && d.vendorId)
+        .map((d) => String(d.vendorId).trim())
+        .filter(Boolean)
+    ),
+  ];
+  const nameById = new Map();
+  if (vendorIds.length) {
+    const vendors = await Vendor.find({ _id: { $in: vendorIds } })
+      .select({ _id: 1, storeName: 1, status: 1 })
+      .lean();
+    for (const v of vendors) {
+      if (v?.status === 'approved' && v.storeName) {
+        nameById.set(String(v._id), String(v.storeName).trim());
+      }
+    }
+  }
+  return list.map((d) => {
+    const o = serializeProductDoc(d);
+    if (!o) return null;
+    if (String(o.ownerType || '') === 'vendor' && o.vendorId) {
+      const sellerName = nameById.get(String(o.vendorId)) || '';
+      if (sellerName) {
+        o.sellerName = sellerName;
+        o.soldBy = sellerName;
+      }
+    }
+    return o;
+  }).filter(Boolean);
 }
 
 function serializeProductUrgencySetting(doc) {
@@ -5363,6 +5488,570 @@ app.patch('/api/me/profile', mongoReady, requireAuth, async (req, res) => {
   }
 });
 
+// --- Vendor marketplace (Phase 0) ---
+app.get('/api/me/vendor', mongoReady, requireAuth, async (req, res) => {
+  try {
+    const doc = await Vendor.findOne({ userId: req.session.userId }).lean();
+    res.json({ vendor: doc ? serializeVendor(doc, { includeSensitive: true }) : null });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to load vendor profile' });
+  }
+});
+
+app.post('/api/vendors/apply', mongoReady, requireAuth, async (req, res) => {
+  try {
+    const userId = String(req.session.userId);
+    const existing = await Vendor.findOne({ userId }).lean();
+    if (existing && existing.status !== 'rejected') {
+      res.status(409).json({
+        error: existing.status === 'pending'
+          ? 'You already have a pending vendor application.'
+          : 'You already have a vendor account.',
+        vendor: serializeVendor(existing, { includeSensitive: true }),
+      });
+      return;
+    }
+
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const storeName = String(body.storeName ?? '').trim();
+    if (!storeName || storeName.length < 2) {
+      res.status(400).json({ error: 'Store name is required' });
+      return;
+    }
+
+    let contactEmail = String(body.contactEmail ?? '').trim().toLowerCase();
+    if (contactEmail) {
+      try {
+        const normalized = normalizeEmailOrThrow(contactEmail);
+        contactEmail = String(normalized?.normalizedEmail || contactEmail).trim().toLowerCase();
+      } catch {
+        res.status(400).json({ error: 'Invalid contact email' });
+        return;
+      }
+    }
+
+    let contactPhone = String(body.contactPhone ?? '').trim();
+    if (contactPhone) {
+      try {
+        contactPhone = normalizeIndianMobileOrThrow(contactPhone);
+      } catch (e) {
+        res.status(400).json({ error: e instanceof Error ? e.message : 'Invalid phone number' });
+        return;
+      }
+    }
+
+    const payload = {
+      storeName,
+      contactName: String(body.contactName ?? '').trim(),
+      contactEmail,
+      contactPhone,
+      address: String(body.address ?? '').trim(),
+      city: String(body.city ?? '').trim(),
+      state: String(body.state ?? '').trim(),
+      pincode: String(body.pincode ?? '').trim().slice(0, 12),
+      gstin: String(body.gstin ?? '').trim().toUpperCase(),
+      pan: String(body.pan ?? '').trim().toUpperCase(),
+      bankAccountHolder: String(body.bankAccountHolder ?? '').trim(),
+      bankAccountNumber: String(body.bankAccountNumber ?? '').replace(/\s+/g, ''),
+      bankIfsc: String(body.bankIfsc ?? '').trim().toUpperCase(),
+      bankName: String(body.bankName ?? '').trim(),
+      status: 'pending',
+      rejectionReason: '',
+      reviewedAt: null,
+      reviewedBy: '',
+    };
+
+    let doc;
+    if (existing && existing.status === 'rejected') {
+      await Vendor.updateOne({ _id: existing._id }, { $set: payload });
+      doc = await Vendor.findById(existing._id).lean();
+    } else {
+      const id = `v${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      doc = await Vendor.create({ _id: id, userId, ...payload, commissionPercent: 10 });
+      doc = doc.toObject ? doc.toObject() : doc;
+    }
+
+    res.status(201).json({ vendor: serializeVendor(doc, { includeSensitive: true }) });
+  } catch (e) {
+    console.error(e);
+    if (e?.code === 11000) {
+      res.status(409).json({ error: 'Vendor application already exists for this account' });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to submit vendor application' });
+  }
+});
+
+app.get('/api/admin/vendors', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    const status = req.query?.status ? String(req.query.status).trim() : '';
+    const q = {};
+    if (status && ['pending', 'approved', 'rejected', 'suspended'].includes(status)) {
+      q.status = status;
+    }
+    const docs = await Vendor.find(q).sort({ createdAt: -1 }).limit(200).lean();
+    res.json({ vendors: docs.map((d) => serializeVendor(d, { includeSensitive: true })) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to list vendors' });
+  }
+});
+
+app.patch('/api/admin/vendors/:vendorId', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    const vendorId = String(req.params.vendorId || '').trim();
+    const doc = await Vendor.findById(vendorId).lean();
+    if (!doc) {
+      res.status(404).json({ error: 'Vendor not found' });
+      return;
+    }
+
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const $set = {};
+
+    if (body.status != null) {
+      const status = String(body.status).trim();
+      if (!['pending', 'approved', 'rejected', 'suspended'].includes(status)) {
+        res.status(400).json({ error: 'Invalid status' });
+        return;
+      }
+      $set.status = status;
+      $set.reviewedAt = new Date();
+      $set.reviewedBy = 'admin';
+      if (status === 'rejected') {
+        $set.rejectionReason = String(body.rejectionReason ?? body.adminNotes ?? '').trim() || 'Application rejected';
+      }
+      if (status === 'approved') {
+        $set.rejectionReason = '';
+      }
+    }
+
+    if (body.commissionPercent != null && body.commissionPercent !== '') {
+      const n = Number(body.commissionPercent);
+      if (!Number.isFinite(n) || n < 0 || n > 100) {
+        res.status(400).json({ error: 'commissionPercent must be 0–100' });
+        return;
+      }
+      $set.commissionPercent = n;
+    }
+
+    if (body.adminNotes != null) $set.adminNotes = String(body.adminNotes).trim();
+    if (body.rejectionReason != null) $set.rejectionReason = String(body.rejectionReason).trim();
+
+    if (!Object.keys($set).length) {
+      res.status(400).json({ error: 'No updates provided' });
+      return;
+    }
+
+    await Vendor.updateOne({ _id: vendorId }, { $set });
+    const next = await Vendor.findById(vendorId).lean();
+    res.json({ vendor: serializeVendor(next, { includeSensitive: true }) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to update vendor' });
+  }
+});
+
+async function requireApprovedVendor(req, res, next) {
+  try {
+    if (!req.session?.userId) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+    const vendor = await Vendor.findOne({ userId: req.session.userId }).lean();
+    if (!vendor) {
+      res.status(403).json({ error: 'Vendor application required' });
+      return;
+    }
+    if (vendor.status !== 'approved') {
+      res.status(403).json({ error: `Vendor status is ${vendor.status}; selling is not enabled` });
+      return;
+    }
+    req.vendor = vendor;
+    next();
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to verify vendor' });
+  }
+}
+
+function forceCodEqualsPrice(price, _codPrice) {
+  const n = Number(price);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+app.get('/api/vendor/products', mongoReady, requireAuth, requireApprovedVendor, async (req, res) => {
+  try {
+    const docs = await Product.find({ vendorId: req.vendor._id, ownerType: 'vendor' })
+      .sort({ _id: -1 })
+      .lean();
+    res.json({ products: docs.map((d) => serializeProductDoc(d)) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to list vendor products' });
+  }
+});
+
+function lineBelongsToVendor(it, vendorId, vendorProductIdSet) {
+  const vid = it?.vendorId != null ? String(it.vendorId).trim() : '';
+  if (vid && vid === String(vendorId)) return true;
+  return vendorProductIdSet.has(String(it?.productId || ''));
+}
+
+function serializeVendorOrderView(doc, vendorId, vendorProductIdSet) {
+  if (!doc) return null;
+  const o = doc.toObject ? doc.toObject({ flattenMaps: true, versionKey: false }) : { ...doc };
+  const allItems = Array.isArray(o.items) ? o.items : [];
+  const items = allItems.filter((it) => lineBelongsToVendor(it, vendorId, vendorProductIdSet));
+  if (!items.length) return null;
+
+  const ownsEntireOrder =
+    allItems.length > 0 && allItems.every((it) => lineBelongsToVendor(it, vendorId, vendorProductIdSet));
+
+  const goodsTotal = items.reduce(
+    (acc, it) => acc + (Number(it.price) || 0) * (Number(it.quantity) || 0),
+    0
+  );
+  const customer = o.customer && typeof o.customer === 'object' ? o.customer : {};
+  return {
+    id: o._id,
+    status: o.status,
+    paymentMethod: o.paymentMethod,
+    paymentStatus: o.paymentStatus,
+    amountDue: o.amountDue,
+    createdAt: o.createdAt instanceof Date ? o.createdAt.toISOString() : o.createdAt,
+    customer: {
+      name: customer.name || '',
+      phone: customer.phone || '',
+      email: customer.email || '',
+      address: customer.address || '',
+      city: customer.city || '',
+      state: customer.state || '',
+      pincode: customer.pincode || '',
+    },
+    items: items.map((it) => ({
+      productId: it.productId,
+      sku: it.sku || '',
+      name: it.name,
+      price: it.price,
+      quantity: it.quantity,
+      selectedVariant: it.selectedVariant || '',
+      selectedSize: it.selectedSize || '',
+    })),
+    goodsTotal,
+    ownsEntireOrder,
+    canUpdateStatus: ownsEntireOrder,
+  };
+}
+
+/** Vendor: orders that include this seller's products (customer name + address visible). */
+app.get('/api/vendor/orders', mongoReady, requireAuth, requireApprovedVendor, async (req, res) => {
+  try {
+    const vendorId = String(req.vendor._id);
+    const products = await Product.find({ vendorId, ownerType: 'vendor' }).select({ _id: 1 }).lean();
+    const productIds = products.map((p) => String(p._id));
+    const productIdSet = new Set(productIds);
+
+    const or = [{ 'items.vendorId': vendorId }];
+    if (productIds.length) or.push({ 'items.productId': { $in: productIds } });
+
+    const docs = await Order.find({ $or: or })
+      .sort({ createdAt: -1 })
+      .limit(100)
+      .lean();
+
+    const orders = docs
+      .map((d) => serializeVendorOrderView(d, vendorId, productIdSet))
+      .filter(Boolean);
+
+    const commissionPercent = Number(req.vendor.commissionPercent);
+    const commission = Number.isFinite(commissionPercent) ? commissionPercent : 10;
+    let pendingEarnings = 0;
+    for (const ord of orders) {
+      if (String(ord.status || '') === 'cancelled') continue;
+      pendingEarnings += Number(ord.goodsTotal || 0) * (1 - commission / 100);
+    }
+
+    res.json({
+      orders,
+      summary: {
+        orderCount: orders.length,
+        productCount: productIds.length,
+        pendingEarnings: Math.round(pendingEarnings * 100) / 100,
+        commissionPercent: commission,
+      },
+    });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to list vendor orders' });
+  }
+});
+
+app.get('/api/vendor/orders/:orderId', mongoReady, requireAuth, requireApprovedVendor, async (req, res) => {
+  try {
+    const vendorId = String(req.vendor._id);
+    const orderId = String(req.params.orderId || '').trim();
+    const products = await Product.find({ vendorId, ownerType: 'vendor' }).select({ _id: 1 }).lean();
+    const productIdSet = new Set(products.map((p) => String(p._id)));
+    const doc = await Order.findById(orderId).lean();
+    const view = serializeVendorOrderView(doc, vendorId, productIdSet);
+    if (!view) {
+      res.status(404).json({ error: 'Order not found' });
+      return;
+    }
+    res.json({ order: view });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to load vendor order' });
+  }
+});
+
+/** Vendor: update fulfillment status only for orders that contain solely this vendor's items. */
+app.patch('/api/vendor/orders/:orderId', mongoReady, requireAuth, requireApprovedVendor, async (req, res) => {
+  try {
+    const vendorId = String(req.vendor._id);
+    const orderId = String(req.params.orderId || '').trim();
+    const status = String(req.body?.status || '').trim();
+    if (!ORDER_STATUSES.includes(status)) {
+      res.status(400).json({ error: 'Invalid status' });
+      return;
+    }
+
+    const products = await Product.find({ vendorId, ownerType: 'vendor' }).select({ _id: 1 }).lean();
+    const productIdSet = new Set(products.map((p) => String(p._id)));
+    const before = await Order.findById(orderId).lean();
+    const view = serializeVendorOrderView(before, vendorId, productIdSet);
+    if (!view) {
+      res.status(404).json({ error: 'Order not found' });
+      return;
+    }
+    if (!view.canUpdateStatus) {
+      res.status(403).json({
+        error: 'This order also includes other sellers’ items. Status can only be changed by platform admin.',
+      });
+      return;
+    }
+
+    const $set = { status };
+    const now = new Date();
+    if (status === 'shipped' && !before.shippedAt) $set.shippedAt = now;
+    if (status === 'delivered' && !before.deliveredAt) $set.deliveredAt = now;
+
+    const r = await Order.findByIdAndUpdate(orderId, { $set }, { new: true }).lean();
+    if (!r) {
+      res.status(404).json({ error: 'Order not found' });
+      return;
+    }
+    await syncOrderAdminFlags(orderId);
+
+    if (status === 'packed' && before.status !== 'packed') {
+      setImmediate(() => {
+        void (async () => {
+          try {
+            logJson('info', 'shiprocket.vendor_packed_trigger', {
+              orderId,
+              vendorId,
+              from: String(before.status),
+              to: 'packed',
+            });
+            await finalizePendingOrderShipping(orderId);
+            await ensureShiprocketShipmentForOrderId(orderId, 'vendor-packed');
+          } catch (e) {
+            logJson('warn', 'shiprocket.vendor_packed_trigger_failed', {
+              orderId,
+              vendorId,
+              message: e instanceof Error ? e.message : String(e),
+            });
+          }
+        })();
+      });
+    }
+
+    try {
+      if (before.status !== 'shipped' && status === 'shipped' && !before.shippedEmailSentAt) {
+        await sendOrderStatusEmail({ orderLean: { ...r, _id: r._id || orderId }, kind: 'shipped' });
+        await Order.updateOne({ _id: orderId }, { $set: { shippedEmailSentAt: new Date() } });
+      }
+      if (before.status !== 'delivered' && status === 'delivered' && !before.deliveredEmailSentAt) {
+        await sendOrderStatusEmail({ orderLean: { ...r, _id: r._id || orderId }, kind: 'delivered' });
+        await Order.updateOne({ _id: orderId }, { $set: { deliveredEmailSentAt: new Date() } });
+      }
+    } catch (mailErr) {
+      console.error('Vendor status email failed:', mailErr);
+    }
+
+    const nextView = serializeVendorOrderView(r, vendorId, productIdSet);
+    res.json({ order: nextView });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to update order status' });
+  }
+});
+
+app.post('/api/vendor/products', mongoReady, requireAuth, requireApprovedVendor, async (req, res) => {
+  try {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const name = String(body.name ?? '').trim();
+    const category = String(body.category ?? '').trim();
+    const price = Number(body.price);
+    if (!name) {
+      res.status(400).json({ error: 'Product name is required' });
+      return;
+    }
+    if (!category) {
+      res.status(400).json({ error: 'Category is required' });
+      return;
+    }
+    if (!Number.isFinite(price) || price <= 0) {
+      res.status(400).json({ error: 'Price must be greater than 0' });
+      return;
+    }
+
+    const submit = String(body.submitAction || '').toLowerCase() === 'submit';
+    const id = `vp${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const images = Array.isArray(body.images) ? body.images.map((u) => String(u)).filter(Boolean).slice(0, 8) : [];
+    const doc = await Product.create({
+      _id: id,
+      name,
+      description: String(body.description ?? '').trim(),
+      sku: body.sku != null ? String(body.sku).trim() : '',
+      price,
+      onlinePrice: body.onlinePrice != null && body.onlinePrice !== '' ? Number(body.onlinePrice) : undefined,
+      codPrice: forceCodEqualsPrice(price),
+      originalPrice: body.originalPrice != null && body.originalPrice !== '' ? Number(body.originalPrice) : undefined,
+      images: images.length ? images : ['https://images.unsplash.com/photo-1553062407-98d43420e9e7?w=600'],
+      category,
+      subcategory: body.subcategory != null ? String(body.subcategory).trim() : '',
+      stock: Number(body.stock) || 0,
+      rating: 4,
+      reviews: [],
+      tags: Array.isArray(body.tags) ? body.tags.map((t) => String(t)).filter(Boolean) : [],
+      specifications: normalizeSpecificationsFromBody(body.specifications),
+      ownerType: 'vendor',
+      vendorId: req.vendor._id,
+      approvalStatus: submit ? 'under_review' : 'draft',
+      rejectionReason: '',
+      isCustomPrint: false,
+      isTrending: false,
+    });
+    res.status(201).json({ product: serializeProductDoc(doc) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to create product' });
+  }
+});
+
+app.patch('/api/vendor/products/:productId', mongoReady, requireAuth, requireApprovedVendor, async (req, res) => {
+  try {
+    const productId = String(req.params.productId || '').trim();
+    const existing = await Product.findById(productId).lean();
+    if (!existing || existing.ownerType !== 'vendor' || String(existing.vendorId) !== String(req.vendor._id)) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const $set = {};
+
+    if (body.name != null) $set.name = String(body.name).trim();
+    if (body.description != null) $set.description = String(body.description).trim();
+    if (body.sku != null) $set.sku = String(body.sku).trim();
+    if (body.category != null) $set.category = String(body.category).trim();
+    if (body.subcategory != null) $set.subcategory = String(body.subcategory).trim();
+    if (body.price != null && body.price !== '') {
+      const n = Number(body.price);
+      if (!Number.isFinite(n) || n <= 0) {
+        res.status(400).json({ error: 'Invalid price' });
+        return;
+      }
+      $set.price = n;
+      $set.codPrice = n;
+    }
+    if (body.onlinePrice !== undefined) {
+      $set.onlinePrice = body.onlinePrice === null || body.onlinePrice === '' ? undefined : Number(body.onlinePrice);
+    }
+    if (body.originalPrice !== undefined) {
+      $set.originalPrice =
+        body.originalPrice === null || body.originalPrice === '' ? undefined : Number(body.originalPrice);
+    }
+    if (body.stock != null && body.stock !== '') $set.stock = Number(body.stock) || 0;
+    if (Array.isArray(body.images)) {
+      $set.images = body.images.map((u) => String(u)).filter(Boolean).slice(0, 8);
+    }
+    if (body.specifications !== undefined) {
+      $set.specifications = normalizeSpecificationsFromBody(body.specifications);
+    }
+
+    const submit = String(body.submitAction || '').toLowerCase();
+    if (submit === 'submit') {
+      $set.approvalStatus = 'under_review';
+      $set.rejectionReason = '';
+    } else if (submit === 'draft') {
+      $set.approvalStatus = 'draft';
+    } else if (existing.approvalStatus === 'published' || existing.approvalStatus === 'approved') {
+      // Safer default: published edits go back to review
+      $set.approvalStatus = 'under_review';
+    }
+
+    if (!Object.keys($set).length) {
+      res.status(400).json({ error: 'No updates provided' });
+      return;
+    }
+
+    await Product.updateOne({ _id: productId }, { $set });
+    const next = await Product.findById(productId).lean();
+    res.json({ product: serializeProductDoc(next) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to update product' });
+  }
+});
+
+/** Admin: approve / reject vendor product listings */
+app.patch('/api/admin/vendor-products/:productId', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    const productId = String(req.params.productId || '').trim();
+    const existing = await Product.findById(productId).lean();
+    if (!existing || existing.ownerType !== 'vendor') {
+      res.status(404).json({ error: 'Vendor product not found' });
+      return;
+    }
+    const status = String(req.body?.approvalStatus || '').trim();
+    if (!['published', 'approved', 'rejected', 'under_review', 'draft'].includes(status)) {
+      res.status(400).json({ error: 'Invalid approvalStatus' });
+      return;
+    }
+    const $set = { approvalStatus: status };
+    if (status === 'rejected') {
+      $set.rejectionReason = String(req.body?.rejectionReason || 'Product rejected').trim();
+    } else {
+      $set.rejectionReason = '';
+    }
+    // Treat approved same as published for storefront visibility
+    if (status === 'approved') $set.approvalStatus = 'published';
+    await Product.updateOne({ _id: productId }, { $set });
+    const next = await Product.findById(productId).lean();
+    res.json({ product: serializeProductDoc(next) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to update vendor product' });
+  }
+});
+
+app.get('/api/admin/vendor-products', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    const status = req.query?.status ? String(req.query.status).trim() : '';
+    const q = { ownerType: 'vendor' };
+    if (status) q.approvalStatus = status;
+    const docs = await Product.find(q).sort({ _id: -1 }).limit(200).lean();
+    res.json({ products: docs.map((d) => serializeProductDoc(d)) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to list vendor products' });
+  }
+});
+
 app.get('/api/me/addresses', mongoReady, requireAuth, async (req, res) => {
   try {
     const u = await User.findById(req.session.userId).lean();
@@ -5447,8 +6136,16 @@ app.get('/api/products/:id', mongoReady, async (req, res) => {
       res.status(404).json({ error: 'Product not found' });
       return;
     }
+    if (
+      doc.ownerType === 'vendor' &&
+      !['published', 'approved'].includes(String(doc.approvalStatus || ''))
+    ) {
+      res.status(404).json({ error: 'Product not found' });
+      return;
+    }
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
-    res.json(serializeProductDoc(doc));
+    const [enriched] = await attachSellerNamesToProducts([doc]);
+    res.json(enriched || serializeProductDoc(doc));
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Failed to load product' });
@@ -6099,9 +6796,17 @@ app.post('/api/auth/password/reset', requireTrustedBrowserOrigin, async (req, re
 
 app.get('/api/products', mongoReady, async (_req, res) => {
   try {
-    const docs = await Product.find().sort({ category: 1, displayOrder: 1, _id: 1 }).lean();
+    // Hide unpublished vendor listings; platform products (and legacy docs without ownerType) stay visible.
+    const docs = await Product.find({
+      $or: [
+        { ownerType: { $ne: 'vendor' } },
+        { ownerType: 'vendor', approvalStatus: { $in: ['published', 'approved'] } },
+      ],
+    })
+      .sort({ category: 1, displayOrder: 1, _id: 1 })
+      .lean();
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
-    res.json(docs.map((d) => serializeProductDoc(d)));
+    res.json(await attachSellerNamesToProducts(docs));
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Failed to list products' });
@@ -8057,7 +8762,9 @@ async function computeServerCheckoutPricing({ req, body, rawItems, paymentMethod
       else unit = Number(p.price);
     }
     if (!Number.isFinite(unit) || unit < 0) unit = 0;
-    return { ...line, sku, price: unit };
+    const vendorId =
+      String(p.ownerType || '') === 'vendor' && p.vendorId ? String(p.vendorId).trim() : undefined;
+    return { ...line, sku, price: unit, ...(vendorId ? { vendorId } : {}) };
   });
 
   const subtotal = pricedItems.reduce((acc, l) => acc + (Number(l.price) || 0) * (Number(l.quantity) || 0), 0);

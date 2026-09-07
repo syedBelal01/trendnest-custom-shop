@@ -55,6 +55,11 @@ export default function ProductCard({ product, saleBadgeText }: { product: Produ
         <Link to={productSeoPath(product)}>
           <h3 className="font-medium text-xs sm:text-sm truncate hover:text-primary transition-colors">{product.name}</h3>
         </Link>
+        {(product.soldBy || product.sellerName) ? (
+          <p className="mt-0.5 truncate text-[10px] font-semibold text-orange-600 sm:text-[11px]">
+            Sold by {product.soldBy || product.sellerName}
+          </p>
+        ) : null}
         <div className="flex items-center gap-1.5 sm:gap-2 mt-1">
           <span className="font-bold text-sm sm:text-base">{'\u20B9'}{displayPrice}</span>
           {product.originalPrice && (

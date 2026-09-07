@@ -2,7 +2,7 @@ import { Link, Outlet, useLocation } from 'react-router-dom';
 import AdminGuard from '@/components/AdminGuard';
 import AdminApiKeyBar from '@/components/admin/AdminApiKeyBar';
 import { useOrders } from '@/contexts/OrdersContext';
-import { LayoutDashboard, Package, ShoppingBag, Tag, Palette, Users, LogOut, Undo2, BarChart3, ImageUp, Flame } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingBag, Tag, Palette, Users, LogOut, Undo2, BarChart3, ImageUp, Flame, Store } from 'lucide-react';
 
 function AdminLogoutBar() {
   const { clearAdminApiKeyAndOrders } = useOrders();
@@ -24,6 +24,7 @@ function AdminLogoutBar() {
 const links = [
   { to: '/admin', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/admin/analytics', label: 'Analytics', icon: BarChart3 },
+  { to: '/admin/vendors', label: 'Vendors', icon: Store },
   { to: '/admin/products', label: 'Products', icon: Package },
   { to: '/admin/products/drafts', label: 'Drafts', icon: Package },
   { to: '/admin/orders', label: 'Orders', icon: ShoppingBag },

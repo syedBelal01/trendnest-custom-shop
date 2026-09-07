@@ -117,6 +117,11 @@ function BestDealCard({
             {product.name}
           </h3>
         </Link>
+        {(product.soldBy || product.sellerName) ? (
+          <p className="mt-1 truncate text-[11px] font-semibold text-orange-600">
+            Sold by {product.soldBy || product.sellerName}
+          </p>
+        ) : null}
 
         <div className="mt-2 flex items-end gap-2">
           <span className="text-lg font-black text-slate-950">₹{displayPrice}</span>

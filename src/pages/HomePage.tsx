@@ -123,6 +123,11 @@ function ProductCard({ product, ratingSummary }: { product: Product; ratingSumma
             {product.name}
           </h3>
         </Link>
+        {(product.soldBy || product.sellerName) ? (
+          <p className="mt-1 truncate text-[11px] font-semibold text-orange-600 sm:text-xs">
+            Sold by {product.soldBy || product.sellerName}
+          </p>
+        ) : null}
         <div className="mt-1.5 flex items-end gap-1.5 sm:mt-2 sm:gap-2">
           <span className="text-base font-extrabold text-slate-900 sm:text-lg">₹{displayPrice}</span>
           {product.originalPrice ? (

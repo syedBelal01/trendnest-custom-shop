@@ -4,7 +4,7 @@ import { useCart } from '@/contexts/CartContext';
 import { Button } from '@/components/ui/button';
 import RatingSummaryInline from '@/components/reviews/RatingSummaryInline';
 import { useEffect, useMemo, useState, type WheelEvent } from 'react';
-import { ShoppingCart, ArrowLeft, Minus, Plus, Check, ChevronDown, ChevronUp, Truck, ShieldCheck, BadgeCheck, Package, Heart, CreditCard, RotateCcw, Clock3, Eye, Zap, Flame } from 'lucide-react';
+import { ShoppingCart, ArrowLeft, Minus, Plus, Check, ChevronDown, ChevronUp, Truck, ShieldCheck, BadgeCheck, Package, Heart, CreditCard, RotateCcw, Clock3, Eye, Zap, Flame, Store } from 'lucide-react';
 import type { CartItem, Product } from '@/types';
 import { productVariantNames } from '@/lib/productVariants';
 import { galleryImagesForSelection } from '@/lib/productImages';
@@ -17,6 +17,7 @@ import { normalizeProductPaymentMode, productAllowsPaymentMethod, productDisplay
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { fetchShippingServiceabilityApi, isShippingServiceabilityError, type ShippingServiceabilityResult } from '@/lib/shippingApi';
 import { Input } from '@/components/ui/input';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Helmet } from 'react-helmet-async';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useDelayedFlag } from '@/hooks/useDelayedFlag';
@@ -955,6 +956,42 @@ export default function ProductDetailPage() {
             </div>
 
             <h1 className="text-2xl font-black leading-tight tracking-tight text-slate-950 md:text-4xl">{product.name}</h1>
+
+            {(product.soldBy || product.sellerName) ? (
+              <Popover>
+                <PopoverTrigger asChild>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-3 rounded-2xl border border-orange-100 bg-orange-50/70 px-4 py-3 text-left transition hover:bg-orange-50 hover:shadow-sm"
+                  >
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-orange-600 text-white shadow-sm">
+                      <Store className="h-5 w-5" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-[11px] font-bold uppercase tracking-wide text-orange-700/80">Sold by</span>
+                      <span className="block truncate text-base font-black text-slate-950">
+                        {product.soldBy || product.sellerName}
+                      </span>
+                    </span>
+                    <span className="text-xs font-bold text-orange-600">View seller</span>
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent align="start" className="w-80 rounded-2xl border-orange-100 p-4 shadow-lg">
+                  <div className="flex items-start gap-3">
+                    <span className="grid h-11 w-11 place-items-center rounded-full bg-orange-600 text-white">
+                      <Store className="h-5 w-5" />
+                    </span>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Official seller</p>
+                      <p className="truncate text-lg font-black text-foreground">{product.soldBy || product.sellerName}</p>
+                      <p className="mt-2 text-sm text-muted-foreground">
+                        This product is sold by an approved TrendNest marketplace vendor. Orders are fulfilled through TrendNest checkout.
+                      </p>
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            ) : null}
 
             <div className="flex items-center">
               <RatingSummaryInline

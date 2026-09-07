@@ -77,6 +77,11 @@ export default function Footer() {
                 All Products
               </Link>
             </li>
+            <li>
+              <Link to="/sell" className="hover:text-orange-600 transition-colors">
+                Sell on TrendNest
+              </Link>
+            </li>
           </ul>
         </div>
 

@@ -32,6 +32,7 @@ import AdminCustomers from "@/pages/admin/AdminCustomers";
 import AdminAnalytics from "@/pages/admin/AdminAnalytics";
 import AdminHeroSaleBanners from "@/pages/admin/AdminHeroSaleBanners";
 import AdminUrgencySettings from "@/pages/admin/AdminUrgencySettings";
+import AdminVendors from "@/pages/admin/AdminVendors";
 import UserGuard from "@/components/UserGuard";
 import AccountPage from "@/pages/AccountPage";
 import AccountOrdersPage from "@/pages/AccountOrdersPage";
@@ -44,6 +45,12 @@ import ContactPage from "@/pages/ContactPage";
 import FaqsPage from "@/pages/FaqsPage";
 import ReturnPolicyPage from "@/pages/ReturnPolicyPage";
 import ShippingPolicyPage from "@/pages/ShippingPolicyPage";
+import SellOnTrendNestPage from "@/pages/SellOnTrendNestPage";
+import VendorLayout from "@/pages/vendor/VendorLayout";
+import VendorDashboardPage from "@/pages/vendor/VendorDashboardPage";
+import VendorProductsPage from "@/pages/vendor/VendorProductsPage";
+import VendorProductEditPage from "@/pages/vendor/VendorProductEditPage";
+import VendorOrdersPage from "@/pages/vendor/VendorOrdersPage";
 import NotFound from "@/pages/NotFound";
 import ScrollToTop from "@/components/ScrollToTop";
 import { AuthProvider } from "@/contexts/AuthContext";
@@ -152,10 +159,18 @@ const App = () => (
                 />
                 <Route path="/login" element={<LoginPage />} />
                 <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+                <Route path="/sell" element={<SellOnTrendNestPage />} />
+                </Route>
+                <Route path="/vendor" element={<VendorLayout />}>
+                  <Route index element={<VendorDashboardPage />} />
+                  <Route path="products" element={<VendorProductsPage />} />
+                  <Route path="products/:productId" element={<VendorProductEditPage />} />
+                  <Route path="orders" element={<VendorOrdersPage />} />
                 </Route>
                 <Route path="/admin" element={<AdminLayout />}>
                   <Route index element={<AdminDashboard />} />
                   <Route path="analytics" element={<AdminAnalytics />} />
+                  <Route path="vendors" element={<AdminVendors />} />
                   <Route path="products" element={<AdminProducts />} />
                   <Route path="products/drafts" element={<AdminProductDraftsPage />} />
                   <Route path="products/draft/:draftId/step/:step" element={<AdminProductWizardPage />} />
