@@ -185,7 +185,7 @@ export default function AdminVendors() {
 
       <div className="space-y-2 pt-4">
         <h2 className="text-lg font-semibold">Vendor product listings</h2>
-        <p className="text-sm text-muted-foreground">Publish or reject products submitted by vendors.</p>
+        <p className="text-sm text-muted-foreground">Publish, unpublish, or reject products submitted by vendors.</p>
         <div className="border rounded-lg overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-muted text-muted-foreground">
@@ -215,13 +215,50 @@ export default function AdminVendors() {
                   <td className="p-3">
                     <div className="flex flex-wrap gap-2 justify-center">
                       {p.approvalStatus === 'published' || p.approvalStatus === 'approved' ? (
-                        <span className="inline-flex h-8 items-center rounded-md border border-emerald-200 bg-emerald-50 px-3 text-xs font-medium text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
-                          Published
-                        </span>
+                        <>
+                          <span className="inline-flex h-8 items-center rounded-md border border-emerald-200 bg-emerald-50 px-3 text-xs font-medium text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
+                            Published
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={busyId === p.id}
+                            onClick={() => {
+                              setBusyId(p.id);
+                              void patchAdminVendorProductApi(p.id, { approvalStatus: 'under_review' })
+                                .then((next) => {
+                                  setVendorProducts((prev) => prev.map((x) => (x.id === p.id ? next : x)));
+                                  toast.success('Unpublished — hidden from store');
+                                })
+                                .catch((e) => toast.error(e instanceof Error ? e.message : 'Failed'))
+                                .finally(() => setBusyId(null));
+                            }}
+                          >
+                            Unpublish
+                          </Button>
+                        </>
                       ) : p.approvalStatus === 'rejected' ? (
-                        <span className="inline-flex h-8 items-center rounded-md border border-destructive/30 bg-destructive/10 px-3 text-xs font-medium text-destructive">
-                          Rejected
-                        </span>
+                        <>
+                          <span className="inline-flex h-8 items-center rounded-md border border-destructive/30 bg-destructive/10 px-3 text-xs font-medium text-destructive">
+                            Rejected
+                          </span>
+                          <Button
+                            size="sm"
+                            disabled={busyId === p.id}
+                            onClick={() => {
+                              setBusyId(p.id);
+                              void patchAdminVendorProductApi(p.id, { approvalStatus: 'published' })
+                                .then((next) => {
+                                  setVendorProducts((prev) => prev.map((x) => (x.id === p.id ? next : x)));
+                                  toast.success('Published');
+                                })
+                                .catch((e) => toast.error(e instanceof Error ? e.message : 'Failed'))
+                                .finally(() => setBusyId(null));
+                            }}
+                          >
+                            Publish
+                          </Button>
+                        </>
                       ) : (
                         <Button
                           size="sm"
@@ -240,9 +277,7 @@ export default function AdminVendors() {
                           Publish
                         </Button>
                       )}
-                      {p.approvalStatus !== 'rejected' &&
-                        p.approvalStatus !== 'published' &&
-                        p.approvalStatus !== 'approved' && (
+                      {p.approvalStatus !== 'rejected' && (
                         <Button
                           size="sm"
                           variant="destructive"

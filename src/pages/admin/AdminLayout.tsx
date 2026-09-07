@@ -24,11 +24,11 @@ function AdminLogoutBar() {
 const links = [
   { to: '/admin', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/admin/analytics', label: 'Analytics', icon: BarChart3 },
-  { to: '/admin/vendors', label: 'Vendors', icon: Store },
-  { to: '/admin/products', label: 'Products', icon: Package },
+  { to: '/admin/vendors', label: 'Vendors', icon: Store, section: 'Marketplace' },
+  { to: '/admin/vendor-orders', label: 'Vendor Orders', icon: Boxes },
+  { to: '/admin/products', label: 'Products', icon: Package, section: 'Catalog' },
   { to: '/admin/products/drafts', label: 'Drafts', icon: Package },
   { to: '/admin/orders', label: 'Orders', icon: ShoppingBag },
-  { to: '/admin/vendor-orders', label: 'Vendor Orders', icon: Boxes },
   { to: '/admin/returns', label: 'Returns', icon: Undo2 },
   { to: '/admin/coupons', label: 'Coupons', icon: Tag },
   { to: '/admin/urgency-settings', label: 'Urgency Settings', icon: Flame },
@@ -50,9 +50,24 @@ export default function AdminLayout() {
           </div>
           <nav className="flex-1 p-2 space-y-0.5">
             {links.map(l => (
-              <Link key={l.to} to={l.to} className={`flex items-center gap-2.5 px-3 py-2 text-sm rounded-md transition-colors ${pathname === l.to ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-accent'}`}>
-                <l.icon className="h-4 w-4" />{l.label}
-              </Link>
+              <div key={l.to}>
+                {l.section ? (
+                  <p className="px-3 pt-3 pb-1 text-[10px] uppercase tracking-wider text-muted-foreground/80">
+                    {l.section}
+                  </p>
+                ) : null}
+                <Link
+                  to={l.to}
+                  className={`flex items-center gap-2.5 px-3 py-2 text-sm rounded-md transition-colors ${
+                    pathname === l.to
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                  }`}
+                >
+                  <l.icon className="h-4 w-4" />
+                  {l.label}
+                </Link>
+              </div>
             ))}
           </nav>
           <div className="p-2 border-t">
