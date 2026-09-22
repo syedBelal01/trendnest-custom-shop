@@ -41,18 +41,19 @@ function cartItemsToServiceabilityItems(items: CartItem[]) {
 export async function fetchShippingServiceabilityApi(input: {
   pincode: string;
   items: CartItem[];
-  paymentMethod: 'cod' | 'razorpay';
+  paymentMethod: 'cod' | 'razorpay' | 'partial';
   /** Merchandise total after coupon (rupees); used for free-shipping threshold on the server. */
   goodsAfterDiscount?: number;
   subtotal?: number;
   total?: number;
 }): Promise<ShippingServiceabilityResult> {
+  const paymentMethod = input.paymentMethod === 'razorpay' ? 'razorpay' : 'cod';
   const res = await fetch(apiUrl('/api/shipping/serviceability'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       pincode: input.pincode,
-      paymentMethod: input.paymentMethod,
+      paymentMethod,
       items: cartItemsToServiceabilityItems(input.items),
       goodsAfterDiscount: input.goodsAfterDiscount,
       subtotal: input.subtotal,

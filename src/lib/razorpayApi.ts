@@ -10,7 +10,9 @@ type RazorpayCreateOrderResp = {
   currency: string;
 };
 
-export async function createRazorpayPaymentSessionApi(payload: CreateOrderPayload): Promise<RazorpayCreateOrderResp & { sessionId: string }> {
+export async function createRazorpayPaymentSessionApi(
+  payload: CreateOrderPayload & { checkoutMethod?: 'razorpay' | 'partial' }
+): Promise<RazorpayCreateOrderResp & { sessionId: string; onlineDue?: number; codDue?: number; orderTotal?: number }> {
   const res = await fetch(apiUrl('/api/payments/razorpay/session'), {
     method: 'POST',
     credentials: 'include',
@@ -31,6 +33,9 @@ export async function createRazorpayPaymentSessionApi(payload: CreateOrderPayloa
     amount: Number((data as any).amount),
     currency: String((data as any).currency || 'INR'),
     sessionId: String((data as any).session?.id || ''),
+    onlineDue: (data as any).onlineDue != null ? Number((data as any).onlineDue) : undefined,
+    codDue: (data as any).codDue != null ? Number((data as any).codDue) : undefined,
+    orderTotal: (data as any).orderTotal != null ? Number((data as any).orderTotal) : undefined,
   };
 }
 

@@ -289,14 +289,28 @@ export interface Order {
   customer: CustomerInfo;
   userId?: string;
   status: 'pending' | 'confirmed' | 'packed' | 'shipped' | 'delivered' | 'cancelled';
-  paymentMethod?: 'cod' | 'razorpay';
-  paymentStatus?: 'unpaid' | 'paid' | 'failed';
+  paymentMethod?: 'cod' | 'razorpay' | 'partial';
+  paymentStatus?: 'unpaid' | 'paid' | 'failed' | 'partially_paid';
   amountDue?: number;
   amountPaid?: number;
   paidAt?: string;
   paymentFailureReason?: string;
   razorpayOrderId?: string;
   razorpayPaymentId?: string;
+  paymentSnapshot?: {
+    checkoutMethod?: string;
+    partialMode?: 'amount' | 'percentage';
+    partialAmount?: number;
+    partialPercent?: number;
+    orderTotal?: number;
+    onlineDue?: number;
+    codDue?: number;
+    capturedAt?: string;
+  };
+  codCollectionStatus?: 'pending' | 'collected' | 'n/a';
+  codCollectedAt?: string;
+  paymentTransactions?: Array<Record<string, unknown>>;
+  razorpaySignature?: string;
   subtotal: number;
   total: number;
   /** Merchandise after discount (before shipping), when stored by the server. */

@@ -48,7 +48,10 @@ export type CreateOrderPayload = {
   total: number;
   couponCode?: string;
   hasCustomPrint: boolean;
-  paymentMethod?: 'cod' | 'razorpay';
+  paymentMethod?: 'cod' | 'razorpay' | 'partial';
+  checkoutMethod?: 'razorpay' | 'partial';
+  declaredSubtotal?: number;
+  declaredTotal?: number;
 };
 
 export async function createOrderApi(payload: CreateOrderPayload): Promise<Order> {

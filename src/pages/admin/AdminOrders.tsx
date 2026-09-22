@@ -5,8 +5,21 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { toast } from 'sonner';
 import { downloadOrderInvoicePdf, syncOrderShippingStatusAdmin } from '@/lib/ordersApi';
 import { fetchAdminVendorOrdersApi } from '@/lib/vendorOrdersApi';
+import { collectCodAdminApi } from '@/lib/paymentSettingsApi';
 import { Button } from '@/components/ui/button';
 import { FileDown } from 'lucide-react';
+
+function paymentMethodLabel(method?: string): string {
+  if (method === 'razorpay') return 'Online';
+  if (method === 'cod') return 'COD';
+  if (method === 'partial') return 'Partial';
+  return '—';
+}
+
+function paymentStatusLabel(status?: string): string {
+  if (status === 'partially_paid') return 'Partially paid';
+  return status || '';
+}
 
 const statusColors: Record<OrderStatus, string> = {
   pending: 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200',
@@ -45,6 +58,7 @@ export default function AdminOrders() {
   const [filter, setFilter] = useState<string>('all');
   const [pdfBusy, setPdfBusy] = useState<string | null>(null);
   const [syncBusy, setSyncBusy] = useState<string | null>(null);
+  const [collectBusy, setCollectBusy] = useState<string | null>(null);
   const [vendorOrderIds, setVendorOrderIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -71,6 +85,19 @@ export default function AdminOrders() {
       toast.success(`Order ${id} → ${status}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Update failed');
+    }
+  };
+
+  const onCollectCod = async (id: string) => {
+    setCollectBusy(id);
+    try {
+      await collectCodAdminApi(id);
+      await refreshOrders();
+      toast.success('COD marked as collected');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to collect COD');
+    } finally {
+      setCollectBusy(null);
     }
   };
 
@@ -207,8 +234,16 @@ export default function AdminOrders() {
                   {o.customer.phone}
                 </p>
                 <p>
-                  <span className="text-muted-foreground">Address:</span> {o.customer.address}, {o.customer.city} -{' '}
-                  {o.customer.pincode}
+                  <span className="text-muted-foreground">Address:</span> {o.customer.address || '—'}
+                </p>
+                <p>
+                  <span className="text-muted-foreground">City:</span> {o.customer.city || '—'}
+                </p>
+                <p>
+                  <span className="text-muted-foreground">State:</span> {o.customer.state || '—'}
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Pincode:</span> {o.customer.pincode || '—'}
                 </p>
                 <div className="text-muted-foreground">Items:</div>
                 <ul className="list-disc pl-5 space-y-1">
@@ -235,12 +270,39 @@ export default function AdminOrders() {
                 </p>
                 <p className="font-semibold">Total: ₹{o.total}</p>
                 {(o.paymentMethod || o.paymentStatus) && (
-                  <p className="text-xs text-muted-foreground">
-                    Payment: {o.paymentMethod === 'razorpay' ? 'Online' : o.paymentMethod === 'cod' ? 'COD' : '—'}
-                    {o.paymentStatus ? ` · ${o.paymentStatus}` : ''}
-                    {o.amountDue != null && o.amountDue > 0.005 ? ` · Due ₹${o.amountDue}` : ''}
-                    {o.amountPaid != null && o.amountPaid > 0 ? ` · Paid ₹${o.amountPaid}` : ''}
-                  </p>
+                  <div className="space-y-1 pt-1">
+                    <p className="text-xs text-muted-foreground">
+                      Payment: {paymentMethodLabel(o.paymentMethod)}
+                      {o.paymentStatus ? ` · ${paymentStatusLabel(o.paymentStatus)}` : ''}
+                      {o.amountDue != null && o.amountDue > 0.005 ? ` · Due ₹${o.amountDue}` : ''}
+                      {o.amountPaid != null && o.amountPaid > 0 ? ` · Paid ₹${o.amountPaid}` : ''}
+                    </p>
+                    {o.paymentMethod === 'partial' && o.paymentSnapshot && (
+                      <p className="text-xs text-muted-foreground">
+                        Snapshot: Online ₹{Number(o.paymentSnapshot.onlineDue ?? 0)} · COD ₹
+                        {Number(o.paymentSnapshot.codDue ?? 0)}
+                        {o.codCollectionStatus === 'collected'
+                          ? ' · COD collected'
+                          : o.codCollectionStatus === 'pending'
+                            ? ' · COD pending'
+                            : ''}
+                      </p>
+                    )}
+                    {o.paymentMethod === 'partial' &&
+                      o.paymentStatus === 'partially_paid' &&
+                      o.codCollectionStatus !== 'collected' && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          className="h-7 text-xs"
+                          disabled={collectBusy === o.id}
+                          onClick={() => void onCollectCod(o.id)}
+                        >
+                          {collectBusy === o.id ? 'Saving…' : 'Mark COD collected'}
+                        </Button>
+                      )}
+                  </div>
                 )}
                 {o.createdAt && (
                   <p className="text-xs text-muted-foreground">Placed: {new Date(o.createdAt).toLocaleString()}</p>

@@ -202,8 +202,16 @@ export default function AdminVendorOrders() {
                   {o.customer.phone}
                 </p>
                 <p>
-                  <span className="text-muted-foreground">Address:</span> {o.customer.address}, {o.customer.city} -{' '}
-                  {o.customer.pincode}
+                  <span className="text-muted-foreground">Address:</span> {o.customer.address || '—'}
+                </p>
+                <p>
+                  <span className="text-muted-foreground">City:</span> {o.customer.city || '—'}
+                </p>
+                <p>
+                  <span className="text-muted-foreground">State:</span> {o.customer.state || '—'}
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Pincode:</span> {o.customer.pincode || '—'}
                 </p>
                 <div className="text-muted-foreground">Items:</div>
                 <ul className="list-disc pl-5 space-y-1">
@@ -220,10 +228,34 @@ export default function AdminVendorOrders() {
                 </ul>
                 <p className="font-semibold pt-1">Total: ₹{o.total}</p>
                 {(o.paymentMethod || o.paymentStatus) && (
-                  <p className="text-xs text-muted-foreground">
-                    Payment: {o.paymentMethod === 'razorpay' ? 'Online' : o.paymentMethod === 'cod' ? 'COD' : '—'}
-                    {o.paymentStatus ? ` · ${o.paymentStatus}` : ''}
-                  </p>
+                  <div className="space-y-1">
+                    <p className="text-xs text-muted-foreground">
+                      Payment:{' '}
+                      {o.paymentMethod === 'razorpay'
+                        ? 'Online'
+                        : o.paymentMethod === 'cod'
+                          ? 'COD'
+                          : o.paymentMethod === 'partial'
+                            ? 'Partial'
+                            : '—'}
+                      {o.paymentStatus
+                        ? ` · ${o.paymentStatus === 'partially_paid' ? 'Partially paid' : o.paymentStatus}`
+                        : ''}
+                      {o.amountDue != null && o.amountDue > 0.005 ? ` · Due ₹${o.amountDue}` : ''}
+                      {o.amountPaid != null && o.amountPaid > 0 ? ` · Paid ₹${o.amountPaid}` : ''}
+                    </p>
+                    {o.paymentMethod === 'partial' && o.paymentSnapshot && (
+                      <p className="text-xs text-muted-foreground">
+                        Online ₹{Number(o.paymentSnapshot.onlineDue ?? 0)} · COD ₹
+                        {Number(o.paymentSnapshot.codDue ?? 0)}
+                        {o.codCollectionStatus === 'collected'
+                          ? ' · COD collected'
+                          : o.codCollectionStatus === 'pending'
+                            ? ' · COD pending'
+                            : ''}
+                      </p>
+                    )}
+                  </div>
                 )}
                 {o.createdAt && (
                   <p className="text-xs text-muted-foreground">Placed: {new Date(o.createdAt).toLocaleString()}</p>

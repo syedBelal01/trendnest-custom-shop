@@ -52,14 +52,15 @@ export async function deleteCouponAdmin(id: string): Promise<void> {
 export async function validateCouponApi(params: {
   code: string;
   subtotal: number;
-  paymentMethod: 'cod' | 'razorpay';
+  paymentMethod: 'cod' | 'razorpay' | 'partial';
   items: Array<{ productId: string; quantity: number; selectedVariant?: string }>;
 }): Promise<{ couponCode: string; discount: number; paymentMethodScope: CouponPaymentMethodScope }> {
+  const paymentMethod = params.paymentMethod === 'razorpay' ? 'razorpay' : 'cod';
   const res = await fetch(apiUrl('/api/coupons/validate'), {
     method: 'POST',
     credentials: 'include',
     headers: withAuthHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify(params),
+    body: JSON.stringify({ ...params, paymentMethod }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {

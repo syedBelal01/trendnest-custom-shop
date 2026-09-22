@@ -58,6 +58,12 @@ import { fetchShippingServiceabilityApi, isShippingServiceabilityError, type Shi
 import { IndianPhoneInput } from '@/components/forms/IndianPhoneInput';
 import { clampIndianPhoneInput, isCompleteValidIndianMobile, isIndianPhoneValid, validateIndianPhone } from '@/lib/indianPhone';
 import { validateCouponApi } from '@/lib/couponsApi';
+import {
+  fetchPaymentSettingsPublic,
+  fetchPartialQuoteApi,
+  type PartialQuote,
+  type PaymentSettings,
+} from '@/lib/paymentSettingsApi';
 import { trackCheckoutViewEvent } from '@/lib/engagementAnalyticsApi';
 import { trackMetaPurchase } from '@/lib/metaPixel';
 
@@ -139,14 +145,54 @@ export default function CheckoutPage() {
   const { refreshProducts } = useProducts();
   const { user, loading: authLoading, refreshAuth } = useAuth();
   const { method: paymentMethod, setMethod: setPaymentMethod } = usePaymentMethod();
-  const codAllowed = paymentMethodAllowedForCart('cod');
-  const onlineAllowed = paymentMethodAllowedForCart('razorpay');
+  const [paymentSettings, setPaymentSettings] = useState<PaymentSettings | null>(null);
+  const [partialQuote, setPartialQuote] = useState<PartialQuote | null>(null);
+  const [partialQuoteLoading, setPartialQuoteLoading] = useState(false);
+
+  const cartCodOk = paymentMethodAllowedForCart('cod');
+  const cartOnlineOk = paymentMethodAllowedForCart('razorpay');
+  const cartPartialOk = paymentMethodAllowedForCart('partial');
+
+  const showFullCod = (paymentSettings?.enableFullCod !== false) && cartCodOk;
+  const showFullOnline = (paymentSettings?.enableFullOnline !== false) && cartOnlineOk;
+  const showPartial = !!paymentSettings?.enablePartial && cartPartialOk;
+
+  const methodVisible =
+    (paymentMethod === 'cod' && showFullCod) ||
+    (paymentMethod === 'razorpay' && showFullOnline) ||
+    (paymentMethod === 'partial' && showPartial);
 
   useEffect(() => {
-    if (!paymentMethodAllowedForCart(paymentMethod)) {
-      setPaymentMethod(onlineAllowed ? 'razorpay' : 'cod');
-    }
-  }, [onlineAllowed, paymentMethod, paymentMethodAllowedForCart, setPaymentMethod]);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const s = await fetchPaymentSettingsPublic();
+        if (!cancelled) setPaymentSettings(s);
+      } catch {
+        if (!cancelled) {
+          setPaymentSettings({
+            enableFullCod: true,
+            enableFullOnline: true,
+            enablePartial: false,
+            partialMode: 'percentage',
+            partialAmount: 0,
+            partialPercent: 30,
+          });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!paymentSettings) return;
+    if (methodVisible) return;
+    if (showFullCod) setPaymentMethod('cod');
+    else if (showFullOnline) setPaymentMethod('razorpay');
+    else if (showPartial) setPaymentMethod('partial');
+  }, [methodVisible, paymentSettings, setPaymentMethod, showFullCod, showFullOnline, showPartial]);
 
   useEffect(() => {
     void refreshProducts();
@@ -544,6 +590,52 @@ export default function CheckoutPage() {
     [paymentMethod, totalsForPaymentMethod]
   );
 
+  // Server-backed partial split for display (backend is source of truth).
+  useEffect(() => {
+    if (paymentMethod !== 'partial' || !showPartial || items.length === 0) {
+      setPartialQuote(null);
+      setPartialQuoteLoading(false);
+      return;
+    }
+    setPartialQuoteLoading(true);
+    let cancelled = false;
+    const t = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const computed = totalsForPaymentMethod('partial');
+          const q = await fetchPartialQuoteApi({
+            items: cartItemsToOrderLines(items).map((l, idx) => ({
+              ...l,
+              price: unitPriceForItem(items[idx], 'partial'),
+            })),
+            couponCode: couponCode || undefined,
+            pincode: form.pincode,
+            customer: { pincode: form.pincode },
+            declaredSubtotal: computed.subtotal,
+            declaredTotal: computed.total,
+          });
+          if (!cancelled) setPartialQuote(q);
+        } catch {
+          if (!cancelled) setPartialQuote(null);
+        } finally {
+          if (!cancelled) setPartialQuoteLoading(false);
+        }
+      })();
+    }, 300);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [
+    paymentMethod,
+    showPartial,
+    items,
+    couponCode,
+    form.pincode,
+    totalsForPaymentMethod,
+    unitPriceForItem,
+  ]);
+
   const deliveryPinValid = form.pincode.replace(/\D/g, '').length === 6;
   const healthShippingLoaded = allowRelaxedShipping !== null;
   /** Successful serviceability response including a delivery estimate (required before checkout when not relaxed). */
@@ -557,7 +649,10 @@ export default function CheckoutPage() {
     (allowRelaxedShipping === true || (!shippingQuoteLoading && shippingQuoteHasEta));
 
   const shippingChargeForTotal = 0;
-  const payableGrandTotal = checkoutMerchandise.total;
+  const payableGrandTotal =
+    paymentMethod === 'partial' && partialQuote
+      ? Number(partialQuote.onlineDue)
+      : checkoutMerchandise.total;
 
   // Shiprocket serviceability — clear stale quotes while pin / cart / payment changes, then refetch.
   useEffect(() => {
@@ -788,17 +883,23 @@ export default function CheckoutPage() {
     }
     setSubmitting(true);
     try {
-      const computed = totalsForPaymentMethod(paymentMethod);
+      const pricingMethod = paymentMethod === 'razorpay' ? 'razorpay' : 'cod';
+      const computed = totalsForPaymentMethod(paymentMethod === 'partial' ? 'partial' : pricingMethod);
       const payableTotal = computed.total;
       const payload = {
         customer: { ...form, email: form.email.trim(), phone: phoneCheck.digits },
-        items: cartItemsToOrderLines(items).map((l, idx) => ({ ...l, price: unitPriceForItem(items[idx], paymentMethod) })),
+        items: cartItemsToOrderLines(items).map((l, idx) => ({
+          ...l,
+          price: unitPriceForItem(items[idx], paymentMethod === 'partial' ? 'partial' : pricingMethod),
+        })),
         subtotal: computed.subtotal,
         discount: computed.discount,
         total: payableTotal,
         couponCode: couponCode || undefined,
         hasCustomPrint: items.some(i => !!(i.customDesignFile || i.customDesignName)),
         paymentMethod,
+        declaredSubtotal: computed.subtotal,
+        declaredTotal: payableTotal,
       } as const;
 
       if (paymentMethod === 'cod') {
@@ -819,15 +920,22 @@ export default function CheckoutPage() {
         return;
       }
 
-      // Online payment flow
+      // Full online or partial advance (Razorpay)
       await loadRazorpayCheckoutJs();
-      const rp = await createRazorpayPaymentSessionApi(payload);
+      const rp = await createRazorpayPaymentSessionApi({
+        ...payload,
+        checkoutMethod: paymentMethod === 'partial' ? 'partial' : 'razorpay',
+        paymentMethod: paymentMethod === 'partial' ? 'partial' : 'razorpay',
+      });
       const options = {
         key: rp.keyId,
         amount: rp.amount,
         currency: rp.currency,
         name: 'TrendNest',
-        description: 'Secure payment',
+        description:
+          paymentMethod === 'partial'
+            ? `Partial advance · ₹${Number(rp.onlineDue ?? rp.amount / 100).toFixed(0)} now`
+            : 'Secure payment',
         order_id: rp.razorpayOrderId,
         prefill: {
           name: form.name,
@@ -927,7 +1035,8 @@ export default function CheckoutPage() {
     if (couponRecheckBusyRef.current) return;
     couponRecheckBusyRef.current = true;
     const currentSubtotal = totalsForPaymentMethod(paymentMethod).subtotal;
-    const paymentLabel = paymentMethod === 'razorpay' ? 'online payment' : 'COD';
+    const paymentLabel =
+      paymentMethod === 'razorpay' ? 'online payment' : paymentMethod === 'partial' ? 'partial payment' : 'COD';
 
     void (async () => {
       try {
@@ -955,13 +1064,17 @@ export default function CheckoutPage() {
   }
 
   const hasMissingCustomDesign = items.some((it) => !hasValidCustomDesignForCheckout(it));
+  const methodAvailableNow =
+    (paymentMethod === 'cod' && showFullCod) ||
+    (paymentMethod === 'razorpay' && showFullOnline) ||
+    (paymentMethod === 'partial' && showPartial && !!partialQuote && !partialQuoteLoading);
   const placeOrderDisabled =
     submitting ||
     !deliveryValid ||
     (otpRequired && !otpVerified) ||
     !shippingGateReady ||
     !healthShippingLoaded ||
-    !paymentMethodAllowedForCart(paymentMethod) ||
+    !methodAvailableNow ||
     hasMissingCustomDesign;
 
   const placeOrderLabel =
@@ -969,14 +1082,18 @@ export default function CheckoutPage() {
       ? 'Placing order…'
       : !healthShippingLoaded
         ? 'Loading checkout…'
-        : !paymentMethodAllowedForCart(paymentMethod)
-          ? 'Payment method unavailable'
+        : !methodAvailableNow
+          ? paymentMethod === 'partial' && partialQuoteLoading
+            ? 'Calculating advance…'
+            : 'Payment method unavailable'
         : hasMissingCustomDesign
           ? 'Upload design first'
         : !deliveryPinValid
           ? 'Enter 6-digit pincode'
           : allowRelaxedShipping === true
-            ? `Place Order — ₹${payableGrandTotal}`
+            ? paymentMethod === 'partial'
+              ? `Pay advance — ₹${payableGrandTotal}`
+              : `Place Order — ₹${payableGrandTotal}`
             : shippingQuoteLoading
               ? 'Checking delivery estimate…'
               : isShippingServiceabilityError(shippingQuote)
@@ -985,13 +1102,21 @@ export default function CheckoutPage() {
                   : 'Shipping unavailable'
                 : !shippingGateReady
                   ? 'Waiting for delivery estimate…'
-                  : `Place Order — ₹${payableGrandTotal}`;
+                  : paymentMethod === 'partial'
+                    ? `Pay advance — ₹${payableGrandTotal}`
+                    : `Place Order — ₹${payableGrandTotal}`;
   const checkoutCouponDiscountLabel =
     !couponCode
       ? 'No coupon applied'
       : checkoutMerchandise.discount > 0
         ? `-₹${checkoutMerchandise.discount}`
-        : `Not valid for ${paymentMethod === 'razorpay' ? 'online payment' : 'COD'}`;
+        : `Not valid for ${
+            paymentMethod === 'razorpay'
+              ? 'online payment'
+              : paymentMethod === 'partial'
+                ? 'partial payment'
+                : 'COD'
+          }`;
   const checkoutCouponDiscountClass =
     checkoutMerchandise.discount > 0 ? 'font-black text-emerald-700' : 'font-semibold text-slate-400';
 
@@ -1482,44 +1607,79 @@ export default function CheckoutPage() {
               </div>
               <div className="p-5">
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod('cod')}
-                    disabled={!codAllowed}
-                    className={`rounded-2xl border p-4 text-left transition ${
-                      paymentMethod === 'cod'
-                        ? 'border-orange-500 bg-orange-50 text-orange-700 shadow-sm'
-                        : codAllowed
-                          ? 'border-slate-200 bg-white text-slate-700 hover:border-orange-200'
-                          : 'cursor-not-allowed border-slate-100 bg-slate-50 text-slate-300'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="flex items-center gap-3 text-sm font-black">💵 Cash on Delivery</span>
-                      {paymentMethod === 'cod' ? <span className="text-sm font-black">✓</span> : null}
-                    </div>
-                    <p className="mt-2 text-xs text-slate-500">{codAllowed ? 'Pay when your order arrives.' : 'Not available for one or more products.'}</p>
-                  </button>
+                  {showFullCod ? (
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod('cod')}
+                      className={`rounded-2xl border p-4 text-left transition ${
+                        paymentMethod === 'cod'
+                          ? 'border-orange-500 bg-orange-50 text-orange-700 shadow-sm'
+                          : 'border-slate-200 bg-white text-slate-700 hover:border-orange-200'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="flex items-center gap-3 text-sm font-black">💵 Cash on Delivery</span>
+                        {paymentMethod === 'cod' ? <span className="text-sm font-black">✓</span> : null}
+                      </div>
+                      <p className="mt-2 text-xs text-slate-500">Pay when your order arrives.</p>
+                    </button>
+                  ) : null}
 
-                  <button
-                    type="button"
-                    onClick={() => setPaymentMethod('razorpay')}
-                    disabled={!onlineAllowed}
-                    className={`rounded-2xl border p-4 text-left transition ${
-                      paymentMethod === 'razorpay'
-                        ? 'border-orange-500 bg-orange-50 text-orange-700 shadow-sm'
-                        : onlineAllowed
-                          ? 'border-slate-200 bg-white text-slate-700 hover:border-orange-200'
-                          : 'cursor-not-allowed border-slate-100 bg-slate-50 text-slate-300'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <span className="flex items-center gap-3 text-sm font-black">💳 Online payment</span>
-                      {paymentMethod === 'razorpay' ? <span className="text-sm font-black">✓</span> : null}
-                    </div>
-                    <p className="mt-2 text-xs text-slate-500">{onlineAllowed ? 'Pay securely with Razorpay.' : 'Not available for one or more products.'}</p>
-                  </button>
+                  {showFullOnline ? (
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod('razorpay')}
+                      className={`rounded-2xl border p-4 text-left transition ${
+                        paymentMethod === 'razorpay'
+                          ? 'border-orange-500 bg-orange-50 text-orange-700 shadow-sm'
+                          : 'border-slate-200 bg-white text-slate-700 hover:border-orange-200'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="flex items-center gap-3 text-sm font-black">💳 Online payment</span>
+                        {paymentMethod === 'razorpay' ? <span className="text-sm font-black">✓</span> : null}
+                      </div>
+                      <p className="mt-2 text-xs text-slate-500">Pay securely with Razorpay.</p>
+                    </button>
+                  ) : null}
+
+                  {showPartial ? (
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod('partial')}
+                      className={`rounded-2xl border p-4 text-left transition sm:col-span-2 ${
+                        paymentMethod === 'partial'
+                          ? 'border-orange-500 bg-orange-50 text-orange-700 shadow-sm'
+                          : 'border-slate-200 bg-white text-slate-700 hover:border-orange-200'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="flex items-center gap-3 text-sm font-black">⚡ Partial payment</span>
+                        {paymentMethod === 'partial' ? <span className="text-sm font-black">✓</span> : null}
+                      </div>
+                      <p className="mt-2 text-xs text-slate-500">
+                        {partialQuoteLoading
+                          ? 'Calculating advance…'
+                          : partialQuote
+                            ? `Pay ₹${partialQuote.onlineDue} online now · ₹${partialQuote.codDue} COD on delivery`
+                            : 'Pay a portion online now; rest on delivery.'}
+                      </p>
+                    </button>
+                  ) : null}
                 </div>
+                {!showFullCod && !showFullOnline && !showPartial ? (
+                  <p className="mt-3 text-sm text-red-600">No payment methods available for this cart.</p>
+                ) : null}
+                {paymentMethod === 'partial' && partialQuote && !partialQuoteLoading ? (
+                  <div className="mt-4 rounded-2xl border border-orange-100 bg-orange-50/60 px-4 py-3 text-sm text-slate-700">
+                    <p className="font-black text-slate-900">Partial breakdown</p>
+                    <p className="mt-1">
+                      Pay <span className="font-black text-orange-700">₹{partialQuote.onlineDue}</span> online now ·{' '}
+                      <span className="font-black">₹{partialQuote.codDue}</span> COD on delivery
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">Order total ₹{partialQuote.orderTotal}</p>
+                  </div>
+                ) : null}
               </div>
             </section>
 

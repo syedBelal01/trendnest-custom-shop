@@ -1,7 +1,12 @@
 import type { Product } from '@/types';
 
 export type ProductPaymentMode = 'both' | 'online' | 'cod';
-export type CheckoutPaymentMethod = 'cod' | 'razorpay';
+export type CheckoutPaymentMethod = 'cod' | 'razorpay' | 'partial';
+
+/** Pricing path: partial uses COD/selling prices (same as Full COD). */
+export function pricingMethodForCheckout(method: CheckoutPaymentMethod): 'cod' | 'razorpay' {
+  return method === 'razorpay' ? 'razorpay' : 'cod';
+}
 
 export function normalizeProductPaymentMode(raw: unknown): ProductPaymentMode {
   const mode = String(raw || '').trim().toLowerCase();
@@ -11,6 +16,7 @@ export function normalizeProductPaymentMode(raw: unknown): ProductPaymentMode {
 
 export function productAllowsPaymentMethod(product: Pick<Product, 'paymentMode'> | null | undefined, method: CheckoutPaymentMethod): boolean {
   const mode = normalizeProductPaymentMode(product?.paymentMode);
+  if (method === 'partial') return mode === 'both';
   if (mode === 'both') return true;
   if (mode === 'online') return method === 'razorpay';
   return method === 'cod';
@@ -20,7 +26,8 @@ export function effectivePaymentMethodForProduct(
   product: Pick<Product, 'paymentMode'> | null | undefined,
   preferred: CheckoutPaymentMethod = 'cod'
 ): CheckoutPaymentMethod {
-  if (productAllowsPaymentMethod(product, preferred)) return preferred;
+  const pref = preferred === 'partial' ? 'cod' : preferred;
+  if (productAllowsPaymentMethod(product, pref)) return pref;
   return productAllowsPaymentMethod(product, 'razorpay') ? 'razorpay' : 'cod';
 }
 
@@ -29,20 +36,21 @@ export function productUnitPriceForPaymentMethod(
   method: CheckoutPaymentMethod,
   selectedVariant?: string
 ): number {
+  const priceMethod = pricingMethodForCheckout(method);
   const p = product as any;
   const variantKey = selectedVariant ? String(selectedVariant) : defaultVariantKey(product) ?? '';
   if (p?.variantModel?.items?.length && variantKey) {
     const hit = p.variantModel.items.find((x: any) => String(x?.key) === variantKey);
     if (hit) {
       const n =
-        method === 'razorpay'
+        priceMethod === 'razorpay'
           ? (hit.onlinePrice != null ? Number(hit.onlinePrice) : Number(hit.price))
           : (hit.codPrice != null ? Number(hit.codPrice) : Number(hit.price));
       return Number.isFinite(n) && n >= 0 ? n : 0;
     }
   }
   const n =
-    method === 'razorpay'
+    priceMethod === 'razorpay'
       ? (p.onlinePrice != null ? Number(p.onlinePrice) : Number(p.price))
       : (p.codPrice != null ? Number(p.codPrice) : Number(p.price));
   return Number.isFinite(n) && n >= 0 ? n : 0;

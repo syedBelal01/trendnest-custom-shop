@@ -28,6 +28,7 @@ import AdminOrders from "@/pages/admin/AdminOrders";
 import AdminVendorOrders from "@/pages/admin/AdminVendorOrders";
 import AdminReturns from "@/pages/admin/AdminReturns";
 import AdminCoupons from "@/pages/admin/AdminCoupons";
+import AdminPaymentSettings from "@/pages/admin/AdminPaymentSettings";
 import AdminCustomPrints from "@/pages/admin/AdminCustomPrints";
 import AdminCustomers from "@/pages/admin/AdminCustomers";
 import AdminAnalytics from "@/pages/admin/AdminAnalytics";
@@ -181,6 +182,7 @@ const App = () => (
                   <Route path="vendor-orders" element={<AdminVendorOrders />} />
                   <Route path="returns" element={<AdminReturns />} />
                   <Route path="coupons" element={<AdminCoupons />} />
+                  <Route path="payment-settings" element={<AdminPaymentSettings />} />
                   <Route path="custom-prints" element={<AdminCustomPrints />} />
                   <Route path="customers" element={<AdminCustomers />} />
                   <Route path="urgency-settings" element={<AdminUrgencySettings />} />

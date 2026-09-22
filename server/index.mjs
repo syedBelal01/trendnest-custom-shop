@@ -560,6 +560,21 @@ HeroSaleBannerSchema.index({ slug: 1, status: 1, startDate: 1, endDate: 1, prior
 
 const HeroSaleBanner = mongoose.model('HeroSaleBanner', HeroSaleBannerSchema);
 
+const PAYMENT_SETTINGS_ID = 'payment-settings';
+const PaymentSettingsSchema = new mongoose.Schema(
+  {
+    _id: { type: String, required: true },
+    enableFullCod: { type: Boolean, default: true },
+    enableFullOnline: { type: Boolean, default: true },
+    enablePartial: { type: Boolean, default: false },
+    partialMode: { type: String, enum: ['amount', 'percentage'], default: 'percentage' },
+    partialAmount: { type: Number, default: 0 },
+    partialPercent: { type: Number, default: 30 },
+  },
+  { versionKey: false, timestamps: true, collection: 'payment_settings' }
+);
+const PaymentSettings = mongoose.model('PaymentSettings', PaymentSettingsSchema);
+
 const PRODUCT_URGENCY_SCOPES = ['all', 'category', 'product'];
 
 const ProductUrgencySettingSchema = new mongoose.Schema(
@@ -1054,12 +1069,127 @@ function productAllowsPaymentMethod(product, paymentMethod) {
   return method === 'cod';
 }
 
+function productAllowsPartialPayment(product) {
+  return normalizeProductPaymentMode(product?.paymentMode) === 'both';
+}
+
 function paymentModeErrorMessage(product, paymentMethod) {
   const mode = normalizeProductPaymentMode(product?.paymentMode);
   const name = String(product?.name || product?._id || 'This product').trim();
   if (mode === 'online') return `${name} is available for online payment only.`;
   if (mode === 'cod') return `${name} is available for COD only.`;
   return `${name} is not available for this payment method.`;
+}
+
+function defaultPaymentSettingsDoc() {
+  return {
+    _id: PAYMENT_SETTINGS_ID,
+    enableFullCod: true,
+    enableFullOnline: true,
+    enablePartial: false,
+    partialMode: 'percentage',
+    partialAmount: 0,
+    partialPercent: 30,
+  };
+}
+
+function serializePaymentSettings(doc) {
+  const d = doc || defaultPaymentSettingsDoc();
+  return {
+    enableFullCod: d.enableFullCod !== false,
+    enableFullOnline: d.enableFullOnline !== false,
+    enablePartial: !!d.enablePartial,
+    partialMode: d.partialMode === 'amount' ? 'amount' : 'percentage',
+    partialAmount: Number(d.partialAmount) || 0,
+    partialPercent: Number(d.partialPercent) || 0,
+    updatedAt: d.updatedAt instanceof Date ? d.updatedAt.toISOString() : d.updatedAt,
+  };
+}
+
+async function getPaymentSettingsLean() {
+  const doc = await PaymentSettings.findById(PAYMENT_SETTINGS_ID).lean();
+  return doc || defaultPaymentSettingsDoc();
+}
+
+function normalizePaymentSettingsPatch(body) {
+  const patch = {};
+  if (body.enableFullCod != null) patch.enableFullCod = !!body.enableFullCod;
+  if (body.enableFullOnline != null) patch.enableFullOnline = !!body.enableFullOnline;
+  if (body.enablePartial != null) patch.enablePartial = !!body.enablePartial;
+  if (body.partialMode != null) {
+    const m = String(body.partialMode).trim().toLowerCase();
+    if (m !== 'amount' && m !== 'percentage') throw new Error('partialMode must be amount or percentage');
+    patch.partialMode = m;
+  }
+  if (body.partialAmount != null && body.partialAmount !== '') {
+    const n = Number(body.partialAmount);
+    if (!Number.isFinite(n) || n < 0) throw new Error('partialAmount must be a non-negative number');
+    patch.partialAmount = n;
+  }
+  if (body.partialPercent != null && body.partialPercent !== '') {
+    const n = Number(body.partialPercent);
+    if (!Number.isFinite(n) || n <= 0 || n > 100) throw new Error('partialPercent must be greater than 0 and at most 100');
+    patch.partialPercent = n;
+  }
+  return patch;
+}
+
+/** Compute online advance + COD remainder from order total and payment settings. */
+function computePartialSplit(orderTotal, settings) {
+  const total = roundMoney2(Number(orderTotal) || 0);
+  if (!(total > 0)) {
+    const err = new Error('Order total must be greater than 0 for partial payment');
+    err.statusCode = 400;
+    throw err;
+  }
+  const mode = settings?.partialMode === 'amount' ? 'amount' : 'percentage';
+  let onlineDue = 0;
+  if (mode === 'amount') {
+    const amt = Number(settings?.partialAmount) || 0;
+    if (!(amt > 0)) {
+      const err = new Error('Partial advance amount must be greater than 0');
+      err.statusCode = 400;
+      throw err;
+    }
+    if (amt >= total) {
+      const err = new Error('Partial advance must be less than order total. Use Full Online payment instead.');
+      err.statusCode = 400;
+      throw err;
+    }
+    onlineDue = roundMoney2(amt);
+  } else {
+    const pct = Number(settings?.partialPercent) || 0;
+    if (!(pct > 0) || pct > 100) {
+      const err = new Error('Partial percent must be greater than 0 and at most 100');
+      err.statusCode = 400;
+      throw err;
+    }
+    if (pct >= 100) {
+      const err = new Error('100% partial is not allowed. Use Full Online payment instead.');
+      err.statusCode = 400;
+      throw err;
+    }
+    onlineDue = roundMoney2((total * pct) / 100);
+    if (!(onlineDue > 0) || onlineDue >= total) {
+      const err = new Error('Computed advance is invalid for this order total. Adjust partial percent.');
+      err.statusCode = 400;
+      throw err;
+    }
+  }
+  const codDue = roundMoney2(total - onlineDue);
+  if (!(codDue > 0)) {
+    const err = new Error('COD remainder must be greater than 0 for partial payment');
+    err.statusCode = 400;
+    throw err;
+  }
+  return {
+    partialMode: mode,
+    partialAmount: mode === 'amount' ? Number(settings.partialAmount) || 0 : undefined,
+    partialPercent: mode === 'percentage' ? Number(settings.partialPercent) || 0 : undefined,
+    orderTotal: total,
+    onlineDue,
+    codDue,
+  };
 }
 
 // --- Visitor analytics (admin-only visibility) ---
@@ -1496,8 +1626,12 @@ const OrderSchema = new mongoose.Schema(
     freeShippingApplied: { type: Boolean, default: false },
     total: { type: Number, required: true },
     // Payment is separate from fulfillment `status` (keeps COD flow unchanged).
-    paymentMethod: { type: String, enum: ['cod', 'razorpay'], default: 'cod' },
-    paymentStatus: { type: String, enum: ['unpaid', 'paid', 'failed'], default: 'unpaid' },
+    paymentMethod: { type: String, enum: ['cod', 'razorpay', 'partial'], default: 'cod' },
+    paymentStatus: {
+      type: String,
+      enum: ['unpaid', 'paid', 'failed', 'partially_paid'],
+      default: 'unpaid',
+    },
     amountDue: { type: Number, default: 0 },
     amountPaid: { type: Number, default: 0 },
     paidAt: Date,
@@ -1505,6 +1639,11 @@ const OrderSchema = new mongoose.Schema(
     razorpayOrderId: String,
     razorpayPaymentId: String,
     razorpaySignature: String,
+    /** Immutable checkout payment config/split (esp. partial payment). */
+    paymentSnapshot: { type: Object, default: undefined },
+    codCollectionStatus: { type: String, enum: ['pending', 'collected', 'n/a'], default: 'n/a' },
+    codCollectedAt: { type: Date, default: undefined },
+    paymentTransactions: { type: [Object], default: [] },
     shipping: {
       type: {
         provider: { type: String, default: undefined }, // 'shiprocket'
@@ -1612,6 +1751,11 @@ const PaymentSessionSchema = new mongoose.Schema(
     shippingPlaceholder: { type: Boolean, default: false },
     /** Snapshot of `resolveShippingChargeForPricing` result when checkout had a real quote (for Order shipping doc). */
     shippingQuoteSnapshot: { type: Object, default: undefined },
+    /** 'razorpay' = full online; 'partial' = advance only. */
+    checkoutMethod: { type: String, enum: ['razorpay', 'partial'], default: 'razorpay' },
+    onlineDue: { type: Number, default: undefined },
+    codDue: { type: Number, default: undefined },
+    paymentSnapshot: { type: Object, default: undefined },
   },
   { versionKey: false, timestamps: true }
 );
@@ -1945,6 +2089,7 @@ function serializeOrder(doc) {
   if (out.shippedAt instanceof Date) out.shippedAt = out.shippedAt.toISOString();
   if (out.paidAt instanceof Date) out.paidAt = out.paidAt.toISOString();
   if (out.cancelledAt instanceof Date) out.cancelledAt = out.cancelledAt.toISOString();
+  if (out.codCollectedAt instanceof Date) out.codCollectedAt = out.codCollectedAt.toISOString();
   if (out.cancellationRefund && typeof out.cancellationRefund === 'object') {
     if (out.cancellationRefund.processedAt instanceof Date) {
       out.cancellationRefund.processedAt = out.cancellationRefund.processedAt.toISOString();
@@ -7785,6 +7930,68 @@ app.patch('/api/admin/hero-banners/settings', mongoReady, adminKeyRequired, asyn
   }
 });
 
+/** Public payment method toggles for checkout (no secrets). */
+app.get('/api/payment-settings', mongoReady, async (_req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store');
+    const doc = await getPaymentSettingsLean();
+    res.json({ settings: serializePaymentSettings(doc) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to load payment settings' });
+  }
+});
+
+app.get('/api/admin/payment-settings', mongoReady, adminKeyRequired, async (_req, res) => {
+  try {
+    const doc = await getPaymentSettingsLean();
+    res.json({ settings: serializePaymentSettings(doc) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to load payment settings' });
+  }
+});
+
+app.patch('/api/admin/payment-settings', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    const patch = normalizePaymentSettingsPatch(req.body || {});
+    const existing = await getPaymentSettingsLean();
+    const next = {
+      enableFullCod: patch.enableFullCod != null ? patch.enableFullCod : existing.enableFullCod !== false,
+      enableFullOnline: patch.enableFullOnline != null ? patch.enableFullOnline : existing.enableFullOnline !== false,
+      enablePartial: patch.enablePartial != null ? patch.enablePartial : !!existing.enablePartial,
+      partialMode: patch.partialMode || (existing.partialMode === 'amount' ? 'amount' : 'percentage'),
+      partialAmount: patch.partialAmount != null ? patch.partialAmount : Number(existing.partialAmount) || 0,
+      partialPercent: patch.partialPercent != null ? patch.partialPercent : Number(existing.partialPercent) || 30,
+    };
+    if (!next.enableFullCod && !next.enableFullOnline && !next.enablePartial) {
+      res.status(400).json({ error: 'At least one payment method must stay enabled' });
+      return;
+    }
+    if (next.enablePartial) {
+      if (next.partialMode === 'amount') {
+        if (!(next.partialAmount > 0)) {
+          res.status(400).json({ error: 'Partial amount must be greater than 0 when Partial Payment is enabled' });
+          return;
+        }
+      } else if (!(next.partialPercent > 0) || next.partialPercent > 100) {
+        res.status(400).json({ error: 'Partial percent must be greater than 0 and at most 100' });
+        return;
+      }
+    }
+    await PaymentSettings.updateOne(
+      { _id: PAYMENT_SETTINGS_ID },
+      { $set: next, $setOnInsert: { _id: PAYMENT_SETTINGS_ID } },
+      { upsert: true }
+    );
+    const doc = await PaymentSettings.findById(PAYMENT_SETTINGS_ID).lean();
+    res.json({ settings: serializePaymentSettings(doc) });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Failed to update payment settings';
+    res.status(400).json({ error: msg });
+  }
+});
+
 app.post('/api/admin/hero-banners', mongoReady, adminKeyRequired, async (req, res) => {
   try {
     const payload = normalizeSaleBannerCreateBodyOrThrow(req.body || {});
@@ -9160,6 +9367,13 @@ app.post('/api/orders', orderCreateRateLimit, requireTrustedBrowserOrigin, mongo
       res.status(400).json({ error: 'Online payments use a payment session. Start checkout again.' });
       return;
     }
+    {
+      const paySettings = await getPaymentSettingsLean();
+      if (paySettings.enableFullCod === false) {
+        res.status(400).json({ error: 'Full COD payment is not enabled' });
+        return;
+      }
+    }
 
     const pricing = await computeServerCheckoutPricing({
       req,
@@ -9357,13 +9571,33 @@ app.post('/api/payments/razorpay/session', paymentCreateRateLimit, requireTruste
     const byId = new Map(docs.map((d) => [String(d._id), d]));
 
     // Stock validation: block starting payment if any item is unavailable.
+    const checkoutMethodRaw = String(body.checkoutMethod || body.paymentMethod || 'razorpay').trim().toLowerCase();
+    const isPartial = checkoutMethodRaw === 'partial';
+    const paySettings = await getPaymentSettingsLean();
+    if (isPartial) {
+      if (!paySettings.enablePartial) {
+        res.status(400).json({ error: 'Partial payment is not enabled' });
+        return;
+      }
+    } else if (paySettings.enableFullOnline === false) {
+      res.status(400).json({ error: 'Full online payment is not enabled' });
+      return;
+    }
+
     for (const line of items) {
       const p = byId.get(String(line.productId));
       if (!p) {
         res.status(404).json({ error: `Product not found: ${String(line.productId)}` });
         return;
       }
-      if (!productAllowsPaymentMethod(p, 'razorpay')) {
+      if (isPartial) {
+        if (!productAllowsPartialPayment(p)) {
+          res.status(400).json({
+            error: `${String(p.name || p._id)} must allow both COD and online payment for Partial Payment.`,
+          });
+          return;
+        }
+      } else if (!productAllowsPaymentMethod(p, 'razorpay')) {
         res.status(400).json({ error: paymentModeErrorMessage(p, 'razorpay') });
         return;
       }
@@ -9378,11 +9612,14 @@ app.post('/api/payments/razorpay/session', paymentCreateRateLimit, requireTruste
         return;
       }
     }
+
+    // Partial uses COD pricing for order total; full online uses razorpay pricing.
+    const pricingMethod = isPartial ? 'cod' : 'razorpay';
     const pricing = await computeServerCheckoutPricing({
       req,
       body,
       rawItems: items,
-      paymentMethod: 'razorpay',
+      paymentMethod: pricingMethod,
       pincode,
       incrementCouponUsage: true,
     });
@@ -9413,16 +9650,42 @@ app.post('/api/payments/razorpay/session', paymentCreateRateLimit, requireTruste
       ship,
     } = pricing;
 
+    let onlineCharge = Number(total);
+    let partialSnap = null;
+    if (isPartial) {
+      try {
+        partialSnap = computePartialSplit(total, paySettings);
+      } catch (e) {
+        const status = Number(e?.statusCode) || 400;
+        res.status(status).json({ error: e instanceof Error ? e.message : 'Invalid partial payment' });
+        return;
+      }
+      onlineCharge = partialSnap.onlineDue;
+    }
+
     const sessionId = `PS-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
     const razorpay = new Razorpay({ key_id: String(RAZORPAY_KEY_ID), key_secret: String(RAZORPAY_KEY_SECRET) });
     const rpOrder = await razorpay.orders.create({
-      amount: Math.round(Number(total) * 100),
+      amount: Math.round(Number(onlineCharge) * 100),
       currency: 'INR',
       receipt: String(sessionId),
-      notes: { sessionId: String(sessionId) },
+      notes: { sessionId: String(sessionId), checkoutMethod: isPartial ? 'partial' : 'razorpay' },
     });
+
+    const paymentSnapshot = isPartial
+      ? {
+          checkoutMethod: 'partial',
+          partialMode: partialSnap.partialMode,
+          partialAmount: partialSnap.partialAmount,
+          partialPercent: partialSnap.partialPercent,
+          orderTotal: partialSnap.orderTotal,
+          onlineDue: partialSnap.onlineDue,
+          codDue: partialSnap.codDue,
+          capturedAt: new Date().toISOString(),
+        }
+      : undefined;
 
     await PaymentSession.create({
       _id: sessionId,
@@ -9444,6 +9707,10 @@ app.post('/api/payments/razorpay/session', paymentCreateRateLimit, requireTruste
       razorpayOrderId: String(rpOrder.id),
       shippingPlaceholder: !!shippingPlaceholder,
       shippingQuoteSnapshot: shippingPlaceholder ? undefined : cloneShipForStorage(ship),
+      checkoutMethod: isPartial ? 'partial' : 'razorpay',
+      onlineDue: isPartial ? partialSnap.onlineDue : total,
+      codDue: isPartial ? partialSnap.codDue : 0,
+      paymentSnapshot,
     });
 
     res.status(201).json({
@@ -9452,6 +9719,10 @@ app.post('/api/payments/razorpay/session', paymentCreateRateLimit, requireTruste
       razorpayOrderId: String(rpOrder.id),
       amount: Number(rpOrder.amount),
       currency: String(rpOrder.currency || 'INR'),
+      checkoutMethod: isPartial ? 'partial' : 'razorpay',
+      onlineDue: isPartial ? partialSnap.onlineDue : Number(total),
+      codDue: isPartial ? partialSnap.codDue : 0,
+      orderTotal: Number(total),
     });
   } catch (e) {
     const status = Number(e?.statusCode) || 500;
@@ -9554,7 +9825,11 @@ app.post('/api/payments/razorpay/verify', paymentVerifyRateLimit, requireTrusted
     const payment = await razorpay.payments.fetch(razorpayPaymentId);
     const payStatus = String(payment?.status || '').toLowerCase(); // 'captured' when successful
     const payAmount = Number(payment?.amount || 0); // paise
-    const expectedAmount = Math.round(Number(session.total || 0) * 100);
+    const isPartialSession = String(session.checkoutMethod || '') === 'partial';
+    const expectedRupees = isPartialSession
+      ? Number(session.onlineDue != null ? session.onlineDue : session.paymentSnapshot?.onlineDue)
+      : Number(session.total || 0);
+    const expectedAmount = Math.round(Number(expectedRupees || 0) * 100);
     if (payStatus !== 'captured') {
       await PaymentSession.updateOne(
         { _id: sessionId },
@@ -9573,18 +9848,19 @@ app.post('/api/payments/razorpay/verify', paymentVerifyRateLimit, requireTrusted
     }
 
     const couponScopeAtVerify = normalizeCouponPaymentMethodScope(session.couponPaymentMethodScope);
-    if (session.couponCode && !couponScopeAllowsPaymentMethod(couponScopeAtVerify, 'razorpay')) {
+    const couponMethodForScope = isPartialSession ? 'cod' : 'razorpay';
+    if (session.couponCode && !couponScopeAllowsPaymentMethod(couponScopeAtVerify, couponMethodForScope)) {
       await PaymentSession.updateOne(
         { _id: sessionId },
         { $set: { status: 'failed', error: 'Coupon scope does not match payment method' } }
       );
-      res.status(400).json({ error: 'This coupon is not valid for online payments.' });
+      res.status(400).json({ error: 'This coupon is not valid for this payment method.' });
       return;
     }
 
     // Deduct inventory only after payment is captured.
     try {
-      await decrementInventoryForOrderLines(session.items, 'razorpay');
+      await decrementInventoryForOrderLines(session.items, isPartialSession ? 'cod' : 'razorpay');
     } catch (invErr) {
       const status = Number(invErr?.statusCode) || 500;
       if (status === 409) {
@@ -9598,17 +9874,18 @@ app.post('/api/payments/razorpay/verify', paymentVerifyRateLimit, requireTrusted
       throw invErr;
     }
 
-    // Create the actual Order now (confirmed/paid).
+    // Create the actual Order now (confirmed/paid or partially paid).
     const orderId = `ORD-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const orderTotal = roundMoney2(Number(session.total ?? 0));
-    /** Use captured gateway amount (rupees); must match orderTotal after checks above. */
+    /** Use captured gateway amount (rupees). */
     const amountPaid = roundMoney2(payAmount / 100);
-    /** Prepaid full capture: never mirror total into amountDue (that falsely triggers admin / shipment gates). */
-    const amountDue = 0;
+    const amountDue = isPartialSession
+      ? roundMoney2(Number(session.codDue != null ? session.codDue : session.paymentSnapshot?.codDue) || 0)
+      : 0;
     const ph = !!session.shippingPlaceholder;
     if (ph) {
       logJson('warn', 'checkout.order_relaxed_shipping', {
-        channel: 'razorpay',
+        channel: isPartialSession ? 'partial' : 'razorpay',
         orderId,
         pincode: normalizePincode(session.customer?.pincode),
       });
@@ -9619,6 +9896,27 @@ app.post('/api/payments/razorpay/verify', paymentVerifyRateLimit, requireTrusted
           shippingPlaceholder: false,
           ship: session.shippingQuoteSnapshot || {},
         });
+
+    const paymentSnapshot = isPartialSession
+      ? {
+          ...(session.paymentSnapshot && typeof session.paymentSnapshot === 'object' ? session.paymentSnapshot : {}),
+          checkoutMethod: 'partial',
+          orderTotal,
+          onlineDue: amountPaid,
+          codDue: amountDue,
+          capturedAt: new Date().toISOString(),
+        }
+      : undefined;
+
+    const onlineTxn = {
+      kind: 'online',
+      amount: amountPaid,
+      status: 'completed',
+      razorpayOrderId,
+      razorpayPaymentId,
+      processedAt: new Date().toISOString(),
+    };
+
     await Order.create({
       _id: orderId,
       customer: session.customer || {},
@@ -9633,8 +9931,8 @@ app.post('/api/payments/razorpay/verify', paymentVerifyRateLimit, requireTrusted
       freeShippingApplied: !!session.freeShippingApplied,
       total: orderTotal,
       shipping: shippingDoc,
-      paymentMethod: 'razorpay',
-      paymentStatus: 'paid',
+      paymentMethod: isPartialSession ? 'partial' : 'razorpay',
+      paymentStatus: isPartialSession ? 'partially_paid' : 'paid',
       amountDue,
       amountPaid,
       paidAt: new Date(),
@@ -9645,6 +9943,9 @@ app.post('/api/payments/razorpay/verify', paymentVerifyRateLimit, requireTrusted
       hasCustomPrint: !!session.hasCustomPrint,
       status: 'pending',
       stockDeductedAt: new Date(),
+      paymentSnapshot,
+      codCollectionStatus: isPartialSession ? 'pending' : 'n/a',
+      paymentTransactions: [onlineTxn],
     });
     await syncOrderAdminFlags(orderId);
 
@@ -9866,6 +10167,122 @@ app.patch('/api/orders/:id', mongoReady, adminKeyRequired, async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'Failed to update order' });
+  }
+});
+
+/** Admin: mark remaining COD collected on a partial-payment order. */
+app.post('/api/admin/orders/:id/collect-cod', mongoReady, adminKeyRequired, async (req, res) => {
+  try {
+    const id = String(req.params.id || '').trim();
+    const order = await Order.findById(id).lean();
+    if (!order) {
+      res.status(404).json({ error: 'Order not found' });
+      return;
+    }
+    if (String(order.paymentMethod) !== 'partial') {
+      res.status(400).json({ error: 'Only partial-payment orders support COD collection' });
+      return;
+    }
+    if (String(order.paymentStatus) === 'paid' && String(order.codCollectionStatus) === 'collected') {
+      res.json({ order: serializeOrder(order) });
+      return;
+    }
+    if (String(order.paymentStatus) !== 'partially_paid' && String(order.codCollectionStatus) !== 'pending') {
+      res.status(400).json({ error: 'Order is not awaiting COD collection' });
+      return;
+    }
+    const orderTotal = roundMoney2(Number(order.total) || 0);
+    const codDue = roundMoney2(
+      Number(order.amountDue != null ? order.amountDue : order.paymentSnapshot?.codDue) || 0
+    );
+    const now = new Date();
+    const txns = Array.isArray(order.paymentTransactions) ? [...order.paymentTransactions] : [];
+    txns.push({
+      kind: 'cod',
+      amount: codDue,
+      status: 'completed',
+      processedAt: now.toISOString(),
+    });
+    await Order.updateOne(
+      { _id: id },
+      {
+        $set: {
+          paymentStatus: 'paid',
+          amountDue: 0,
+          amountPaid: orderTotal,
+          codCollectionStatus: 'collected',
+          codCollectedAt: now,
+          paymentTransactions: txns,
+          paymentPending: false,
+        },
+      }
+    );
+    await syncOrderAdminFlags(id);
+    const fresh = await Order.findById(id).lean();
+    res.json({ order: serializeOrder(fresh) });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'Failed to mark COD collected' });
+  }
+});
+
+/** Preview partial split for checkout UI (authoritative server calc). */
+app.post('/api/payments/partial-quote', requireTrustedBrowserOrigin, mongoReady, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const paySettings = await getPaymentSettingsLean();
+    if (!paySettings.enablePartial) {
+      res.status(400).json({ error: 'Partial payment is not enabled' });
+      return;
+    }
+    let items;
+    try {
+      items = normalizeOrderItemsFromBody(body.items);
+    } catch (e) {
+      res.status(400).json({ error: e.message || 'Invalid items' });
+      return;
+    }
+    const pincode = String(body.customer?.pincode || body.pincode || '').trim();
+    const ids = Array.from(new Set(items.map((x) => String(x.productId)).filter(Boolean)));
+    const docs = ids.length ? await Product.find({ _id: { $in: ids } }).lean() : [];
+    const byId = new Map(docs.map((d) => [String(d._id), d]));
+    for (const line of items) {
+      const p = byId.get(String(line.productId));
+      if (!p) {
+        res.status(404).json({ error: `Product not found: ${String(line.productId)}` });
+        return;
+      }
+      if (!productAllowsPartialPayment(p)) {
+        res.status(400).json({
+          error: `${String(p.name || p._id)} must allow both COD and online for Partial Payment.`,
+        });
+        return;
+      }
+    }
+    const pricing = await computeServerCheckoutPricing({
+      req,
+      body,
+      rawItems: items,
+      paymentMethod: 'cod',
+      pincode: pincode || '110001',
+      incrementCouponUsage: false,
+    });
+    const split = computePartialSplit(pricing.total, paySettings);
+    res.json({
+      orderTotal: split.orderTotal,
+      onlineDue: split.onlineDue,
+      codDue: split.codDue,
+      partialMode: split.partialMode,
+      partialAmount: split.partialAmount,
+      partialPercent: split.partialPercent,
+      subtotal: pricing.subtotal,
+      discount: pricing.discount,
+    });
+  } catch (e) {
+    const status = Number(e?.statusCode) || 500;
+    res.status(status === 500 ? 500 : status).json({
+      error: e instanceof Error ? e.message : 'Failed to quote partial payment',
+    });
   }
 });
 

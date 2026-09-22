@@ -150,10 +150,16 @@ export default function VendorOrdersPage() {
                   {o.customer.email} · {o.customer.phone}
                 </p>
                 <p>
-                  <span className="text-muted-foreground">Address:</span> {o.customer.address}
-                  {o.customer.city ? `, ${o.customer.city}` : ''}
-                  {o.customer.state ? `, ${o.customer.state}` : ''}
-                  {o.customer.pincode ? ` - ${o.customer.pincode}` : ''}
+                  <span className="text-muted-foreground">Address:</span> {o.customer.address || '—'}
+                </p>
+                <p>
+                  <span className="text-muted-foreground">City:</span> {o.customer.city || '—'}
+                </p>
+                <p>
+                  <span className="text-muted-foreground">State:</span> {o.customer.state || '—'}
+                </p>
+                <p>
+                  <span className="text-muted-foreground">Pincode:</span> {o.customer.pincode || '—'}
                 </p>
                 <div className="text-muted-foreground">Your items:</div>
                 <ul className="list-disc pl-5 space-y-1">

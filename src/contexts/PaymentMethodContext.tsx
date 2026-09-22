@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 
-export type StorefrontPaymentMethod = 'cod' | 'razorpay';
+export type StorefrontPaymentMethod = 'cod' | 'razorpay' | 'partial';
 
 type PaymentMethodContextValue = {
   method: StorefrontPaymentMethod;
@@ -15,7 +15,7 @@ function safeReadStored(): StorefrontPaymentMethod | null {
   if (typeof window === 'undefined') return null;
   try {
     const raw = window.localStorage.getItem(KEY);
-    if (raw === 'cod' || raw === 'razorpay') return raw;
+    if (raw === 'cod' || raw === 'razorpay' || raw === 'partial') return raw;
     return null;
   } catch {
     return null;
@@ -38,8 +38,7 @@ export function PaymentMethodProvider(props: { children: React.ReactNode }) {
 }
 
 export function usePaymentMethod(): PaymentMethodContextValue {
-  const ctx = useContext(Ctx);
-  if (!ctx) throw new Error('usePaymentMethod must be used within PaymentMethodProvider');
-  return ctx;
+  const v = useContext(Ctx);
+  if (!v) throw new Error('usePaymentMethod must be used within PaymentMethodProvider');
+  return v;
 }
-

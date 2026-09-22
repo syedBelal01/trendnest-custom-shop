@@ -3,14 +3,19 @@ import { CartItem, type CouponPaymentMethodScope, type Product } from '@/types';
 import { toast } from 'sonner';
 import { useProducts } from '@/contexts/ProductsContext';
 import { trackAddToCartEvent } from '@/lib/engagementAnalyticsApi';
-import { productAllowsPaymentMethod, productUnitPriceForPaymentMethod } from '@/lib/productPayment';
+import {
+  productAllowsPaymentMethod,
+  productUnitPriceForPaymentMethod,
+  pricingMethodForCheckout,
+  type CheckoutPaymentMethod,
+} from '@/lib/productPayment';
 
 interface CartState {
   items: CartItem[];
   couponCode: string | null;
   discount: number;
   couponPaymentMethodScope: CouponPaymentMethodScope;
-  couponValidatedFor: 'cod' | 'razorpay' | null;
+  couponValidatedFor: CheckoutPaymentMethod | null;
 }
 
 type CartAction =
@@ -23,7 +28,7 @@ type CartAction =
         code: string;
         discount: number;
         paymentMethodScope?: CouponPaymentMethodScope;
-        validatedFor?: 'cod' | 'razorpay';
+        validatedFor?: CheckoutPaymentMethod;
       };
     }
   | { type: 'CLEAR_COUPON' }
@@ -44,10 +49,11 @@ function normalizeCouponPaymentMethodScope(raw: unknown): CouponPaymentMethodSco
   return 'both';
 }
 
-function couponScopeAllowsMethod(scope: CouponPaymentMethodScope, method: 'cod' | 'razorpay'): boolean {
+function couponScopeAllowsMethod(scope: CouponPaymentMethodScope, method: CheckoutPaymentMethod): boolean {
+  const pricing = pricingMethodForCheckout(method);
   if (scope === 'both') return true;
-  if (scope === 'online') return method === 'razorpay';
-  return method === 'cod';
+  if (scope === 'online') return pricing === 'razorpay';
+  return pricing === 'cod';
 }
 
 function sameCartLine(a: CartItem, b: CartItem): boolean {
@@ -162,19 +168,19 @@ interface CartContextType {
   couponCode: string | null;
   discount: number;
   couponPaymentMethodScope: CouponPaymentMethodScope;
-  couponValidatedFor: 'cod' | 'razorpay' | null;
+  couponValidatedFor: CheckoutPaymentMethod | null;
   /** Per-line computed unit price (defaults to product.price). */
-  unitPriceForItem: (item: CartItem, method?: 'cod' | 'razorpay') => number;
+  unitPriceForItem: (item: CartItem, method?: CheckoutPaymentMethod) => number;
   /** Compute totals for a payment method without changing cart state. */
-  totalsForPaymentMethod: (method: 'cod' | 'razorpay') => { subtotal: number; discount: number; total: number };
-  paymentMethodAllowedForCart: (method: 'cod' | 'razorpay') => boolean;
+  totalsForPaymentMethod: (method: CheckoutPaymentMethod) => { subtotal: number; discount: number; total: number };
+  paymentMethodAllowedForCart: (method: CheckoutPaymentMethod) => boolean;
   addItem: (item: CartItemInput) => void;
   removeItem: (cartLineId: string) => void;
   updateQuantity: (cartLineId: string, quantity: number) => void;
   applyCoupon: (
     code: string,
     discount: number,
-    opts?: { paymentMethodScope?: CouponPaymentMethodScope; validatedFor?: 'cod' | 'razorpay' }
+    opts?: { paymentMethodScope?: CouponPaymentMethodScope; validatedFor?: CheckoutPaymentMethod }
   ) => void;
   clearCoupon: () => void;
   clearCart: () => void;
@@ -224,7 +230,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   );
 
   const unitPriceForItem = useCallback(
-    (item: CartItem, method: 'cod' | 'razorpay' = 'cod'): number => {
+    (item: CartItem, method: CheckoutPaymentMethod = 'cod'): number => {
       const fresh = productById.get(item.product.id);
       return productUnitPriceForPaymentMethod(fresh ?? item.product, method, item.selectedVariant);
     },
@@ -244,7 +250,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const itemCount = useMemo(() => state.items.reduce((sum, i) => sum + i.quantity, 0), [state.items]);
 
   const totalsForPaymentMethod = useCallback(
-    (method: 'cod' | 'razorpay') => {
+    (method: CheckoutPaymentMethod) => {
       const sub = state.items.reduce((sum, i) => sum + unitPriceForItem(i, method) * i.quantity, 0);
       const effectiveDiscount =
         state.couponCode && couponScopeAllowsMethod(state.couponPaymentMethodScope, method) ? state.discount : 0;
@@ -254,7 +260,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   );
 
   const paymentMethodAllowedForCart = useCallback(
-    (method: 'cod' | 'razorpay') =>
+    (method: CheckoutPaymentMethod) =>
       state.items.every((item) => {
         const fresh = productById.get(item.product.id);
         return productAllowsPaymentMethod(fresh ?? item.product, method);
